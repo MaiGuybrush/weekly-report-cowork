@@ -208,6 +208,8 @@ try {
   const published = await call(`/api/publications/${firstPublication.body.id}`, 'R');
   assert.equal(published.status, 200);
   assert.equal(published.body.version, 1);
+  assert.equal(published.body.sourceStatus.find(source => source.section === 's1').status, 'succeeded');
+  assert.equal(published.body.sourceStatus.find(source => source.section === 's2').status, 'not-connected');
   assert.equal(published.body.items.find(item => item.id === id).content, 'committed text');
   assert.equal((await call('/api/publications/latest', 'R2')).body.id, firstPublication.body.id);
   assert.equal((await call(`/api/publications/${firstPublication.body.id}`, 'missing')).status, 403);

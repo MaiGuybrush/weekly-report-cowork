@@ -190,7 +190,7 @@ app.MapGet("/api/reports/{reportId}", (HttpContext ctx, Store store, string repo
     }
     return Results.Ok(new { id = reportId, meetingDate = date, sections = ReportSections.All, items });
 });
-app.MapPost("/api/reports/{reportId}/publications", (HttpContext ctx, Store store, string reportId, PublicationRequest request) =>
+app.MapPost("/api/reports/{reportId}/publications", (HttpContext ctx, Store store, IConfiguration config, string reportId, PublicationRequest request) =>
 {
     if (Current(ctx).Role != "Guy") return Results.StatusCode(403);
     if (string.IsNullOrWhiteSpace(request.RequestId) || request.RequestId.Length > 200) return Results.BadRequest(new { error = "requestId required" });
@@ -205,7 +205,7 @@ app.MapPost("/api/reports/{reportId}/publications", (HttpContext ctx, Store stor
         return Results.Ok(existing);
     }
     existingRows.Close();
-    var snapshot = Snapshot(db, reportId);
+    var snapshot = Snapshot(db, reportId, config);
     var version = Convert.ToInt32(Store.Sql(db, "SELECT COALESCE(MAX(version),0)+1 FROM publications WHERE report_id=$report", ("$report", reportId)).ExecuteScalar());
     var id = Guid.NewGuid().ToString();
     var publishedAt = DateTimeOffset.UtcNow.ToString("O");
@@ -221,7 +221,7 @@ app.MapGet("/api/publications/{publicationId}", (HttpContext ctx, Store store, s
     using var rows = Store.Sql(db, "SELECT p.version,p.published_at,p.published_by,p.snapshot FROM publications p WHERE p.id=$id", ("$id", publicationId)).ExecuteReader();
     if (!rows.Read()) return Results.NotFound();
     var snapshot = System.Text.Json.JsonSerializer.Deserialize<ReportSnapshot>(rows.GetString(3));
-    return Results.Ok(new { id = publicationId, version = rows.GetInt32(0), publishedAt = rows.GetString(1), publishedBy = rows.GetString(2), meetingDate = snapshot!.MeetingDate, sections = ReportSections.All, items = snapshot.Items });
+    return Results.Ok(new { id = publicationId, version = rows.GetInt32(0), publishedAt = rows.GetString(1), publishedBy = rows.GetString(2), meetingDate = snapshot!.MeetingDate, sections = ReportSections.All, items = snapshot.Items, sourceStatus = snapshot.SourceStatus });
 });
 app.MapGet("/api/publications/latest", (HttpContext ctx, Store store) =>
 {
@@ -540,7 +540,7 @@ static ScheduleEntry? ScheduleEntry(SqliteConnection db, string entryId)
     using var rows = Store.Sql(db, "SELECT id,project_id,kind,name,baseline_start,baseline_end,forecast_start,forecast_end,actual_start,actual_end,version FROM project_schedule_entries WHERE id=$id", ("$id", entryId)).ExecuteReader();
     return rows.Read() ? new ScheduleEntry(rows.GetString(0), rows.GetString(1), rows.GetString(2), rows.GetString(3), NullableString(rows, 4), NullableString(rows, 5), NullableString(rows, 6), NullableString(rows, 7), NullableString(rows, 8), NullableString(rows, 9), rows.GetInt32(10)) : null;
 }
-static ReportSnapshot Snapshot(SqliteConnection db, string reportId)
+static ReportSnapshot Snapshot(SqliteConnection db, string reportId, IConfiguration config)
 {
     var meetingDate = (string)Store.Sql(db, "SELECT meeting_date FROM reports WHERE id=$id", ("$id", reportId)).ExecuteScalar()!;
     var items = new List<PublishedItem>();
@@ -549,7 +549,20 @@ static ReportSnapshot Snapshot(SqliteConnection db, string reportId)
         while (rows.Read()) items.Add(new PublishedItem(rows.GetString(0), rows.GetString(1), rows.GetString(2), rows.GetString(3), rows.GetString(4), rows.GetString(5), rows.GetString(6), rows.GetInt32(7)));
     }
     items = items.Select(item => item with { Schedule = ScheduleEntries(db, item.Id) }).ToList();
-    return new ReportSnapshot(meetingDate, items);
+    var sections = EcimMembers(config).Select(member => member.Section).ToHashSet();
+    using (var sectionRows = Store.Sql(db, "SELECT DISTINCT section FROM users WHERE role='Head' AND section IS NOT NULL ORDER BY section").ExecuteReader())
+        while (sectionRows.Read()) sections.Add(sectionRows.GetString(0));
+    using (var importSections = Store.Sql(db, "SELECT DISTINCT section FROM ecim_import_runs WHERE report_id=$report", ("$report", reportId)).ExecuteReader())
+        while (importSections.Read()) sections.Add(importSections.GetString(0));
+    var sourceStatus = new List<SourceStatus>();
+    foreach (var section in sections)
+    {
+        using var latest = Store.Sql(db, "SELECT status,period_from,period_to,finished_at FROM ecim_import_runs WHERE report_id=$report AND section=$section ORDER BY started_at DESC LIMIT 1", ("$report", reportId), ("$section", section)).ExecuteReader();
+        sourceStatus.Add(latest.Read()
+            ? new SourceStatus(section, latest.GetString(0), NullableString(latest, 1), NullableString(latest, 2), NullableString(latest, 3))
+            : new SourceStatus(section, "not-connected", null, null, null));
+    }
+    return new ReportSnapshot(meetingDate, items, sourceStatus);
 }
 static ReportSnapshot? PreviousPublication(SqliteConnection db, string meetingDate)
 {
@@ -592,7 +605,8 @@ record AccessUserRequest(string EmpNo, string Name, string Role, string? Section
 record PublicationRequest(string? RequestId);
 record ScheduleEntry(string Id, string ProjectId, string Kind, string Name, string? BaselineStart, string? BaselineEnd, string? ForecastStart, string? ForecastEnd, string? ActualStart, string? ActualEnd, int Version);
 record PublishedItem(string Id, string ContinuityId, string Section, string OwnerSection, string Title, string Content, string Status, int Version, List<ScheduleEntry>? Schedule = null);
-record ReportSnapshot(string MeetingDate, List<PublishedItem> Items);
+record SourceStatus(string Section, string Status, string? PeriodFrom, string? PeriodTo, string? FinishedAt);
+record ReportSnapshot(string MeetingDate, List<PublishedItem> Items, List<SourceStatus>? SourceStatus = null);
 record DraftRequest(string Title, string Content, string? Status);
 record TokenRequest(string Token);
 record CommitRequest(string Token, int BaseVersion, string? Status);

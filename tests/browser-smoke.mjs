@@ -21,7 +21,10 @@ const base = `http://127.0.0.1:${port}`;
 const api = spawn('dotnet', [join(root, 'apps/api/bin/Debug/net9.0/WeeklyReport.Api.dll'), '--urls', base], {
   cwd: join(root, 'apps/api'),
   env: { ...process.env, DatabasePath: join(temporary, 'report.db'), JwksUrl: `http://127.0.0.1:${jwks.address().port}/jwks`,
-    Access__Users__0__EmpNo: 'G', Access__Users__0__Name: 'Guy', Access__Users__0__Role: 'Guy' }
+    Access__Users__0__EmpNo: 'G', Access__Users__0__Name: 'Guy', Access__Users__0__Role: 'Guy',
+    Access__Users__1__EmpNo: 'H1', Access__Users__1__Name: 'Head One', Access__Users__1__Role: 'Head', Access__Users__1__Section: 's1',
+    Access__Users__2__EmpNo: 'H2', Access__Users__2__Name: 'Head Two', Access__Users__2__Role: 'Head', Access__Users__2__Section: 's2',
+    Access__Users__3__EmpNo: 'H3', Access__Users__3__Name: 'Head Three', Access__Users__3__Role: 'Head', Access__Users__3__Section: 's3' }
 });
 let logs = '';
 api.stdout.on('data', chunk => logs = (logs + chunk).slice(-10000));
@@ -29,6 +32,19 @@ api.stderr.on('data', chunk => logs = (logs + chunk).slice(-10000));
 const b64 = value => Buffer.from(JSON.stringify(value)).toString('base64url');
 const parts = `${b64({ alg: 'RS256', kid: 'browser' })}.${b64({ empNo: 'G', exp: Math.floor(Date.now() / 1000) + 3600 })}`;
 const token = `${parts}.${sign('RSA-SHA256', Buffer.from(parts), privateKey).toString('base64url')}`;
+async function apiCall(path, method = 'GET', body) {
+  const response = await fetch(base + path, { method, headers: { Authorization: `Bearer ${token}`, ...(body ? { 'Content-Type': 'application/json' } : {}) }, body: body ? JSON.stringify(body) : undefined });
+  const text = await response.text();
+  return { status: response.status, body: text ? JSON.parse(text) : null };
+}
+async function createCommittedItem(reportId, section, title, content) {
+  const created = await apiCall(`/api/reports/${reportId}/items`, 'POST', { section, title, ...(section === 'personnel' ? { ownerSection: 's1' } : {}) });
+  assert.equal(created.status, 201);
+  const lease = await apiCall(`/api/items/${created.body.id}/lease`, 'POST', {});
+  assert.equal(lease.status, 200);
+  assert.equal((await apiCall(`/api/items/${created.body.id}/private-draft`, 'PUT', { title, content })).status, 204);
+  assert.equal((await apiCall(`/api/items/${created.body.id}/commit`, 'POST', { token: lease.body.token, baseVersion: lease.body.baseVersion })).status, 200);
+}
 let browser;
 try {
   let ready = false;
@@ -40,6 +56,9 @@ try {
   const report = await fetch(base + '/api/reports', { method: 'POST', headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' }, body: JSON.stringify({ meetingDate: '2026-10-01' }) });
   assert.equal(report.status, 200);
   const { id } = await report.json();
+  const longContent = '這是投影與列印驗收用的代表性長文字，涵蓋本週成果、未達成事項、風險、相依與下一步。'.repeat(18);
+  for (const [section, title] of [['summary', '管理摘要'], ['projects', '專案摘要'], ['projects', '專案摘要（二）'], ['operations', '維運狀態'], ['personnel', '人事交接'], ['technology', '技術評估'], ['appendix', '來源附錄']])
+    await createCommittedItem(id, section, title, longContent);
   browser = await chromium.launch({ headless: true, executablePath: process.env.CHROME_PATH || 'C:/Program Files/Google/Chrome/Application/chrome.exe', args: ['--no-sandbox'] });
   const page = await browser.newPage();
   page.on('pageerror', error => console.error('Browser page error:', error.message));
@@ -72,8 +91,19 @@ try {
   await publication.click();
   await page.getByRole('heading', { name: '正式處會週報' }).waitFor({ timeout: 15000 });
   await page.getByText('版本 1').waitFor({ timeout: 15000 });
+  await page.getByRole('heading', { name: '來源狀態' }).waitFor({ timeout: 15000 });
+  assert.equal(await page.getByText('尚未接入來源').count(), 3);
+  await page.getByText('這是投影與列印驗收用的代表性長文字', { exact: false }).first().waitFor({ timeout: 15000 });
+  assert.equal(await page.getByRole('heading', { name: '專案摘要', exact: true }).count(), 1);
+  assert.equal(await page.getByRole('heading', { name: '專案摘要（二）', exact: true }).count(), 1);
+  assert.equal(await page.getByRole('heading', { name: '人事交接', exact: true }).count(), 1);
+  assert.match(page.url(), new RegExp(`#/publications/`));
   await page.emulateMedia({ media: 'print' });
   assert.equal(await page.locator('header a').evaluate(element => getComputedStyle(element).display), 'none');
+  assert.equal(await page.locator('nav').count(), 0);
+  assert.equal(await page.locator('.publication article').first().evaluate(element => getComputedStyle(element).breakInside), 'avoid');
+  const pdf = await page.pdf({ format: 'A4', printBackground: true });
+  assert.ok(pdf.length > 1000, 'print PDF should contain the representative publication');
   console.log('Browser smoke passed: SSO return, item commit, publication, and print layout');
 } finally {
   await browser?.close();

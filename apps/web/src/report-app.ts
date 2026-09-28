@@ -13,6 +13,7 @@ type ProjectWork = { section: string; work: string; scheduleProposal: string | n
 type ScheduleEntry = { id: string; kind: 'phase' | 'milestone'; name: string; baselineStart: string | null; baselineEnd: string | null; forecastStart: string | null; forecastEnd: string | null; actualStart: string | null; actualEnd: string | null; version: number };
 type EcimMember = { userId: string; periodFrom: string | null; periodTo: string | null; status: string; error: string | null; lastSuccessAt: string | null };
 type EcimCandidate = { id: string; status: string; workId: string; periodFrom: string; periodTo: string };
+type SourceStatus = { section: string; status: string; periodFrom: string | null; periodTo: string | null; finishedAt: string | null };
 type Report = { id: string; meetingDate: string; sections: string[]; items: Item[] };
 type Conflict = { latest: Item; draft: { title: string; content: string } | null; lease: Lease; error: string };
 const labels: Record<string, string> = {
@@ -335,7 +336,8 @@ export class ReportEditor implements OnInit, OnDestroy {
 
 @Component({ standalone: true, imports: [CommonModule], template: `
 <header><h1>正式處會週報 <small>{{publication?.meetingDate}}</small></h1><a href="#/">週報清單</a></header>
-<main *ngIf="publication" class="publication"><p>版本 {{publication.version}} · 發布於 {{publication.publishedAt | date:'short'}}</p>
+<main *ngIf="publication" class="publication"><p class="publication-meta">版本 {{publication.version}} · 發布於 {{publication.publishedAt | date:'short'}}</p>
+  <section class="publication-sources"><h2>來源狀態</h2><ul><li *ngFor="let source of publication.sourceStatus || []"><strong>{{source.section}}</strong> · {{sourceLabel(source.status)}}<span *ngIf="source.periodFrom"> · {{source.periodFrom}}–{{source.periodTo}}</span></li></ul></section>
   <section *ngFor="let section of publication.sections"><h2>{{label(section)}}</h2>
     <article *ngFor="let item of inSection(section)"><h3>{{item.title}}</h3><p>{{item.content}}</p>
       <ul *ngIf="item.schedule?.length"><li *ngFor="let entry of item.schedule"><strong>{{entry.kind === 'phase' ? '階段' : '重要里程碑'}}：{{entry.name}}</strong>
@@ -347,9 +349,10 @@ export class PublicationPage implements OnInit {
   private http = inject(HttpClient);
   private route = inject(ActivatedRoute);
   private changes = inject(ChangeDetectorRef);
-  publication: (Report & { version: number; publishedAt: string }) | null = null;
+  publication: (Report & { version: number; publishedAt: string; sourceStatus?: SourceStatus[] }) | null = null;
   private publicationId = this.route.snapshot.paramMap.get('id')!;
   label(section: string) { return labels[section] ?? section; }
+  sourceLabel(status: string) { return ({ succeeded: '同步成功', partial: '部分同步失敗', failed: '同步失敗', 'not-connected': '尚未接入來源' } as Record<string, string>)[status] ?? status; }
   inSection(section: string) { return this.publication?.items.filter(item => item.section === section) ?? []; }
   async ngOnInit() { this.publication = await firstValueFrom(this.http.get<typeof this.publication>(`/api/publications/${this.publicationId}`)); this.changes.detectChanges(); }
 }
