@@ -42,7 +42,9 @@ async function createCommittedItem(reportId, section, title, content) {
   assert.equal(created.status, 201);
   const lease = await apiCall(`/api/items/${created.body.id}/lease`, 'POST', {});
   assert.equal(lease.status, 200);
-  assert.equal((await apiCall(`/api/items/${created.body.id}/private-draft`, 'PUT', { title, content })).status, 204);
+  assert.equal((await apiCall(`/api/items/${created.body.id}/private-draft`, 'PUT', section === 'personnel'
+    ? { title, content: '', details: { effectiveDate: '2026-10-01', handover: '交接維運系統', impact: '值班責任調整', nextStep: '確認新負責人' } }
+    : { title, content })).status, 204);
   assert.equal((await apiCall(`/api/items/${created.body.id}/commit`, 'POST', { token: lease.body.token, baseVersion: lease.body.baseVersion })).status, 200);
 }
 let browser;
@@ -83,8 +85,19 @@ try {
   await page.getByRole('button', { name: 'Browser item' }).click();
   await page.getByRole('button', { name: '開始編輯' }).click();
   await page.getByRole('textbox', { name: '內容' }).fill('Browser committed content');
+  await page.getByRole('button', { name: '新增來源連結' }).click();
+  await page.getByRole('textbox', { name: '來源連結 URL' }).fill('https://example.test/work/42');
+  await page.getByRole('textbox', { name: '待決策事項' }).fill('確認負責人');
+  await page.getByLabel('新期限').fill('2026-10-08');
   await page.getByRole('button', { name: '儲存完成' }).click();
   await page.getByText('Browser committed content').waitFor({ timeout: 15000 });
+  await page.getByRole('button', { name: '交接維運系統' }).click();
+  await page.getByRole('button', { name: '開始編輯' }).click();
+  await page.getByLabel('生效日期').waitFor({ timeout: 15000 });
+  assert.equal(await page.getByLabel('職責或系統交接').inputValue(), '交接維運系統');
+  await page.getByLabel('下一步').fill('完成簽收');
+  await page.getByRole('button', { name: '儲存完成' }).click();
+  await page.getByText('完成簽收').waitFor({ timeout: 15000 });
   await page.getByRole('button', { name: '發布正式版' }).click();
   const publication = page.getByRole('link', { name: '查看剛發布的固定版本' });
   await publication.waitFor({ timeout: 15000 });
@@ -96,7 +109,10 @@ try {
   await page.getByText('這是投影與列印驗收用的代表性長文字', { exact: false }).first().waitFor({ timeout: 15000 });
   assert.equal(await page.getByRole('heading', { name: '專案摘要', exact: true }).count(), 1);
   assert.equal(await page.getByRole('heading', { name: '專案摘要（二）', exact: true }).count(), 1);
-  assert.equal(await page.getByRole('heading', { name: '人事交接', exact: true }).count(), 1);
+  assert.equal(await page.getByRole('heading', { name: '交接維運系統', exact: true }).count(), 1);
+  await page.getByText('完成簽收').waitFor({ timeout: 15000 });
+  await page.getByRole('link', { name: '來源' }).waitFor({ timeout: 15000 });
+  await page.getByText('確認負責人', { exact: false }).waitFor({ timeout: 15000 });
   assert.match(page.url(), new RegExp(`#/publications/`));
   await page.emulateMedia({ media: 'print' });
   assert.equal(await page.locator('header a').evaluate(element => getComputedStyle(element).display), 'none');

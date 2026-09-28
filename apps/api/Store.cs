@@ -22,7 +22,7 @@ public sealed class Store(IConfiguration config)
             CREATE TABLE IF NOT EXISTS items(id TEXT PRIMARY KEY, report_id TEXT NOT NULL REFERENCES reports(id), continuity_id TEXT NOT NULL, section TEXT NOT NULL, owner_section TEXT NOT NULL, title TEXT NOT NULL, content TEXT NOT NULL DEFAULT '', details TEXT NOT NULL DEFAULT '{}', status TEXT NOT NULL DEFAULT 'open', version INTEGER NOT NULL DEFAULT 0, created_by TEXT NOT NULL);
             CREATE TABLE IF NOT EXISTS leases(item_id TEXT PRIMARY KEY REFERENCES items(id), holder TEXT NOT NULL, token_hash TEXT NOT NULL, expires_at TEXT NOT NULL, base_version INTEGER NOT NULL);
             CREATE TABLE IF NOT EXISTS drafts(item_id TEXT NOT NULL REFERENCES items(id), editor TEXT NOT NULL, title TEXT NOT NULL, content TEXT NOT NULL, details TEXT NOT NULL DEFAULT '{}', status TEXT NOT NULL DEFAULT 'open', saved_at TEXT NOT NULL, PRIMARY KEY(item_id,editor));
-            CREATE TABLE IF NOT EXISTS revisions(id INTEGER PRIMARY KEY AUTOINCREMENT, item_id TEXT NOT NULL, actor TEXT NOT NULL, at TEXT NOT NULL, before_version INTEGER NOT NULL, after_version INTEGER NOT NULL, before_title TEXT NOT NULL, after_title TEXT NOT NULL, before_content TEXT NOT NULL, after_content TEXT NOT NULL);
+            CREATE TABLE IF NOT EXISTS revisions(id INTEGER PRIMARY KEY AUTOINCREMENT, item_id TEXT NOT NULL, actor TEXT NOT NULL, at TEXT NOT NULL, before_version INTEGER NOT NULL, after_version INTEGER NOT NULL, before_title TEXT NOT NULL, after_title TEXT NOT NULL, before_content TEXT NOT NULL, after_content TEXT NOT NULL, before_details TEXT NOT NULL DEFAULT '{}', after_details TEXT NOT NULL DEFAULT '{}');
             CREATE TABLE IF NOT EXISTS audit(id INTEGER PRIMARY KEY AUTOINCREMENT, item_id TEXT NOT NULL, actor TEXT NOT NULL, at TEXT NOT NULL, action TEXT NOT NULL, reason TEXT);
             CREATE TABLE IF NOT EXISTS access_audit(id INTEGER PRIMARY KEY AUTOINCREMENT, actor TEXT NOT NULL, target_emp_no TEXT NOT NULL, at TEXT NOT NULL, action TEXT NOT NULL, before_role TEXT, after_role TEXT NOT NULL, before_reader_access INTEGER, after_reader_access INTEGER NOT NULL DEFAULT 0);
             CREATE TABLE IF NOT EXISTS publications(id TEXT PRIMARY KEY, report_id TEXT NOT NULL REFERENCES reports(id), version INTEGER NOT NULL, request_id TEXT, published_by TEXT NOT NULL, published_at TEXT NOT NULL, snapshot TEXT NOT NULL, UNIQUE(report_id, version), UNIQUE(report_id, request_id));
@@ -42,6 +42,8 @@ public sealed class Store(IConfiguration config)
         EnsureColumn(db, "items", "details", "TEXT NOT NULL DEFAULT '{}'");
         EnsureColumn(db, "drafts", "status", "TEXT NOT NULL DEFAULT 'open'");
         EnsureColumn(db, "drafts", "details", "TEXT NOT NULL DEFAULT '{}'");
+        EnsureColumn(db, "revisions", "before_details", "TEXT NOT NULL DEFAULT '{}'");
+        EnsureColumn(db, "revisions", "after_details", "TEXT NOT NULL DEFAULT '{}'");
         EnsureColumn(db, "users", "reader_access", "INTEGER NOT NULL DEFAULT 0");
         EnsureColumn(db, "access_audit", "before_reader_access", "INTEGER");
         EnsureColumn(db, "access_audit", "after_reader_access", "INTEGER NOT NULL DEFAULT 0");

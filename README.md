@@ -1,12 +1,14 @@
 # 處會週報共同編輯
 
-依 [實作規格](docs/implementation-spec.md) 建置的第一階段工作區。目前完成票據 01–03：UAC JWT 身分驗證、首份空白週報、六章節導覽、按課別的項目編輯、30 分鐘排他租約、私有草稿、衝突比較、接管與修訂紀錄。正式發布、上週延續、專案結構化欄位及 eCIM 同步屬後續票據。
+依 [實作規格](docs/implementation-spec.md) 建置的處會週報工作區。已具備 UAC JWT 身分驗證、按課別共編、私有草稿與租約、結構化專案時程、人事權限、不可變發布版、跨週延續、正式讀者入口，以及 eCIM 課別同步。
 
 ## 設定
 
 需求：.NET SDK 9、Node.js 20.19 以上、pnpm、可連到 UAC 的內網環境。
 
-API 從 `apps/api/appsettings.json` 讀取 `JwksUrl` 與 `DatabasePath`。`Access:Users` 需在首次啟動前設定 Guy 與三位課長的 `EmpNo`、`Name`、`Role` (`Guy` 或 `Head`) 和課長的 `Section`（例如 `s1`、`s2`、`s3`）。項目的 `section` 是六段報告章節，`ownerSection` 是可編輯該項目的課別，兩者彼此獨立。讀者角色目前無編輯頁權限。設定會於首次啟動匯入 SQLite；既有帳號不會因修改設定檔而覆寫。
+API 從 `apps/api/appsettings.json` 讀取 `JwksUrl` 與 `DatabasePath`。`Access:Users` 需在首次啟動前設定 Guy、三位課長與正式版讀者的 `EmpNo`、`Name`、`Role` (`Guy`、`Head` 或 `Reader`)；課長另需 `Section`（例如 `s1`、`s2`、`s3`）。項目的 `section` 是六段報告章節，`ownerSection` 是可編輯該項目的課別，兩者彼此獨立。讀者無編輯頁權限。設定會於首次啟動匯入 SQLite；既有帳號不會因修改設定檔而覆寫，後續名單由 Guy 的受控 API 調整並留稽核。
+
+人事項目以生效日期、交接、影響、下一步四欄保存；一般項目可附多個來源 URL 與待決策事項。下週草稿保留來源與上週承諾；未解待決事項在新週發布前須填決策結果或新期限。
 
 `DatabasePath` 預設在 API 工作目錄的 `weekly-report.db`。正式部署時請設為持久磁碟上的絕對路徑。資料庫以 `CREATE TABLE IF NOT EXISTS` 建立初始結構；保存正式資料前需加入 migration 和備份流程。
 

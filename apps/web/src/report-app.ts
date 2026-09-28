@@ -8,14 +8,16 @@ import { Auth, editorGuard, entryGuard, readerGuard } from './auth';
 
 type User = { empNo: string; name: string; role: string; section: string | null };
 type Lease = { holder: string; expiresAt: string } | null;
-type Item = { id: string; continuityId: string; section: string; ownerSection: string; title: string; content: string; status: string; version: number; lease: Lease; schedule?: ScheduleEntry[] };
+type ItemDetails = { effectiveDate?: string; handover?: string; impact?: string; nextStep?: string; sourceLinks?: { label: string; url: string }[]; pendingDecision?: { description: string; result?: string; newDueDate?: string; requiresFollowUp?: boolean }; previousCommitment?: string };
+type Item = { id: string; continuityId: string; section: string; ownerSection: string; title: string; content: string; details: ItemDetails | string; status: string; version: number; lease: Lease; schedule?: ScheduleEntry[] };
+const detailsOf = (value: ItemDetails | string | undefined): ItemDetails => typeof value === 'string' ? JSON.parse(value) : (value ?? {});
 type ProjectWork = { section: string; work: string; scheduleProposal: string | null; version: number; updatedBy: string; updatedAt: string };
 type ScheduleEntry = { id: string; kind: 'phase' | 'milestone'; name: string; baselineStart: string | null; baselineEnd: string | null; forecastStart: string | null; forecastEnd: string | null; actualStart: string | null; actualEnd: string | null; version: number };
 type EcimMember = { userId: string; periodFrom: string | null; periodTo: string | null; status: string; error: string | null; lastSuccessAt: string | null };
 type EcimCandidate = { id: string; status: string; workId: string; periodFrom: string; periodTo: string };
 type SourceStatus = { section: string; status: string; periodFrom: string | null; periodTo: string | null; finishedAt: string | null };
 type Report = { id: string; meetingDate: string; sections: string[]; items: Item[] };
-type Conflict = { latest: Item; draft: { title: string; content: string } | null; lease: Lease; error: string };
+type Conflict = { latest: Item; draft: { title: string; content: string; details: ItemDetails } | null; lease: Lease; error: string };
 const labels: Record<string, string> = {
   summary: '本週管理摘要', projects: '進行中專案進度', operations: '系統維護與營運',
   personnel: '人力與組織異動', technology: '新技術評估', appendix: '工程師工作明細與來源連結'
@@ -69,14 +71,26 @@ export class Home implements OnInit {
   <article><p *ngIf="message" class="message">{{message}}</p>
     <ng-container *ngIf="selected as item"><h2>{{label(item.section)}}</h2>
       <p>共用版本 {{item.version}} <span *ngIf="item.lease">· {{item.lease.holder}} 編輯至 {{item.lease.expiresAt | date:'short'}}</span></p>
-      <div *ngIf="!token"><h3>{{item.title}}</h3><p>{{item.content}}</p><button (click)="acquire()">開始編輯</button></div>
-      <div *ngIf="token"><label>標題 <input [(ngModel)]="draftTitle" (ngModelChange)="scheduleSave()"></label>
-        <label>內容 <textarea rows="12" [(ngModel)]="draftContent" (ngModelChange)="scheduleSave()"></textarea></label>
-        <label><input type="checkbox" [checked]="draftStatus === 'closed'" (change)="draftStatus = $any($event.target).checked ? 'closed' : 'open'"> 本週結案（下週不再延續）</label>
+      <div *ngIf="!token"><h3>{{item.title}}</h3><p *ngIf="item.section !== 'personnel'">{{item.content}}</p><p *ngIf="item.section === 'personnel'">{{detailsOf(item.details).effectiveDate}} · {{detailsOf(item.details).handover}} · {{detailsOf(item.details).impact}} · {{detailsOf(item.details).nextStep}}</p><p *ngIf="detailsOf(item.details).previousCommitment">上週承諾：{{detailsOf(item.details).previousCommitment}}</p><button (click)="acquire()">開始編輯</button></div>
+      <div *ngIf="token"><label *ngIf="item.section !== 'personnel'">標題 <input [(ngModel)]="draftTitle" (ngModelChange)="scheduleSave()"></label>
+        <ng-container *ngIf="item.section === 'personnel'; else regularContent">
+          <label>生效日期 <input type="date" [(ngModel)]="draftDetails.effectiveDate" (ngModelChange)="scheduleSave()"></label>
+          <label>職責或系統交接 <textarea [(ngModel)]="draftDetails.handover" (ngModelChange)="scheduleSave()"></textarea></label>
+          <label>工作影響 <textarea [(ngModel)]="draftDetails.impact" (ngModelChange)="scheduleSave()"></textarea></label>
+          <label>下一步 <textarea [(ngModel)]="draftDetails.nextStep" (ngModelChange)="scheduleSave()"></textarea></label>
+        </ng-container>
+        <ng-template #regularContent><label>內容 <textarea rows="12" [(ngModel)]="draftContent" (ngModelChange)="scheduleSave()"></textarea></label>
+          <div class="source-link-row" *ngFor="let link of draftDetails.sourceLinks; let index = index"><label>來源名稱 <input [(ngModel)]="link.label" (ngModelChange)="scheduleSave()"></label><label>來源連結 URL <input type="url" [(ngModel)]="link.url" (ngModelChange)="scheduleSave()"></label><button (click)="removeSourceLink(index)">移除連結</button></div>
+          <button (click)="addSourceLink()">新增來源連結</button>
+          <label>待決策事項 <textarea [(ngModel)]="decisionDescription" (ngModelChange)="scheduleSave()"></textarea></label>
+          <label *ngIf="decisionDescription">決策結果 <textarea [(ngModel)]="decisionResult" (ngModelChange)="scheduleSave()"></textarea></label>
+          <label *ngIf="decisionDescription">新期限 <input type="date" [(ngModel)]="decisionDueDate" (ngModelChange)="scheduleSave()"></label>
+        </ng-template>
+        <label><input type="checkbox" [checked]="draftStatus === 'closed'" (change)="draftStatus = $any($event.target).checked ? 'closed' : 'open'; scheduleSave()"> 本週結案（下週不再延續）</label>
         <p>{{saveState}}</p><button (click)="commit()">儲存完成</button><button (click)="release()">取消編輯</button></div>
       <div *ngIf="conflict" class="conflict"><h3>編輯衝突</h3><p>{{conflict.error}}</p>
-        <div class="compare"><div><strong>最新共用版本 {{conflict.latest.version}}</strong><p>{{conflict.latest.title}}</p><p>{{conflict.latest.content}}</p></div>
-        <div><strong>我的私有草稿</strong><p>{{conflict.draft?.title || draftTitle}}</p><p>{{conflict.draft?.content || draftContent}}</p></div></div>
+        <div class="compare"><div><strong>最新共用版本 {{conflict.latest.version}}</strong><p>{{conflict.latest.title}}</p><p>{{conflict.latest.content}}</p><pre>{{detailsOf(conflict.latest.details) | json}}</pre></div>
+        <div><strong>我的私有草稿</strong><p>{{conflict.draft?.title || draftTitle}}</p><p>{{conflict.draft?.content || draftContent}}</p><pre>{{conflict.draft?.details || currentDetails() | json}}</pre></div></div>
         <button (click)="reloadAndAcquire()">重新取得租約並套用我的草稿</button></div>
       <div *ngIf="me?.role === 'Guy' && item.lease && item.lease.holder !== me?.empNo">
         <label>接管理由 <input [(ngModel)]="takeoverReason"></label><button (click)="takeover()">接管租約</button></div>
@@ -102,7 +116,7 @@ export class Home implements OnInit {
       <details><summary>修訂紀錄</summary><button (click)="loadHistory()">重新整理</button>
         <ul><li *ngFor="let entry of history">{{entry.at | date:'short'}} · {{entry.actor}} · {{entry.action}}
           <span *ngIf="entry.action === 'commit'"> {{entry.beforeVersion}} → {{entry.afterVersion}}</span>
-          <span *ngIf="entry.reason"> · {{entry.reason}}</span></li></ul></details>
+          <span *ngIf="entry.reason"> · {{entry.reason}}</span><details *ngIf="entry.afterDetails"><summary>欄位變更</summary><pre>{{entry.beforeDetails | json}} → {{entry.afterDetails | json}}</pre></details></li></ul></details>
     </ng-container><p *ngIf="!selected">請選擇項目。</p>
   </article>
 </main>` })
@@ -119,6 +133,27 @@ export class ReportEditor implements OnInit, OnDestroy {
   draftTitle = '';
   draftContent = '';
   draftStatus = 'open';
+  draftDetails: ItemDetails = {};
+  decisionDescription = '';
+  decisionResult = '';
+  decisionDueDate = '';
+  detailsOf = detailsOf;
+  currentDetails(): ItemDetails {
+    if (this.selected?.section === 'personnel') return { effectiveDate: this.draftDetails.effectiveDate, handover: this.draftDetails.handover, impact: this.draftDetails.impact, nextStep: this.draftDetails.nextStep };
+    const details: ItemDetails = { ...this.draftDetails, sourceLinks: this.draftDetails.sourceLinks?.filter(link => link.url.trim()) ?? [] };
+    if (this.decisionDescription.trim()) details.pendingDecision = { description: this.decisionDescription, result: this.decisionResult, newDueDate: this.decisionDueDate, requiresFollowUp: this.draftDetails.pendingDecision?.requiresFollowUp };
+    else delete details.pendingDecision;
+    return details;
+  }
+  loadDetails(value: ItemDetails | string | undefined) {
+    this.draftDetails = { ...detailsOf(value) };
+    this.draftDetails.sourceLinks = this.draftDetails.sourceLinks?.map(link => ({ ...link })) ?? [];
+    this.decisionDescription = this.draftDetails.pendingDecision?.description ?? '';
+    this.decisionResult = this.draftDetails.pendingDecision?.result ?? '';
+    this.decisionDueDate = this.draftDetails.pendingDecision?.newDueDate ?? '';
+  }
+  addSourceLink() { this.draftDetails.sourceLinks ??= []; this.draftDetails.sourceLinks.push({ label: '來源', url: '' }); this.changes.detectChanges(); }
+  removeSourceLink(index: number) { this.draftDetails.sourceLinks?.splice(index, 1); this.scheduleSave(); }
   saveState = '';
   message = '';
   conflict: Conflict | null = null;
@@ -154,7 +189,7 @@ export class ReportEditor implements OnInit, OnDestroy {
     const headers = { 'Content-Type': 'application/json', Authorization: `Bearer ${this.auth.token()}` };
     fetch(`/api/items/${itemId}/private-draft`, {
       method: 'PUT', keepalive: true, headers,
-      body: JSON.stringify({ title: this.draftTitle, content: this.draftContent, status: this.draftStatus })
+      body: JSON.stringify({ title: this.draftTitle, content: this.selected.section === 'personnel' ? '' : this.draftContent, details: this.currentDetails(), status: this.draftStatus })
     }).catch(() => {});
     fetch(`/api/items/${itemId}/lease`, {
       method: 'DELETE', keepalive: true,
@@ -203,7 +238,7 @@ export class ReportEditor implements OnInit, OnDestroy {
     }
     clearInterval(this.renewTimer); clearTimeout(this.saveTimer);
     this.selected = item; this.token = ''; this.conflict = null; this.history = []; this.message = '';
-    this.draftTitle = item.title; this.draftContent = item.content; this.draftStatus = item.status;
+    this.draftTitle = item.title; this.draftContent = item.content; this.draftStatus = item.status; this.loadDetails(item.details);
     this.projectWork = []; this.myProjectWork = ''; this.myScheduleProposal = ''; this.myProjectWorkVersion = 0; this.isParticipant = false;
     this.scheduleEntries = []; this.resetScheduleDraft();
     if (item.section === 'projects') { await this.loadProjectWork(); await this.loadSchedule(); }
@@ -265,8 +300,8 @@ export class ReportEditor implements OnInit, OnDestroy {
       this.token = lease.token; this.baseVersion = lease.baseVersion;
       this.renewTimer = setInterval(() => this.renew(), 5 * 60 * 1000);
       try {
-        const draft = await firstValueFrom(this.http.get<{ title: string; content: string; status: string }>(`/api/items/${this.selected.id}/private-draft`));
-        this.draftTitle = draft.title; this.draftContent = draft.content; this.draftStatus = draft.status;
+        const draft = await firstValueFrom(this.http.get<{ title: string; content: string; details: ItemDetails; status: string }>(`/api/items/${this.selected.id}/private-draft`));
+        this.draftTitle = draft.title; this.draftContent = draft.content; this.draftStatus = draft.status; this.loadDetails(draft.details);
       } catch { /* no existing draft */ }
     } catch (error: any) { this.conflict = error.error; await this.refresh(); }
     this.changes.detectChanges();
@@ -283,7 +318,7 @@ export class ReportEditor implements OnInit, OnDestroy {
   async save() {
     if (!this.selected) return;
     try {
-      await firstValueFrom(this.http.put(`/api/items/${this.selected.id}/private-draft`, { title: this.draftTitle, content: this.draftContent, status: this.draftStatus }));
+      await firstValueFrom(this.http.put(`/api/items/${this.selected.id}/private-draft`, { title: this.draftTitle, content: this.selected.section === 'personnel' ? '' : this.draftContent, details: this.currentDetails(), status: this.draftStatus }));
       this.saveState = '私人草稿已儲存';
     } catch { this.saveState = '草稿儲存失敗'; }
     this.changes.detectChanges();
@@ -339,7 +374,11 @@ export class ReportEditor implements OnInit, OnDestroy {
 <main *ngIf="publication" class="publication"><p class="publication-meta">版本 {{publication.version}} · 發布於 {{publication.publishedAt | date:'short'}}</p>
   <section class="publication-sources"><h2>來源狀態</h2><ul><li *ngFor="let source of publication.sourceStatus || []"><strong>{{source.section}}</strong> · {{sourceLabel(source.status)}}<span *ngIf="source.periodFrom"> · {{source.periodFrom}}–{{source.periodTo}}</span></li></ul></section>
   <section *ngFor="let section of publication.sections"><h2>{{label(section)}}</h2>
-    <article *ngFor="let item of inSection(section)"><h3>{{item.title}}</h3><p>{{item.content}}</p>
+    <article *ngFor="let item of inSection(section)"><h3>{{item.title}}</h3><p *ngIf="item.section !== 'personnel'">{{item.content}}</p>
+      <p *ngIf="item.section === 'personnel'">生效日期：{{detailsOf(item.details).effectiveDate}} · 交接：{{detailsOf(item.details).handover}} · 影響：{{detailsOf(item.details).impact}} · 下一步：{{detailsOf(item.details).nextStep}}</p>
+      <p *ngIf="detailsOf(item.details).previousCommitment">上週承諾：{{detailsOf(item.details).previousCommitment}}</p>
+      <ul *ngIf="detailsOf(item.details).sourceLinks?.length"><li *ngFor="let source of detailsOf(item.details).sourceLinks"><a [href]="source.url" rel="noopener noreferrer">{{source.label}}</a></li></ul>
+      <p *ngIf="detailsOf(item.details).pendingDecision as decision">待決策：{{decision.description}} · 結果：{{decision.result || '待定'}} · 新期限：{{decision.newDueDate || '待定'}}</p>
       <ul *ngIf="item.schedule?.length"><li *ngFor="let entry of item.schedule"><strong>{{entry.kind === 'phase' ? '階段' : '重要里程碑'}}：{{entry.name}}</strong>
         · 基準 {{entry.baselineStart || '—'}}–{{entry.baselineEnd || '—'}} · 預估 {{entry.forecastStart || '—'}}–{{entry.forecastEnd || '—'}} · 實際 {{entry.actualStart || '—'}}–{{entry.actualEnd || '—'}}</li></ul>
     </article>
@@ -350,6 +389,7 @@ export class PublicationPage implements OnInit {
   private route = inject(ActivatedRoute);
   private changes = inject(ChangeDetectorRef);
   publication: (Report & { version: number; publishedAt: string; sourceStatus?: SourceStatus[] }) | null = null;
+  detailsOf = detailsOf;
   private publicationId = this.route.snapshot.paramMap.get('id')!;
   label(section: string) { return labels[section] ?? section; }
   sourceLabel(status: string) { return ({ succeeded: '同步成功', partial: '部分同步失敗', failed: '同步失敗', 'not-connected': '尚未接入來源' } as Record<string, string>)[status] ?? status; }

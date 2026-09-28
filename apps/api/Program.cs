@@ -89,7 +89,7 @@ app.MapPost("/api/reports", (HttpContext ctx, Store store, CreateReport request)
             {
                 var carriedId = Guid.NewGuid().ToString();
                 Store.Sql(db, "INSERT INTO items(id,report_id,continuity_id,section,owner_section,title,content,details,status,version,created_by) VALUES($id,$report,$continuity,$section,$owner,$title,$content,$details,$status,1,$actor)",
-                    ("$id", carriedId), ("$report", newReportId), ("$continuity", item.ContinuityId), ("$section", item.Section), ("$owner", item.OwnerSection), ("$title", item.Title), ("$content", item.Content), ("$details", item.Details), ("$status", item.Status), ("$actor", Current(ctx).EmpNo)).ExecuteNonQuery();
+                    ("$id", carriedId), ("$report", newReportId), ("$continuity", item.ContinuityId), ("$section", item.Section), ("$owner", item.OwnerSection), ("$title", item.Title), ("$content", item.Content), ("$details", CarryDetails(item)), ("$status", item.Status), ("$actor", Current(ctx).EmpNo)).ExecuteNonQuery();
                 foreach (var entry in item.Schedule ?? [])
                     Store.Sql(db, "INSERT INTO project_schedule_entries(id,project_id,kind,name,baseline_start,baseline_end,forecast_start,forecast_end,actual_start,actual_end,version,created_by,updated_at) VALUES($id,$project,$kind,$name,$baselineStart,$baselineEnd,$forecastStart,$forecastEnd,$actualStart,$actualEnd,$version,$actor,$at)",
                         ("$id", Guid.NewGuid().ToString()), ("$project", carriedId), ("$kind", entry.Kind), ("$name", entry.Name), ("$baselineStart", entry.BaselineStart), ("$baselineEnd", entry.BaselineEnd), ("$forecastStart", entry.ForecastStart), ("$forecastEnd", entry.ForecastEnd), ("$actualStart", entry.ActualStart), ("$actualEnd", entry.ActualEnd), ("$version", entry.Version), ("$actor", Current(ctx).EmpNo), ("$at", DateTimeOffset.UtcNow.ToString("O"))).ExecuteNonQuery();
@@ -206,6 +206,7 @@ app.MapPost("/api/reports/{reportId}/publications", (HttpContext ctx, Store stor
     }
     existingRows.Close();
     var snapshot = Snapshot(db, reportId, config);
+    if (snapshot.Items.Any(item => !ValidPublicationDetails(item))) return Results.BadRequest(new { error = "unresolved carried decision requires a result or new due date" });
     var version = Convert.ToInt32(Store.Sql(db, "SELECT COALESCE(MAX(version),0)+1 FROM publications WHERE report_id=$report", ("$report", reportId)).ExecuteScalar());
     var id = Guid.NewGuid().ToString();
     var publishedAt = DateTimeOffset.UtcNow.ToString("O");
@@ -428,7 +429,7 @@ app.MapPut("/api/items/{itemId}/private-draft", (HttpContext ctx, Store store, s
     if (!CanEdit(user, item.OwnerSection)) return Results.StatusCode(403);
     var status = request.Status ?? item.Status;
     var details = request.Details?.GetRawText() ?? item.Details;
-    if (!Valid(request.Title, request.Content) || !ValidStatus(status, request.Content) || !ValidDetails(item.Section, request.Content, details, status)) return Results.BadRequest();
+    if (!Valid(request.Title, request.Content) || !ValidStatus(status, request.Content, item.Section) || !ValidDetails(item.Section, request.Content, details, status) || !ValidDecisionTransition(item.Details, details)) return Results.BadRequest();
     Store.Sql(db, "INSERT INTO drafts(item_id,editor,title,content,details,status,saved_at) VALUES($id,$actor,$title,$content,$details,$status,$at) ON CONFLICT(item_id,editor) DO UPDATE SET title=excluded.title,content=excluded.content,details=excluded.details,status=excluded.status,saved_at=excluded.saved_at",
         ("$id", itemId), ("$actor", user.EmpNo), ("$title", request.Title.Trim()), ("$content", request.Content), ("$details", details), ("$status", status), ("$at", DateTimeOffset.UtcNow.ToString("O"))).ExecuteNonQuery();
     return Results.NoContent();
@@ -451,10 +452,15 @@ app.MapPost("/api/items/{itemId}/commit", (HttpContext ctx, Store store, string 
     var details = draftRows.GetString(2); var draftStatus = draftRows.GetString(3);
     draftRows.Close();
     var status = request.Status ?? draftStatus;
-    if (!Valid(title, content) || !ValidStatus(status, content) || !ValidDetails(item.Section, content, details, status)) return Results.BadRequest();
+    if (!Valid(title, content) || !ValidStatus(status, content, item.Section) || !ValidDetails(item.Section, content, details, status) || !ValidDecisionTransition(item.Details, details)) return Results.BadRequest();
+    if (item.Section == "personnel")
+    {
+        using var personnelDetails = System.Text.Json.JsonDocument.Parse(details);
+        title = Text(personnelDetails.RootElement, "handover")!;
+    }
     Store.Sql(db, "UPDATE items SET title=$title,content=$content,details=$details,status=$status,version=version+1 WHERE id=$id AND version=$version", ("$title", title), ("$content", content), ("$details", details), ("$status", status), ("$id", itemId), ("$version", item.Version)).ExecuteNonQuery();
-    Store.Sql(db, "INSERT INTO revisions(item_id,actor,at,before_version,after_version,before_title,after_title,before_content,after_content) VALUES($id,$actor,$at,$before,$after,$oldTitle,$newTitle,$oldContent,$newContent)",
-        ("$id", itemId), ("$actor", user.EmpNo), ("$at", DateTimeOffset.UtcNow.ToString("O")), ("$before", item.Version), ("$after", item.Version + 1), ("$oldTitle", item.Title), ("$newTitle", title), ("$oldContent", item.Content), ("$newContent", content)).ExecuteNonQuery();
+    Store.Sql(db, "INSERT INTO revisions(item_id,actor,at,before_version,after_version,before_title,after_title,before_content,after_content,before_details,after_details) VALUES($id,$actor,$at,$before,$after,$oldTitle,$newTitle,$oldContent,$newContent,$oldDetails,$newDetails)",
+        ("$id", itemId), ("$actor", user.EmpNo), ("$at", DateTimeOffset.UtcNow.ToString("O")), ("$before", item.Version), ("$after", item.Version + 1), ("$oldTitle", item.Title), ("$newTitle", title), ("$oldContent", item.Content), ("$newContent", content), ("$oldDetails", item.Details), ("$newDetails", details)).ExecuteNonQuery();
     Store.Sql(db, "INSERT INTO audit(item_id,actor,at,action) VALUES($id,$actor,$at,'commit')",
         ("$id", itemId), ("$actor", user.EmpNo), ("$at", DateTimeOffset.UtcNow.ToString("O"))).ExecuteNonQuery();
     Store.Sql(db, "DELETE FROM leases WHERE item_id=$id", ("$id", itemId)).ExecuteNonQuery();
@@ -469,8 +475,8 @@ app.MapGet("/api/items/{itemId}/history", (HttpContext ctx, Store store, string 
     if (item is null) return Results.NotFound();
     if (!CanEdit(Current(ctx), item.OwnerSection)) return Results.StatusCode(403);
     var history = new List<object>();
-    using (var rows = Store.Sql(db, "SELECT actor,at,before_version,after_version,before_title,after_title,before_content,after_content FROM revisions WHERE item_id=$id ORDER BY id", ("$id", itemId)).ExecuteReader())
-        while (rows.Read()) history.Add(new { action = "commit", actor = rows.GetString(0), at = rows.GetString(1), beforeVersion = rows.GetInt32(2), afterVersion = rows.GetInt32(3), beforeTitle = rows.GetString(4), afterTitle = rows.GetString(5), beforeContent = rows.GetString(6), afterContent = rows.GetString(7) });
+    using (var rows = Store.Sql(db, "SELECT actor,at,before_version,after_version,before_title,after_title,before_content,after_content,before_details,after_details FROM revisions WHERE item_id=$id ORDER BY id", ("$id", itemId)).ExecuteReader())
+        while (rows.Read()) history.Add(new { action = "commit", actor = rows.GetString(0), at = rows.GetString(1), beforeVersion = rows.GetInt32(2), afterVersion = rows.GetInt32(3), beforeTitle = rows.GetString(4), afterTitle = rows.GetString(5), beforeContent = rows.GetString(6), afterContent = rows.GetString(7), beforeDetails = System.Text.Json.JsonSerializer.Deserialize<System.Text.Json.JsonElement>(rows.GetString(8)), afterDetails = System.Text.Json.JsonSerializer.Deserialize<System.Text.Json.JsonElement>(rows.GetString(9)) });
     using (var rows = Store.Sql(db, "SELECT actor,at,reason FROM audit WHERE item_id=$id AND action='takeover' ORDER BY id", ("$id", itemId)).ExecuteReader())
         while (rows.Read()) history.Add(new { action = "takeover", actor = rows.GetString(0), at = rows.GetString(1), reason = rows.GetString(2) });
     return Results.Ok(history);
@@ -510,11 +516,55 @@ static bool ValidMilestoneDates(string? start, string? end)
     if (end is not null && !DateOnly.TryParseExact(end, "yyyy-MM-dd", out _)) return false;
     return start is null || end is null || string.CompareOrdinal(start, end) <= 0;
 }
-static bool ValidStatus(string status, string content) => status is "open" or "closed" && (status != "closed" || !string.IsNullOrWhiteSpace(content));
+static bool ValidStatus(string status, string content, string section) => status is "open" or "closed" && (status != "closed" || section == "personnel" || !string.IsNullOrWhiteSpace(content));
 static bool ValidDetails(string section, string content, string details, string status)
 {
-    try { using var document = System.Text.Json.JsonDocument.Parse(details); var root = document.RootElement; return section != "personnel" || string.IsNullOrWhiteSpace(content) && root.TryGetProperty("effectiveDate", out var date) && DateOnly.TryParseExact(date.GetString(), "yyyy-MM-dd", out _) && new[] { "handover", "impact", "nextStep" }.All(name => root.TryGetProperty(name, out var value) && !string.IsNullOrWhiteSpace(value.GetString())); }
+    try
+    {
+        using var document = System.Text.Json.JsonDocument.Parse(details);
+        var root = document.RootElement;
+        if (root.ValueKind != System.Text.Json.JsonValueKind.Object) return false;
+        if (section == "personnel")
+        {
+            if (!string.IsNullOrWhiteSpace(content) || root.EnumerateObject().Any(property => !new[] { "effectiveDate", "handover", "impact", "nextStep" }.Contains(property.Name))) return false;
+            return Text(root, "effectiveDate") is { } date && DateOnly.TryParseExact(date, "yyyy-MM-dd", out _) && new[] { "handover", "impact", "nextStep" }.All(name => !string.IsNullOrWhiteSpace(Text(root, name)));
+        }
+        if (root.TryGetProperty("sourceLinks", out var links) && (links.ValueKind != System.Text.Json.JsonValueKind.Array || links.EnumerateArray().Any(link => link.ValueKind != System.Text.Json.JsonValueKind.Object || !Uri.TryCreate(Text(link, "url"), UriKind.Absolute, out var uri) || uri.Scheme is not ("http" or "https")))) return false;
+        if (!root.TryGetProperty("pendingDecision", out var decision)) return true;
+        if (decision.ValueKind != System.Text.Json.JsonValueKind.Object || string.IsNullOrWhiteSpace(Text(decision, "description"))) return false;
+        var due = Text(decision, "newDueDate");
+        if (due is not null && !DateOnly.TryParseExact(due, "yyyy-MM-dd", out _)) return false;
+        return status != "closed" || !string.IsNullOrWhiteSpace(Text(decision, "result"));
+    }
     catch { return false; }
+}
+static string? Text(System.Text.Json.JsonElement value, string name) => value.TryGetProperty(name, out var property) && property.ValueKind == System.Text.Json.JsonValueKind.String ? property.GetString() : null;
+static bool ValidPublicationDetails(PublishedItem item)
+{
+    using var document = System.Text.Json.JsonDocument.Parse(item.Details);
+    var root = document.RootElement;
+    return !root.TryGetProperty("pendingDecision", out var decision) || !decision.TryGetProperty("requiresFollowUp", out var required) || required.ValueKind != System.Text.Json.JsonValueKind.True || !string.IsNullOrWhiteSpace(Text(decision, "result")) || !string.IsNullOrWhiteSpace(Text(decision, "newDueDate"));
+}
+static bool ValidDecisionTransition(string before, string after)
+{
+    using var previous = System.Text.Json.JsonDocument.Parse(before);
+    if (!previous.RootElement.TryGetProperty("pendingDecision", out var oldDecision) || !oldDecision.TryGetProperty("requiresFollowUp", out var required) || required.ValueKind != System.Text.Json.JsonValueKind.True) return true;
+    using var proposed = System.Text.Json.JsonDocument.Parse(after);
+    return proposed.RootElement.TryGetProperty("pendingDecision", out var newDecision) && newDecision.TryGetProperty("requiresFollowUp", out var stillRequired) && stillRequired.ValueKind == System.Text.Json.JsonValueKind.True && Text(newDecision, "description") == Text(oldDecision, "description");
+}
+static string CarryDetails(PublishedItem item)
+{
+    var details = System.Text.Json.Nodes.JsonNode.Parse(item.Details) as System.Text.Json.Nodes.JsonObject ?? new();
+    if (item.Section != "personnel")
+    {
+        details["previousCommitment"] = item.Content;
+        if (details["pendingDecision"] is System.Text.Json.Nodes.JsonObject decision && string.IsNullOrWhiteSpace((string?)decision["result"]))
+        {
+            decision["requiresFollowUp"] = true;
+            decision.Remove("newDueDate");
+        }
+    }
+    return details.ToJsonString();
 }
 static string Hash(string token) => Convert.ToHexString(SHA256.HashData(Encoding.ASCII.GetBytes(token)));
 static bool Matches(string token, string hash) => !string.IsNullOrWhiteSpace(token) && CryptographicOperations.FixedTimeEquals(Convert.FromHexString(Hash(token)), Convert.FromHexString(hash));
@@ -578,9 +628,9 @@ static ReportSnapshot? PreviousPublication(SqliteConnection db, string meetingDa
 static IResult Conflict(SqliteConnection db, string id, string actor, string error, Lease? lease)
 {
     var item = GetItem(db, id)!;
-    using var rows = Store.Sql(db, "SELECT title,content,status,saved_at FROM drafts WHERE item_id=$id AND editor=$actor", ("$id", id), ("$actor", actor)).ExecuteReader();
-    object? draft = rows.Read() ? new { title = rows.GetString(0), content = rows.GetString(1), status = rows.GetString(2), savedAt = rows.GetString(3) } : null;
-    return Results.Conflict(new { error, latest = new { item.Title, item.Content, item.Version }, draft, lease = LeaseObject(lease) });
+    using var rows = Store.Sql(db, "SELECT title,content,details,status,saved_at FROM drafts WHERE item_id=$id AND editor=$actor", ("$id", id), ("$actor", actor)).ExecuteReader();
+    object? draft = rows.Read() ? new { title = rows.GetString(0), content = rows.GetString(1), details = System.Text.Json.JsonSerializer.Deserialize<System.Text.Json.JsonElement>(rows.GetString(2)), status = rows.GetString(3), savedAt = rows.GetString(4) } : null;
+    return Results.Conflict(new { error, latest = new { item.Title, item.Content, details = System.Text.Json.JsonSerializer.Deserialize<System.Text.Json.JsonElement>(item.Details), item.Version }, draft, lease = LeaseObject(lease) });
 }
 static IResult ChangeLease(HttpContext ctx, Store store, IConfiguration config, string id, string token, bool release)
 {
