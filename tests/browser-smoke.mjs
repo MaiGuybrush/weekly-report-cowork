@@ -66,7 +66,15 @@ try {
   await page.getByRole('textbox', { name: '內容' }).fill('Browser committed content');
   await page.getByRole('button', { name: '儲存完成' }).click();
   await page.getByText('Browser committed content').waitFor({ timeout: 15000 });
-  console.log('Browser smoke passed: SSO return, item draft, and commit');
+  await page.getByRole('button', { name: '發布正式版' }).click();
+  const publication = page.getByRole('link', { name: '查看剛發布的固定版本' });
+  await publication.waitFor({ timeout: 15000 });
+  await publication.click();
+  await page.getByRole('heading', { name: '正式處會週報' }).waitFor({ timeout: 15000 });
+  await page.getByText('版本 1').waitFor({ timeout: 15000 });
+  await page.emulateMedia({ media: 'print' });
+  assert.equal(await page.locator('header a').evaluate(element => getComputedStyle(element).display), 'none');
+  console.log('Browser smoke passed: SSO return, item commit, publication, and print layout');
 } finally {
   await browser?.close();
   api.kill();

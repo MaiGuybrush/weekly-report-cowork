@@ -8,7 +8,7 @@ import { Auth, editorGuard } from './auth';
 
 type User = { empNo: string; name: string; role: string; section: string | null };
 type Lease = { holder: string; expiresAt: string } | null;
-type Item = { id: string; section: string; ownerSection: string; title: string; content: string; version: number; lease: Lease };
+type Item = { id: string; continuityId: string; section: string; ownerSection: string; title: string; content: string; status: string; version: number; lease: Lease };
 type Report = { id: string; meetingDate: string; sections: string[]; items: Item[] };
 type Conflict = { latest: Item; draft: { title: string; content: string } | null; lease: Lease; error: string };
 const labels: Record<string, string> = {
@@ -51,9 +51,9 @@ export class Home implements OnInit {
 }
 
 @Component({ standalone: true, imports: [CommonModule, FormsModule], template: `
-<header><h1>處會週報 <small>{{report?.meetingDate}}</small></h1><a href="#/">週報清單</a></header>
+<header><h1>處會週報 <small>{{report?.meetingDate}}</small></h1><span><button *ngIf="me?.role === 'Guy'" (click)="publish()">發布正式版</button><a href="#/">週報清單</a></span></header>
 <main *ngIf="report" class="editor">
-  <nav><h2>章節與項目</h2><section *ngFor="let section of report.sections">
+  <nav><h2>章節與項目</h2><p *ngIf="publicationUrl"><a [href]="publicationUrl">查看剛發布的固定版本</a></p><section *ngFor="let section of report.sections">
     <h3>{{label(section)}}</h3><button *ngIf="canAdd(section)" (click)="add(section)">新增項目</button>
     <button class="item" *ngFor="let item of inSection(section)" (click)="select(item)">{{item.title}} <span *ngIf="item.lease">🔒</span></button>
   </section></nav>
@@ -63,6 +63,7 @@ export class Home implements OnInit {
       <div *ngIf="!token"><h3>{{item.title}}</h3><p>{{item.content}}</p><button (click)="acquire()">開始編輯</button></div>
       <div *ngIf="token"><label>標題 <input [(ngModel)]="draftTitle" (ngModelChange)="scheduleSave()"></label>
         <label>內容 <textarea rows="12" [(ngModel)]="draftContent" (ngModelChange)="scheduleSave()"></textarea></label>
+        <label><input type="checkbox" [checked]="draftStatus === 'closed'" (change)="draftStatus = $any($event.target).checked ? 'closed' : 'open'"> 本週結案（下週不再延續）</label>
         <p>{{saveState}}</p><button (click)="commit()">儲存完成</button><button (click)="release()">取消編輯</button></div>
       <div *ngIf="conflict" class="conflict"><h3>編輯衝突</h3><p>{{conflict.error}}</p>
         <div class="compare"><div><strong>最新共用版本 {{conflict.latest.version}}</strong><p>{{conflict.latest.title}}</p><p>{{conflict.latest.content}}</p></div>
@@ -89,11 +90,14 @@ export class ReportEditor implements OnInit, OnDestroy {
   baseVersion = 0;
   draftTitle = '';
   draftContent = '';
+  draftStatus = 'open';
   saveState = '';
   message = '';
   conflict: Conflict | null = null;
   history: any[] = [];
   takeoverReason = '';
+  publicationUrl = '';
+  private pendingPublicationRequestId = '';
   private saveTimer?: ReturnType<typeof setTimeout>;
   private renewTimer?: ReturnType<typeof setInterval>;
   private reportId = this.route.snapshot.paramMap.get('id')!;
@@ -111,7 +115,7 @@ export class ReportEditor implements OnInit, OnDestroy {
     const headers = { 'Content-Type': 'application/json', Authorization: `Bearer ${this.auth.token()}` };
     fetch(`/api/items/${itemId}/private-draft`, {
       method: 'PUT', keepalive: true, headers,
-      body: JSON.stringify({ title: this.draftTitle, content: this.draftContent })
+      body: JSON.stringify({ title: this.draftTitle, content: this.draftContent, status: this.draftStatus })
     }).catch(() => {});
     fetch(`/api/items/${itemId}/lease`, {
       method: 'DELETE', keepalive: true,
@@ -142,7 +146,7 @@ export class ReportEditor implements OnInit, OnDestroy {
     }
     clearInterval(this.renewTimer); clearTimeout(this.saveTimer);
     this.selected = item; this.token = ''; this.conflict = null; this.history = []; this.message = '';
-    this.draftTitle = item.title; this.draftContent = item.content;
+    this.draftTitle = item.title; this.draftContent = item.content; this.draftStatus = item.status;
     this.changes.detectChanges();
   }
   async acquire() {
@@ -152,8 +156,8 @@ export class ReportEditor implements OnInit, OnDestroy {
       this.token = lease.token; this.baseVersion = lease.baseVersion;
       this.renewTimer = setInterval(() => this.renew(), 5 * 60 * 1000);
       try {
-        const draft = await firstValueFrom(this.http.get<{ title: string; content: string }>(`/api/items/${this.selected.id}/private-draft`));
-        this.draftTitle = draft.title; this.draftContent = draft.content;
+        const draft = await firstValueFrom(this.http.get<{ title: string; content: string; status: string }>(`/api/items/${this.selected.id}/private-draft`));
+        this.draftTitle = draft.title; this.draftContent = draft.content; this.draftStatus = draft.status;
       } catch { /* no existing draft */ }
     } catch (error: any) { this.conflict = error.error; await this.refresh(); }
     this.changes.detectChanges();
@@ -170,7 +174,7 @@ export class ReportEditor implements OnInit, OnDestroy {
   async save() {
     if (!this.selected) return;
     try {
-      await firstValueFrom(this.http.put(`/api/items/${this.selected.id}/private-draft`, { title: this.draftTitle, content: this.draftContent }));
+      await firstValueFrom(this.http.put(`/api/items/${this.selected.id}/private-draft`, { title: this.draftTitle, content: this.draftContent, status: this.draftStatus }));
       this.saveState = '私人草稿已儲存';
     } catch { this.saveState = '草稿儲存失敗'; }
     this.changes.detectChanges();
@@ -180,7 +184,7 @@ export class ReportEditor implements OnInit, OnDestroy {
     clearTimeout(this.saveTimer); await this.save();
     if (this.saveState !== '私人草稿已儲存') return;
     try {
-      await firstValueFrom(this.http.post(`/api/items/${this.selected.id}/commit`, { token: this.token, baseVersion: this.baseVersion }));
+      await firstValueFrom(this.http.post(`/api/items/${this.selected.id}/commit`, { token: this.token, baseVersion: this.baseVersion, status: this.draftStatus }));
       this.token = ''; clearInterval(this.renewTimer); this.conflict = null;
       await this.refresh(); this.message = '已儲存完成。';
     } catch (error: any) { this.conflict = error.error; this.message = '提交遇到衝突，私有草稿已保留。'; this.changes.detectChanges(); }
@@ -203,10 +207,40 @@ export class ReportEditor implements OnInit, OnDestroy {
     } catch { this.message = '接管失敗。'; this.changes.detectChanges(); }
   }
   async reloadAndAcquire() { await this.refresh(); this.token = ''; this.conflict = null; await this.acquire(); }
+  async publish() {
+    try {
+      this.pendingPublicationRequestId ||= sessionStorage.getItem(`publication-request:${this.reportId}`) ?? crypto.randomUUID();
+      sessionStorage.setItem(`publication-request:${this.reportId}`, this.pendingPublicationRequestId);
+      const publication = await firstValueFrom(this.http.post<{ id: string; version: number }>(`/api/reports/${this.reportId}/publications`, { requestId: this.pendingPublicationRequestId }));
+      this.pendingPublicationRequestId = '';
+      sessionStorage.removeItem(`publication-request:${this.reportId}`);
+      this.publicationUrl = `#/publications/${publication.id}`;
+      this.message = `已發布正式版 ${publication.version}。`;
+      this.changes.detectChanges();
+    } catch { this.message = '發布失敗。'; this.changes.detectChanges(); }
+  }
   async loadHistory() {
     if (this.selected) this.history = await firstValueFrom(this.http.get<any[]>(`/api/items/${this.selected.id}/history`));
     this.changes.detectChanges();
   }
+}
+
+@Component({ standalone: true, imports: [CommonModule], template: `
+<header><h1>正式處會週報 <small>{{publication?.meetingDate}}</small></h1><a href="#/">週報清單</a></header>
+<main *ngIf="publication" class="publication"><p>版本 {{publication.version}} · 發布於 {{publication.publishedAt | date:'short'}}</p>
+  <section *ngFor="let section of publication.sections"><h2>{{label(section)}}</h2>
+    <article *ngFor="let item of inSection(section)"><h3>{{item.title}}</h3><p>{{item.content}}</p></article>
+  </section>
+</main>` })
+export class PublicationPage implements OnInit {
+  private http = inject(HttpClient);
+  private route = inject(ActivatedRoute);
+  private changes = inject(ChangeDetectorRef);
+  publication: (Report & { version: number; publishedAt: string }) | null = null;
+  private publicationId = this.route.snapshot.paramMap.get('id')!;
+  label(section: string) { return labels[section] ?? section; }
+  inSection(section: string) { return this.publication?.items.filter(item => item.section === section) ?? []; }
+  async ngOnInit() { this.publication = await firstValueFrom(this.http.get<typeof this.publication>(`/api/publications/${this.publicationId}`)); this.changes.detectChanges(); }
 }
 
 @Component({ standalone: true, template: '<main><h1>無權限</h1><p>此帳號無法編輯處會週報。</p></main>' })
@@ -215,6 +249,7 @@ export class Forbidden {}
 export const routes: Routes = [
   { path: '', component: Home, canActivate: [editorGuard] },
   { path: 'reports/:id', component: ReportEditor, canActivate: [editorGuard] },
+  { path: 'publications/:id', component: PublicationPage },
   { path: 'forbidden', component: Forbidden },
   { path: '**', redirectTo: '' }
 ];
