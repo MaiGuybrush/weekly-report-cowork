@@ -121,9 +121,30 @@ app.MapPost("/api/reports/{reportId}/ecim-sync", async (HttpContext ctx, Store s
             using var tx = db.BeginTransaction();
             foreach (var entry in work)
             {
-                var sourceId = Guid.NewGuid().ToString();
-                var inserted = Store.Sql(db, "INSERT INTO ecim_sources(id,report_id,section,work_id,period_from,period_to,payload,import_run_id) VALUES($id,$report,$section,$work,$from,$to,$payload,$run) ON CONFLICT(report_id,work_id,period_from,period_to) DO NOTHING", ("$id", sourceId), ("$report", reportId), ("$section", user.Section), ("$work", entry.WorkId), ("$from", member.UpdateDateFrom ?? ""), ("$to", member.UpdateDateTo ?? ""), ("$payload", entry.Payload), ("$run", runId)).ExecuteNonQuery() == 1;
-                if (inserted) Store.Sql(db, "INSERT INTO ecim_candidates(id,report_id,source_id,section) VALUES($id,$report,$source,$section)", ("$id", Guid.NewGuid().ToString()), ("$report", reportId), ("$source", sourceId), ("$section", user.Section)).ExecuteNonQuery();
+                var sourceId = Store.Sql(db, "SELECT id FROM ecim_sources WHERE report_id=$report AND work_id=$work AND period_from=$from AND period_to=$to", ("$report", reportId), ("$work", entry.WorkId), ("$from", member.UpdateDateFrom ?? ""), ("$to", member.UpdateDateTo ?? "")).ExecuteScalar() as string;
+                if (sourceId is null)
+                {
+                    sourceId = Guid.NewGuid().ToString();
+                    Store.Sql(db, "INSERT INTO ecim_sources(id,report_id,section,work_id,period_from,period_to,payload,import_run_id) VALUES($id,$report,$section,$work,$from,$to,$payload,$run)", ("$id", sourceId), ("$report", reportId), ("$section", user.Section), ("$work", entry.WorkId), ("$from", member.UpdateDateFrom ?? ""), ("$to", member.UpdateDateTo ?? ""), ("$payload", entry.Payload), ("$run", runId)).ExecuteNonQuery();
+                    Store.Sql(db, "INSERT INTO ecim_candidates(id,report_id,source_id,section,candidate_type,reason) VALUES($id,$report,$source,$section,'new-source','新增來源')", ("$id", Guid.NewGuid().ToString()), ("$report", reportId), ("$source", sourceId), ("$section", user.Section)).ExecuteNonQuery();
+                }
+                else
+                {
+                    var previous = Store.Sql(db, "SELECT payload FROM ecim_sources WHERE id=$id", ("$id", sourceId)).ExecuteScalar() as string;
+                    if (previous != entry.Payload)
+                    {
+                        var classification = CandidateClassification(entry.Payload);
+                        Store.Sql(db, "UPDATE ecim_sources SET payload=$payload,import_run_id=$run WHERE id=$id", ("$payload", entry.Payload), ("$run", runId), ("$id", sourceId)).ExecuteNonQuery();
+                        Store.Sql(db, "UPDATE ecim_candidates SET status='new',candidate_type=$type,reason=$reason,decided_by=NULL,decided_at=NULL WHERE source_id=$source", ("$type", classification.Type), ("$reason", classification.Reason), ("$source", sourceId)).ExecuteNonQuery();
+                        var targetItemId = Store.Sql(db, "SELECT target_item_id FROM ecim_candidates WHERE source_id=$source", ("$source", sourceId)).ExecuteScalar() as string;
+                        if (!string.IsNullOrWhiteSpace(targetItemId))
+                        {
+                            var origin = GetFieldOrigin(db, targetItemId);
+                            var target = GetItem(db, targetItemId);
+                            if (origin is not null && target is not null) UpsertFieldOrigin(db, targetItemId, origin.LatestSourceValue, entry.Payload, target.Content, origin.HumanOverride);
+                        }
+                    }
+                }
             }
             Store.Sql(db, "INSERT INTO ecim_member_results(run_id,user_id,status,work_count,last_success_at) VALUES($run,$user,'succeeded',$count,$at)", ("$run", runId), ("$user", member.UserId), ("$count", work.Count), ("$at", succeededAt)).ExecuteNonQuery();
             Store.Sql(db, "INSERT INTO ecim_member_sync_state(section,user_id,last_success_at) VALUES($section,$user,$at) ON CONFLICT(section,user_id) DO UPDATE SET last_success_at=excluded.last_success_at", ("$section", user.Section), ("$user", member.UserId), ("$at", succeededAt)).ExecuteNonQuery();
@@ -167,10 +188,61 @@ app.MapGet("/api/reports/{reportId}/ecim-candidates", (HttpContext ctx, Store st
     var user = Current(ctx);
     if (user.Role != "Head" || string.IsNullOrWhiteSpace(user.Section)) return Results.StatusCode(403);
     using var db = store.Open();
-    using var rows = Store.Sql(db, "SELECT c.id,c.status,s.work_id,s.period_from,s.period_to,s.payload FROM ecim_candidates c JOIN ecim_sources s ON s.id=c.source_id WHERE c.report_id=$report AND c.section=$section ORDER BY s.rowid", ("$report", reportId), ("$section", user.Section)).ExecuteReader();
+    using var rows = Store.Sql(db, "SELECT c.id,c.status,c.candidate_type,c.reason,c.target_item_id,s.work_id,s.period_from,s.period_to,s.payload,f.last_source_value,f.latest_source_value,f.report_value,f.human_override FROM ecim_candidates c JOIN ecim_sources s ON s.id=c.source_id LEFT JOIN field_origins f ON f.item_id=c.target_item_id AND f.field_name='content' WHERE c.report_id=$report AND c.section=$section ORDER BY s.rowid", ("$report", reportId), ("$section", user.Section)).ExecuteReader();
     var candidates = new List<object>();
-    while (rows.Read()) candidates.Add(new { id = rows.GetString(0), status = rows.GetString(1), workId = rows.GetString(2), periodFrom = rows.GetString(3), periodTo = rows.GetString(4), source = System.Text.Json.JsonSerializer.Deserialize<System.Text.Json.JsonElement>(rows.GetString(5)) });
+    while (rows.Read()) candidates.Add(new { id = rows.GetString(0), status = rows.GetString(1), type = rows.GetString(2), reason = NullableString(rows, 3), targetItemId = NullableString(rows, 4), workId = rows.GetString(5), periodFrom = rows.GetString(6), periodTo = rows.GetString(7), source = System.Text.Json.JsonSerializer.Deserialize<System.Text.Json.JsonElement>(rows.GetString(8)), lastSourceValue = NullableString(rows, 9), latestSourceValue = NullableString(rows, 10), reportValue = NullableString(rows, 11), humanOverride = !rows.IsDBNull(12) && rows.GetInt32(12) == 1 });
     return Results.Ok(candidates);
+});
+app.MapPost("/api/reports/{reportId}/ecim-candidates/{candidateId}/decision", (HttpContext ctx, Store store, string reportId, string candidateId, CandidateDecisionRequest request) =>
+{
+    var user = Current(ctx);
+    if (user.Role != "Head" || string.IsNullOrWhiteSpace(user.Section) || request.Action is not ("create" or "merge" or "defer" or "ignore" or "keep-manual" or "apply-source")) return Results.StatusCode(403);
+    using var db = store.Open();
+    using var tx = db.BeginTransaction();
+    using var rows = Store.Sql(db, "SELECT c.source_id,c.target_item_id,s.payload FROM ecim_candidates c JOIN ecim_sources s ON s.id=c.source_id WHERE c.id=$id AND c.report_id=$report AND c.section=$section", ("$id", candidateId), ("$report", reportId), ("$section", user.Section)).ExecuteReader();
+    if (!rows.Read()) return Results.NotFound();
+    var sourceId = rows.GetString(0);
+    var existingTarget = NullableString(rows, 1);
+    var payload = rows.GetString(2);
+    rows.Close();
+    var targetItemId = request.TargetItemId ?? existingTarget;
+    if (request.Action == "create")
+    {
+        targetItemId = Guid.NewGuid().ToString();
+        var source = System.Text.Json.JsonDocument.Parse(payload).RootElement;
+        var title = $"eCIM {Text(source, "summary") ?? Text(source, "title") ?? "工作"}";
+        Store.Sql(db, "INSERT INTO items(id,report_id,continuity_id,section,owner_section,title,content,details,status,version,created_by) VALUES($id,$report,$continuity,'appendix',$owner,$title,$content,'{}','open',1,$actor)",
+            ("$id", targetItemId), ("$report", reportId), ("$continuity", Guid.NewGuid().ToString()), ("$owner", user.Section), ("$title", title[..Math.Min(title.Length, 200)]), ("$content", payload), ("$actor", user.EmpNo)).ExecuteNonQuery();
+        UpsertFieldOrigin(db, targetItemId, null, payload, payload, false);
+    }
+    else if (request.Action is "merge" or "keep-manual" or "apply-source")
+    {
+        if (string.IsNullOrWhiteSpace(targetItemId)) return Results.BadRequest(new { error = "targetItemId required" });
+        var target = GetItem(db, targetItemId);
+        if (target is null || Store.Sql(db, "SELECT 1 FROM items WHERE id=$id AND report_id=$report", ("$id", targetItemId), ("$report", reportId)).ExecuteScalar() is null || !CanEdit(user, target.OwnerSection)) return Results.BadRequest(new { error = "invalid targetItemId" });
+        var origin = GetFieldOrigin(db, targetItemId);
+        if (request.Action is "merge" or "apply-source")
+        {
+            Store.Sql(db, "UPDATE items SET content=$content,version=version+1 WHERE id=$id", ("$content", payload), ("$id", targetItemId)).ExecuteNonQuery();
+            Store.Sql(db, "INSERT INTO audit(item_id,actor,at,action) VALUES($id,$actor,$at,'source-applied')", ("$id", targetItemId), ("$actor", user.EmpNo), ("$at", DateTimeOffset.UtcNow.ToString("O"))).ExecuteNonQuery();
+            UpsertFieldOrigin(db, targetItemId, origin?.LatestSourceValue, payload, payload, false);
+        }
+        else UpsertFieldOrigin(db, targetItemId, origin?.LatestSourceValue, payload, target.Content, true);
+    }
+    Store.Sql(db, "UPDATE ecim_candidates SET status=$status,target_item_id=$target,decided_by=$actor,decided_at=$at WHERE id=$id", ("$status", request.Action), ("$target", targetItemId), ("$actor", user.EmpNo), ("$at", DateTimeOffset.UtcNow.ToString("O")), ("$id", candidateId)).ExecuteNonQuery();
+    tx.Commit();
+    return Results.Ok(new { decision = request.Action, targetItemId });
+});
+app.MapGet("/api/items/{itemId}/field-origins", (HttpContext ctx, Store store, string itemId) =>
+{
+    using var db = store.Open();
+    var item = GetItem(db, itemId);
+    if (item is null) return Results.NotFound();
+    if (!CanEdit(Current(ctx), item.OwnerSection)) return Results.StatusCode(403);
+    using var rows = Store.Sql(db, "SELECT field_name,last_source_value,latest_source_value,report_value,human_override,edited_at FROM field_origins WHERE item_id=$item ORDER BY field_name", ("$item", itemId)).ExecuteReader();
+    var origins = new List<object>();
+    while (rows.Read()) origins.Add(new { fieldName = rows.GetString(0), lastSourceValue = NullableString(rows, 1), latestSourceValue = rows.GetString(2), reportValue = rows.GetString(3), humanOverride = rows.GetInt32(4) == 1, editedAt = rows.GetString(5) });
+    return Results.Ok(origins);
 });
 app.MapGet("/api/reports/{reportId}", (HttpContext ctx, Store store, string reportId) =>
 {
@@ -459,6 +531,8 @@ app.MapPost("/api/items/{itemId}/commit", (HttpContext ctx, Store store, string 
         title = Text(personnelDetails.RootElement, "handover")!;
     }
     Store.Sql(db, "UPDATE items SET title=$title,content=$content,details=$details,status=$status,version=version+1 WHERE id=$id AND version=$version", ("$title", title), ("$content", content), ("$details", details), ("$status", status), ("$id", itemId), ("$version", item.Version)).ExecuteNonQuery();
+    var origin = GetFieldOrigin(db, itemId);
+    if (origin is not null && origin.ReportValue != content) UpsertFieldOrigin(db, itemId, origin.LatestSourceValue, origin.LatestSourceValue, content, true);
     Store.Sql(db, "INSERT INTO revisions(item_id,actor,at,before_version,after_version,before_title,after_title,before_content,after_content,before_details,after_details) VALUES($id,$actor,$at,$before,$after,$oldTitle,$newTitle,$oldContent,$newContent,$oldDetails,$newDetails)",
         ("$id", itemId), ("$actor", user.EmpNo), ("$at", DateTimeOffset.UtcNow.ToString("O")), ("$before", item.Version), ("$after", item.Version + 1), ("$oldTitle", item.Title), ("$newTitle", title), ("$oldContent", item.Content), ("$newContent", content), ("$oldDetails", item.Details), ("$newDetails", details)).ExecuteNonQuery();
     Store.Sql(db, "INSERT INTO audit(item_id,actor,at,action) VALUES($id,$actor,$at,'commit')",
@@ -503,6 +577,15 @@ static bool ValidSection(SqliteConnection db, string? section) => !string.IsNull
 static bool Valid(string? title, string? content) => !string.IsNullOrWhiteSpace(title) && title.Length <= 200 && content is not null && content.Length <= 20000;
 static bool ValidProjectWork(string? work, string? scheduleProposal) => !string.IsNullOrWhiteSpace(work) && work.Length <= 20000 && (scheduleProposal is null || scheduleProposal.Length <= 2000);
 static bool ValidSchedule(ScheduleRequest request) => request.Kind is "phase" or "milestone" && !string.IsNullOrWhiteSpace(request.Name) && request.Name.Length <= 200 && (request.Kind == "phase" ? ValidDateRange(request.BaselineStart, request.BaselineEnd) && ValidDateRange(request.ForecastStart, request.ForecastEnd) && ValidDateRange(request.ActualStart, request.ActualEnd) : ValidMilestoneDates(request.BaselineStart, request.BaselineEnd) && ValidMilestoneDates(request.ForecastStart, request.ForecastEnd) && ValidMilestoneDates(request.ActualStart, request.ActualEnd));
+static (string Type, string Reason) CandidateClassification(string payload)
+{
+    using var document = System.Text.Json.JsonDocument.Parse(payload);
+    var status = Text(document.RootElement, "status") ?? Text(document.RootElement, "state") ?? "";
+    var description = Text(document.RootElement, "summary") ?? Text(document.RootElement, "description") ?? "";
+    if (status.Contains("complete", StringComparison.OrdinalIgnoreCase) || status.Contains("done", StringComparison.OrdinalIgnoreCase)) return ("suspected-complete", "疑似完成");
+    if (description.Contains("異常", StringComparison.OrdinalIgnoreCase) || description.Contains("error", StringComparison.OrdinalIgnoreCase) || description.Contains("incident", StringComparison.OrdinalIgnoreCase)) return ("anomaly-alert", "異常提示");
+    return ("source-change", "來源進度或狀態變更");
+}
 static bool ValidDateRange(string? start, string? end)
 {
     if (start is null && end is null) return true;
@@ -584,6 +667,14 @@ static Lease? GetLease(SqliteConnection db, string id)
 static object? LeaseView(SqliteDataReader rows, int holderColumn) => rows.IsDBNull(holderColumn) ? null : new { holder = rows.GetString(holderColumn), expiresAt = rows.GetString(holderColumn + 1) };
 static object? LeaseObject(Lease? lease) => lease is null ? null : new { holder = lease.Holder, expiresAt = lease.ExpiresAt };
 static string? NullableString(SqliteDataReader rows, int ordinal) => rows.IsDBNull(ordinal) ? null : rows.GetString(ordinal);
+static FieldOrigin? GetFieldOrigin(SqliteConnection db, string itemId)
+{
+    using var rows = Store.Sql(db, "SELECT last_source_value,latest_source_value,report_value,human_override FROM field_origins WHERE item_id=$item AND field_name='content'", ("$item", itemId)).ExecuteReader();
+    return rows.Read() ? new FieldOrigin(NullableString(rows, 0), rows.GetString(1), rows.GetString(2), rows.GetInt32(3) == 1) : null;
+}
+static void UpsertFieldOrigin(SqliteConnection db, string itemId, string? lastSourceValue, string latestSourceValue, string reportValue, bool humanOverride) =>
+    Store.Sql(db, "INSERT INTO field_origins(item_id,field_name,last_source_value,latest_source_value,report_value,human_override,edited_at) VALUES($item,'content',$last,$latest,$report,$override,$at) ON CONFLICT(item_id,field_name) DO UPDATE SET last_source_value=excluded.last_source_value,latest_source_value=excluded.latest_source_value,report_value=excluded.report_value,human_override=excluded.human_override,edited_at=excluded.edited_at",
+        ("$item", itemId), ("$last", lastSourceValue), ("$latest", latestSourceValue), ("$report", reportValue), ("$override", humanOverride ? 1 : 0), ("$at", DateTimeOffset.UtcNow.ToString("O"))).ExecuteNonQuery();
 static List<ScheduleEntry> ScheduleEntries(SqliteConnection db, string itemId)
 {
     using var rows = Store.Sql(db, "SELECT id,project_id,kind,name,baseline_start,baseline_end,forecast_start,forecast_end,actual_start,actual_end,version FROM project_schedule_entries WHERE project_id=$project ORDER BY rowid", ("$project", itemId)).ExecuteReader();
@@ -662,6 +753,8 @@ record PublicationRequest(string? RequestId);
 record ScheduleEntry(string Id, string ProjectId, string Kind, string Name, string? BaselineStart, string? BaselineEnd, string? ForecastStart, string? ForecastEnd, string? ActualStart, string? ActualEnd, int Version);
 record PublishedItem(string Id, string ContinuityId, string Section, string OwnerSection, string Title, string Content, string Status, int Version, string Details = "{}", List<ScheduleEntry>? Schedule = null);
 record SourceStatus(string Section, string Status, string? PeriodFrom, string? PeriodTo, string? FinishedAt);
+record FieldOrigin(string? LastSourceValue, string LatestSourceValue, string ReportValue, bool HumanOverride);
+record CandidateDecisionRequest(string? Action, string? TargetItemId);
 record ReportSnapshot(string MeetingDate, List<PublishedItem> Items, List<SourceStatus>? SourceStatus = null);
 record DraftRequest(string Title, string Content, System.Text.Json.JsonElement? Details, string? Status);
 record TokenRequest(string Token);

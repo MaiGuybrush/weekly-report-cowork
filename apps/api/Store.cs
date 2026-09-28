@@ -35,7 +35,8 @@ public sealed class Store(IConfiguration config)
             CREATE TABLE IF NOT EXISTS ecim_member_results(id INTEGER PRIMARY KEY AUTOINCREMENT, run_id TEXT NOT NULL REFERENCES ecim_import_runs(id), user_id TEXT NOT NULL, status TEXT NOT NULL, error TEXT, work_count INTEGER NOT NULL DEFAULT 0, last_success_at TEXT);
             CREATE TABLE IF NOT EXISTS ecim_member_sync_state(section TEXT NOT NULL, user_id TEXT NOT NULL, last_success_at TEXT, PRIMARY KEY(section,user_id));
             CREATE TABLE IF NOT EXISTS ecim_sources(id TEXT PRIMARY KEY, report_id TEXT NOT NULL REFERENCES reports(id), section TEXT NOT NULL, work_id TEXT NOT NULL, period_from TEXT NOT NULL, period_to TEXT NOT NULL, payload TEXT NOT NULL, import_run_id TEXT NOT NULL REFERENCES ecim_import_runs(id), UNIQUE(report_id,work_id,period_from,period_to));
-            CREATE TABLE IF NOT EXISTS ecim_candidates(id TEXT PRIMARY KEY, report_id TEXT NOT NULL REFERENCES reports(id), source_id TEXT NOT NULL REFERENCES ecim_sources(id), section TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'new', UNIQUE(source_id));
+            CREATE TABLE IF NOT EXISTS ecim_candidates(id TEXT PRIMARY KEY, report_id TEXT NOT NULL REFERENCES reports(id), source_id TEXT NOT NULL REFERENCES ecim_sources(id), section TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'new', candidate_type TEXT NOT NULL DEFAULT 'new-source', reason TEXT, target_item_id TEXT REFERENCES items(id), decided_by TEXT, decided_at TEXT, UNIQUE(source_id));
+            CREATE TABLE IF NOT EXISTS field_origins(item_id TEXT NOT NULL REFERENCES items(id), field_name TEXT NOT NULL, last_source_value TEXT, latest_source_value TEXT NOT NULL, report_value TEXT NOT NULL, human_override INTEGER NOT NULL DEFAULT 0, edited_at TEXT NOT NULL, PRIMARY KEY(item_id,field_name));
             """).ExecuteNonQuery();
         EnsureColumn(db, "items", "continuity_id", "TEXT");
         EnsureColumn(db, "items", "status", "TEXT NOT NULL DEFAULT 'open'");
@@ -48,6 +49,11 @@ public sealed class Store(IConfiguration config)
         EnsureColumn(db, "access_audit", "before_reader_access", "INTEGER");
         EnsureColumn(db, "access_audit", "after_reader_access", "INTEGER NOT NULL DEFAULT 0");
         EnsureColumn(db, "project_work", "version", "INTEGER NOT NULL DEFAULT 0");
+        EnsureColumn(db, "ecim_candidates", "candidate_type", "TEXT NOT NULL DEFAULT 'new-source'");
+        EnsureColumn(db, "ecim_candidates", "reason", "TEXT");
+        EnsureColumn(db, "ecim_candidates", "target_item_id", "TEXT");
+        EnsureColumn(db, "ecim_candidates", "decided_by", "TEXT");
+        EnsureColumn(db, "ecim_candidates", "decided_at", "TEXT");
         Sql(db, "UPDATE items SET continuity_id=id WHERE continuity_id IS NULL OR continuity_id='' ").ExecuteNonQuery();
         Sql(db, "UPDATE users SET reader_access=1 WHERE role='Reader'").ExecuteNonQuery();
         foreach (var user in config.GetSection("Access:Users").GetChildren())

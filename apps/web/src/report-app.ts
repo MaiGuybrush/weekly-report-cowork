@@ -14,7 +14,7 @@ const detailsOf = (value: ItemDetails | string | undefined): ItemDetails => type
 type ProjectWork = { section: string; work: string; scheduleProposal: string | null; version: number; updatedBy: string; updatedAt: string };
 type ScheduleEntry = { id: string; kind: 'phase' | 'milestone'; name: string; baselineStart: string | null; baselineEnd: string | null; forecastStart: string | null; forecastEnd: string | null; actualStart: string | null; actualEnd: string | null; version: number };
 type EcimMember = { userId: string; periodFrom: string | null; periodTo: string | null; status: string; error: string | null; lastSuccessAt: string | null };
-type EcimCandidate = { id: string; status: string; workId: string; periodFrom: string; periodTo: string };
+type EcimCandidate = { id: string; status: string; type: string; reason: string | null; targetItemId: string | null; workId: string; periodFrom: string; periodTo: string; source: unknown; lastSourceValue: string | null; latestSourceValue: string | null; reportValue: string | null; humanOverride: boolean };
 type SourceStatus = { section: string; status: string; periodFrom: string | null; periodTo: string | null; finishedAt: string | null };
 type Report = { id: string; meetingDate: string; sections: string[]; items: Item[] };
 type Conflict = { latest: Item; draft: { title: string; content: string; details: ItemDetails } | null; lease: Lease; error: string };
@@ -63,7 +63,9 @@ export class Home implements OnInit {
   <nav><h2>章節與項目</h2><p *ngIf="publicationUrl"><a [href]="publicationUrl">查看剛發布的固定版本</a></p>
   <section *ngIf="me?.role === 'Head'" class="source-sync"><h3>eCIM 來源同步</h3><button (click)="syncEcim()">同步本課工程師工作</button>
     <p *ngIf="ecimMessage">{{ecimMessage}}</p><ul><li *ngFor="let member of ecimMembers">{{member.userId}} · {{member.periodFrom || '未設定'}}–{{member.periodTo || '未設定'}} · {{member.status === 'succeeded' ? '成功' : member.status === 'failed' ? '失敗' : '尚未同步'}} · 上次成功：{{member.lastSuccessAt ? (member.lastSuccessAt | date:'short') : '尚未成功'}}<span *ngIf="member.error"> · {{member.error}}</span></li></ul>
-    <p *ngIf="ecimCandidates.length">新來源候選</p><ul><li *ngFor="let candidate of ecimCandidates">{{candidate.workId}} · {{candidate.periodFrom}}–{{candidate.periodTo}}</li></ul>
+    <p *ngIf="ecimCandidates.length">來源候選</p><ul><li *ngFor="let candidate of ecimCandidates"><strong>{{candidate.workId}}</strong> · {{candidate.type === 'new-source' ? '新增來源' : candidate.type === 'suspected-complete' ? '疑似完成' : candidate.type === 'anomaly-alert' ? '異常提示' : candidate.reason || '來源變更'}} · {{candidate.periodFrom}}–{{candidate.periodTo}} · {{candidate.status}}
+      <span *ngIf="candidate.status === 'new'"><button (click)="decideCandidate(candidate, 'create')">建立</button><button (click)="decideCandidate(candidate, 'defer')">暫緩</button><button (click)="decideCandidate(candidate, 'ignore')">忽略</button></span>
+      <span *ngIf="candidate.status === 'new'"><button (click)="decideCandidate(candidate, 'merge')">合併</button></span><span *ngIf="candidate.targetItemId && candidate.status === 'new'"><button (click)="decideCandidate(candidate, 'keep-manual')">維持人工版</button><button (click)="decideCandidate(candidate, 'apply-source')">套用來源</button></span><details><summary>比較來源與週報{{candidate.humanOverride ? '（人工覆寫）' : ''}}</summary><p>上次來源：{{candidate.lastSourceValue || '—'}}</p><p>最新來源：{{candidate.latestSourceValue || (candidate.source | json)}}</p><p>目前週報：{{candidate.reportValue || '—'}}</p></details></li></ul>
   </section><section *ngFor="let section of report.sections">
     <h3>{{label(section)}}</h3><button *ngIf="canAdd(section)" (click)="add(section)">新增項目</button>
     <button class="item" *ngFor="let item of inSection(section)" (click)="select(item)">{{item.title}} <span *ngIf="item.lease">🔒</span></button>
@@ -101,9 +103,11 @@ export class Home implements OnInit {
           <label>時程變更建議（選填） <input [(ngModel)]="myScheduleProposal"></label><button (click)="saveProjectWork()">送出給週報維護人</button></div>
       </section>
       <section *ngIf="item.section === 'projects'" class="project-schedule"><h3>專案階段與重要里程碑</h3>
+        <div class="gantt" *ngIf="scheduleEntries.length"><p><strong>甘特圖</strong> · 報告日 {{report?.meetingDate}}</p><div class="gantt-row" *ngFor="let entry of activeScheduleEntries()" (click)="editSchedule(entry)"><span>{{entry.name}}</span><div class="gantt-track"><i class="baseline" [style.left.%]="schedulePosition(entry.baselineStart)" [style.width.%]="scheduleWidth(entry.baselineStart, entry.baselineEnd)"></i><i class="forecast" [style.left.%]="schedulePosition(entry.forecastStart)" [style.width.%]="scheduleWidth(entry.forecastStart, entry.forecastEnd)"></i><i class="actual" *ngIf="entry.actualStart || entry.actualEnd" [style.left.%]="schedulePosition(entry.actualStart || entry.actualEnd)" [style.width.%]="scheduleWidth(entry.actualStart || entry.actualEnd, entry.actualEnd || entry.actualStart)"></i></div><small>基準／預估／實際</small></div><details *ngIf="completedScheduleEntries().length"><summary>已完成階段（{{completedScheduleEntries().length}}）</summary><div class="gantt-row" *ngFor="let entry of completedScheduleEntries()"><span>{{entry.name}}</span><div class="gantt-track"><i class="baseline" [style.left.%]="schedulePosition(entry.baselineStart)" [style.width.%]="scheduleWidth(entry.baselineStart, entry.baselineEnd)"></i><i class="forecast" [style.left.%]="schedulePosition(entry.forecastStart)" [style.width.%]="scheduleWidth(entry.forecastStart, entry.forecastEnd)"></i><i class="actual" [style.left.%]="schedulePosition(entry.actualStart)" [style.width.%]="scheduleWidth(entry.actualStart, entry.actualEnd)"></i></div></div></details></div>
         <ul><li *ngFor="let entry of scheduleEntries"><strong>{{entry.kind === 'phase' ? '階段' : '里程碑'}}：{{entry.name}}</strong>
           · 基準 {{entry.baselineStart || '—'}}–{{entry.baselineEnd || '—'}} · 預估 {{entry.forecastStart || '—'}}–{{entry.forecastEnd || '—'}} · 實際 {{entry.actualStart || '—'}}–{{entry.actualEnd || '—'}}
-          <button *ngIf="canMaintain(item)" (click)="editSchedule(entry)">編輯</button></li></ul>
+          <button *ngIf="canMaintain(item)" (click)="editSchedule(entry)">編輯</button><button (click)="loadBaselineHistory(entry)">基準歷史</button></li></ul>
+        <ul *ngIf="baselineHistory.length" class="baseline-history"><li *ngFor="let change of baselineHistory">{{change.at | date:'short'}} · {{change.beforeBaselineStart || '—'}}–{{change.beforeBaselineEnd || '—'}} → {{change.afterBaselineStart || '—'}}–{{change.afterBaselineEnd || '—'}} · {{change.reason}}</li></ul>
         <div *ngIf="canMaintain(item)"><h4>{{editingSchedule ? '編輯時程' : '新增時程'}}</h4>
           <label>類型 <select [(ngModel)]="scheduleDraft.kind"><option value="phase">階段</option><option value="milestone">重要里程碑</option></select></label>
           <label>名稱 <input [(ngModel)]="scheduleDraft.name"></label>
@@ -166,6 +170,7 @@ export class ReportEditor implements OnInit, OnDestroy {
   scheduleEntries: ScheduleEntry[] = [];
   editingSchedule: ScheduleEntry | null = null;
   scheduleDraft = this.emptyScheduleDraft();
+  baselineHistory: any[] = [];
   ecimMembers: EcimMember[] = [];
   ecimCandidates: EcimCandidate[] = [];
   ecimMessage = '';
@@ -217,6 +222,14 @@ export class ReportEditor implements OnInit, OnDestroy {
       this.ecimMessage = run.status === 'succeeded' ? '本課來源同步完成。' : '同步完成，但部分成員失敗。';
       await this.loadEcimStatus();
     } catch { this.ecimMessage = '來源同步失敗。'; this.changes.detectChanges(); }
+  }
+  async decideCandidate(candidate: EcimCandidate, action: string) {
+    const targetItemId = candidate.targetItemId ?? (action === 'merge' ? prompt('要合併的項目 ID')?.trim() : undefined);
+    if (action === 'merge' && !targetItemId) return;
+    try {
+      await firstValueFrom(this.http.post(`/api/reports/${this.reportId}/ecim-candidates/${candidate.id}/decision`, { action, targetItemId }));
+      this.ecimMessage = '已記錄候選決策。'; await this.loadEcimStatus(); await this.refresh();
+    } catch { this.ecimMessage = '無法套用候選決策。'; this.changes.detectChanges(); }
   }
   async add(section: string) {
     const title = prompt('項目標題');
@@ -277,9 +290,20 @@ export class ReportEditor implements OnInit, OnDestroy {
     if (!this.selected) return;
     try { this.scheduleEntries = await firstValueFrom(this.http.get<ScheduleEntry[]>(`/api/items/${this.selected.id}/schedule`)); } catch { this.scheduleEntries = []; }
   }
+  private ganttDates() { return this.scheduleEntries.flatMap(entry => [entry.baselineStart, entry.baselineEnd, entry.forecastStart, entry.forecastEnd, entry.actualStart, entry.actualEnd]).filter((date): date is string => !!date).map(date => new Date(`${date}T00:00:00`).getTime()); }
+  schedulePosition(date: string | null) { const dates = this.ganttDates(); if (!date || !dates.length) return 0; const min = Math.min(...dates), max = Math.max(...dates); return max === min ? 0 : Math.max(0, Math.min(100, (new Date(`${date}T00:00:00`).getTime() - min) * 100 / (max - min))); }
+  scheduleWidth(start: string | null, end: string | null) { if (!start || !end) return 2; return Math.max(2, this.schedulePosition(end) - this.schedulePosition(start)); }
+  completedScheduleEntries() { return this.scheduleEntries.filter(entry => !!entry.actualEnd && entry.actualEnd <= (this.report?.meetingDate ?? '')); }
+  activeScheduleEntries() { return this.scheduleEntries.filter(entry => !this.completedScheduleEntries().includes(entry)); }
   editSchedule(entry: ScheduleEntry) {
     this.editingSchedule = entry;
     this.scheduleDraft = { kind: entry.kind, name: entry.name, baselineStart: entry.baselineStart ?? '', baselineEnd: entry.baselineEnd ?? '', forecastStart: entry.forecastStart ?? '', forecastEnd: entry.forecastEnd ?? '', actualStart: entry.actualStart ?? '', actualEnd: entry.actualEnd ?? '', baselineChangeReason: '' };
+  }
+  async loadBaselineHistory(entry: ScheduleEntry) {
+    if (!this.selected) return;
+    try { this.baselineHistory = await firstValueFrom(this.http.get<any[]>(`/api/items/${this.selected.id}/schedule/${entry.id}/baseline-history`)); }
+    catch { this.message = '無法載入基準歷史。'; }
+    this.changes.detectChanges();
   }
   resetScheduleDraft() { this.editingSchedule = null; this.scheduleDraft = this.emptyScheduleDraft(); }
   async saveSchedule() {
@@ -379,6 +403,7 @@ export class ReportEditor implements OnInit, OnDestroy {
       <p *ngIf="detailsOf(item.details).previousCommitment">上週承諾：{{detailsOf(item.details).previousCommitment}}</p>
       <ul *ngIf="detailsOf(item.details).sourceLinks?.length"><li *ngFor="let source of detailsOf(item.details).sourceLinks"><a [href]="source.url" rel="noopener noreferrer">{{source.label}}</a></li></ul>
       <p *ngIf="detailsOf(item.details).pendingDecision as decision">待決策：{{decision.description}} · 結果：{{decision.result || '待定'}} · 新期限：{{decision.newDueDate || '待定'}}</p>
+      <div class="gantt" *ngIf="item.schedule?.length"><p><strong>專案甘特圖</strong>（基準／預估／實際）</p><div class="gantt-row" *ngFor="let entry of item.schedule"><span>{{entry.name}}</span><div class="gantt-track"><i class="baseline" [style.left.%]="publicationPosition(item.schedule || [], entry.baselineStart)" [style.width.%]="publicationWidth(item.schedule || [], entry.baselineStart, entry.baselineEnd)"></i><i class="forecast" [style.left.%]="publicationPosition(item.schedule || [], entry.forecastStart)" [style.width.%]="publicationWidth(item.schedule || [], entry.forecastStart, entry.forecastEnd)"></i><i class="actual" *ngIf="entry.actualStart || entry.actualEnd" [style.left.%]="publicationPosition(item.schedule || [], entry.actualStart || entry.actualEnd)" [style.width.%]="publicationWidth(item.schedule || [], entry.actualStart || entry.actualEnd, entry.actualEnd || entry.actualStart)"></i></div><small>偏差：{{variance(entry)}}</small></div></div>
       <ul *ngIf="item.schedule?.length"><li *ngFor="let entry of item.schedule"><strong>{{entry.kind === 'phase' ? '階段' : '重要里程碑'}}：{{entry.name}}</strong>
         · 基準 {{entry.baselineStart || '—'}}–{{entry.baselineEnd || '—'}} · 預估 {{entry.forecastStart || '—'}}–{{entry.forecastEnd || '—'}} · 實際 {{entry.actualStart || '—'}}–{{entry.actualEnd || '—'}}</li></ul>
     </article>
@@ -392,6 +417,10 @@ export class PublicationPage implements OnInit {
   detailsOf = detailsOf;
   private publicationId = this.route.snapshot.paramMap.get('id')!;
   label(section: string) { return labels[section] ?? section; }
+  private publicationDates(entries: ScheduleEntry[]) { return entries.flatMap(entry => [entry.baselineStart, entry.baselineEnd, entry.forecastStart, entry.forecastEnd, entry.actualStart, entry.actualEnd]).filter((date): date is string => !!date).map(date => new Date(`${date}T00:00:00`).getTime()); }
+  publicationPosition(entries: ScheduleEntry[], date: string | null) { const dates = this.publicationDates(entries); if (!date || !dates.length) return 0; const min = Math.min(...dates), max = Math.max(...dates); return max === min ? 0 : Math.max(0, Math.min(100, (new Date(`${date}T00:00:00`).getTime() - min) * 100 / (max - min))); }
+  publicationWidth(entries: ScheduleEntry[], start: string | null, end: string | null) { return !start || !end ? 2 : Math.max(2, this.publicationPosition(entries, end) - this.publicationPosition(entries, start)); }
+  variance(entry: ScheduleEntry) { if (!entry.baselineEnd || !entry.forecastEnd) return '—'; return `${Math.round((new Date(`${entry.forecastEnd}T00:00:00`).getTime() - new Date(`${entry.baselineEnd}T00:00:00`).getTime()) / 86400000)} 天`; }
   sourceLabel(status: string) { return ({ succeeded: '同步成功', partial: '部分同步失敗', failed: '同步失敗', 'not-connected': '尚未接入來源' } as Record<string, string>)[status] ?? status; }
   inSection(section: string) { return this.publication?.items.filter(item => item.section === section) ?? []; }
   async ngOnInit() { this.publication = await firstValueFrom(this.http.get<typeof this.publication>(`/api/publications/${this.publicationId}`)); this.changes.detectChanges(); }

@@ -16,11 +16,12 @@ const jwks = createServer((_req, res) => { res.setHeader('content-type', 'applic
 await new Promise(resolve => jwks.listen(0, '127.0.0.1', resolve));
 const jwksPort = jwks.address().port;
 const failedEcimUsers = new Set(['ecim-fail']);
+let ecimSummary = 'Imported work';
 const ecim = createServer((request, response) => {
   const userId = new URL(request.url, 'http://localhost').searchParams.get('userId');
   if (failedEcimUsers.has(userId)) { response.statusCode = 502; response.end('upstream failure'); return; }
   response.setHeader('content-type', 'application/json');
-  response.end(JSON.stringify([{ workId: `${userId}-work-1`, summary: 'Imported work' }]));
+  response.end(JSON.stringify([{ workId: `${userId}-work-1`, summary: ecimSummary }]));
 });
 await new Promise(resolve => ecim.listen(0, '127.0.0.1', resolve));
 const ecimPort = ecim.address().port;
@@ -92,7 +93,16 @@ try {
   assert.equal(firstSyncStatus.body.members.find(member => member.userId === 'ecim-fail').status, 'failed');
   assert.equal(firstSyncStatus.body.members.find(member => member.userId === 'ecim-fail').periodFrom, '2026-09-25');
   assert.equal(firstSyncStatus.body.members.find(member => member.userId === 'ecim-ok').lastSuccessAt, firstSync.body.memberResults.find(result => result.userId === 'ecim-ok').lastSuccessAt);
-  assert.equal((await call(`/api/reports/${reportId}/ecim-candidates`, 'H1')).body.length, 1);
+  const initialCandidates = await call(`/api/reports/${reportId}/ecim-candidates`, 'H1');
+  assert.equal(initialCandidates.body.length, 1);
+  assert.equal(initialCandidates.body[0].type, 'new-source');
+  const acceptedCandidate = await call(`/api/reports/${reportId}/ecim-candidates/${initialCandidates.body[0].id}/decision`, 'H1', 'POST', { action: 'create' });
+  assert.equal(acceptedCandidate.status, 200);
+  assert.equal(acceptedCandidate.body.decision, 'create');
+  assert.ok(acceptedCandidate.body.targetItemId);
+  const acceptedSource = await call(`/api/items/${acceptedCandidate.body.targetItemId}/field-origins`, 'H1');
+  assert.equal(acceptedSource.status, 200);
+  assert.equal(acceptedSource.body[0].humanOverride, false);
   failedEcimUsers.delete('ecim-fail');
   const retrySync = await call(`/api/reports/${reportId}/ecim-sync`, 'H1', 'POST');
   assert.equal(retrySync.body.memberResults.every(result => result.status === 'succeeded'), true);
@@ -100,7 +110,21 @@ try {
   const repeatedSync = await call(`/api/reports/${reportId}/ecim-sync`, 'H1', 'POST');
   assert.equal(repeatedSync.status, 200);
   assert.equal((await call(`/api/reports/${reportId}/ecim-candidates`, 'H1')).body.length, 2);
-  assert.equal((await call(`/api/reports/${reportId}`, 'H1')).body.items.length, 0);
+  const importedLease = await call(`/api/items/${acceptedCandidate.body.targetItemId}/lease`, 'H1', 'POST', {});
+  assert.equal((await call(`/api/items/${acceptedCandidate.body.targetItemId}/private-draft`, 'H1', 'PUT', { title: 'eCIM manual review', content: 'Manual report value' })).status, 204);
+  assert.equal((await call(`/api/items/${acceptedCandidate.body.targetItemId}/commit`, 'H1', 'POST', { token: importedLease.body.token, baseVersion: importedLease.body.baseVersion })).status, 200);
+  ecimSummary = 'Source progress changed';
+  assert.equal((await call(`/api/reports/${reportId}/ecim-sync`, 'H1', 'POST')).status, 200);
+  const changedCandidate = (await call(`/api/reports/${reportId}/ecim-candidates`, 'H1')).body.find(candidate => candidate.id === initialCandidates.body[0].id);
+  assert.equal(changedCandidate.type, 'source-change');
+  assert.equal(changedCandidate.targetItemId, acceptedCandidate.body.targetItemId);
+  assert.equal((await call(`/api/items/${acceptedCandidate.body.targetItemId}/field-origins`, 'H1')).body[0].latestSourceValue.includes('Source progress changed'), true);
+  assert.equal((await call(`/api/reports/${reportId}/ecim-candidates/${changedCandidate.id}/decision`, 'H1', 'POST', { action: 'keep-manual' })).status, 200);
+  assert.equal((await call(`/api/items/${acceptedCandidate.body.targetItemId}/field-origins`, 'H1')).body[0].humanOverride, true);
+  assert.equal((await call(`/api/reports/${reportId}/ecim-candidates/${changedCandidate.id}/decision`, 'H1', 'POST', { action: 'apply-source' })).status, 200);
+  assert.equal((await call(`/api/items/${acceptedCandidate.body.targetItemId}`, 'H1')).body.content.includes('Source progress changed'), true);
+  assert.equal((await call(`/api/items/${acceptedCandidate.body.targetItemId}/field-origins`, 'H1')).body[0].humanOverride, false);
+  assert.equal((await call(`/api/reports/${reportId}`, 'H1')).body.items.some(item => item.id === acceptedCandidate.body.targetItemId), true);
   assert.equal((await call(`/api/reports/${reportId}/items`, 'H1', 'POST', { section: 'operations', ownerSection: 's2', title: 'bad' })).status, 403);
   const created = await call(`/api/reports/${reportId}/items`, 'H1', 'POST', { section: 'projects', title: 'Project A' });
   assert.equal(created.status, 201);
