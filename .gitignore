@@ -1,0 +1,9 @@
+apps/api/bin/
+apps/api/obj/
+apps/api/.keys/
+apps/api/*.db*
+apps/web/node_modules/
+apps/web/dist/
+apps/web/.angular/
+.pnpm-store/
+.temp-appdata/
