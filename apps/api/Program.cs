@@ -85,8 +85,14 @@ app.MapPost("/api/reports", (HttpContext ctx, Store store, CreateReport request)
         var snapshot = PreviousPublication(db, request.MeetingDate);
         if (snapshot is not null)
             foreach (var item in snapshot.Items.Where(item => item.Status != "closed"))
+            {
+                var carriedId = Guid.NewGuid().ToString();
                 Store.Sql(db, "INSERT INTO items(id,report_id,continuity_id,section,owner_section,title,content,status,version,created_by) VALUES($id,$report,$continuity,$section,$owner,$title,$content,$status,1,$actor)",
-                    ("$id", Guid.NewGuid().ToString()), ("$report", newReportId), ("$continuity", item.ContinuityId), ("$section", item.Section), ("$owner", item.OwnerSection), ("$title", item.Title), ("$content", item.Content), ("$status", item.Status), ("$actor", Current(ctx).EmpNo)).ExecuteNonQuery();
+                    ("$id", carriedId), ("$report", newReportId), ("$continuity", item.ContinuityId), ("$section", item.Section), ("$owner", item.OwnerSection), ("$title", item.Title), ("$content", item.Content), ("$status", item.Status), ("$actor", Current(ctx).EmpNo)).ExecuteNonQuery();
+                foreach (var entry in item.Schedule ?? [])
+                    Store.Sql(db, "INSERT INTO project_schedule_entries(id,project_id,kind,name,baseline_start,baseline_end,forecast_start,forecast_end,actual_start,actual_end,version,created_by,updated_at) VALUES($id,$project,$kind,$name,$baselineStart,$baselineEnd,$forecastStart,$forecastEnd,$actualStart,$actualEnd,$version,$actor,$at)",
+                        ("$id", Guid.NewGuid().ToString()), ("$project", carriedId), ("$kind", entry.Kind), ("$name", entry.Name), ("$baselineStart", entry.BaselineStart), ("$baselineEnd", entry.BaselineEnd), ("$forecastStart", entry.ForecastStart), ("$forecastEnd", entry.ForecastEnd), ("$actualStart", entry.ActualStart), ("$actualEnd", entry.ActualEnd), ("$version", entry.Version), ("$actor", Current(ctx).EmpNo), ("$at", DateTimeOffset.UtcNow.ToString("O"))).ExecuteNonQuery();
+            }
     }
     tx.Commit();
     return Results.Ok(new { id, request.MeetingDate, sections = ReportSections.All });
@@ -224,6 +230,64 @@ app.MapPut("/api/items/{itemId}/project-work", (HttpContext ctx, Store store, st
     tx.Commit();
     return Results.Ok(new { version = beforeVersion + 1 });
 });
+app.MapGet("/api/items/{itemId}/schedule", (HttpContext ctx, Store store, string itemId) =>
+{
+    using var db = store.Open();
+    var item = GetItem(db, itemId);
+    if (item is null) return Results.NotFound();
+    var user = Current(ctx);
+    if (item.Section != "projects" || !CanMaintainProject(user, item) && !IsProjectParticipant(db, itemId, user.Section)) return Results.StatusCode(403);
+    return Results.Ok(ScheduleEntries(db, itemId));
+});
+app.MapPost("/api/items/{itemId}/schedule", (HttpContext ctx, Store store, string itemId, ScheduleRequest request) =>
+{
+    using var db = store.Open();
+    var item = GetItem(db, itemId);
+    if (item is null) return Results.NotFound();
+    if (item.Section != "projects" || !CanMaintainProject(Current(ctx), item)) return Results.StatusCode(403);
+    if (!ValidSchedule(request)) return Results.BadRequest();
+    var id = Guid.NewGuid().ToString();
+    var at = DateTimeOffset.UtcNow.ToString("O");
+    Store.Sql(db, "INSERT INTO project_schedule_entries(id,project_id,kind,name,baseline_start,baseline_end,forecast_start,forecast_end,actual_start,actual_end,created_by,updated_at) VALUES($id,$project,$kind,$name,$baselineStart,$baselineEnd,$forecastStart,$forecastEnd,$actualStart,$actualEnd,$actor,$at)",
+        ("$id", id), ("$project", itemId), ("$kind", request.Kind!), ("$name", request.Name!.Trim()), ("$baselineStart", request.BaselineStart), ("$baselineEnd", request.BaselineEnd), ("$forecastStart", request.ForecastStart), ("$forecastEnd", request.ForecastEnd), ("$actualStart", request.ActualStart), ("$actualEnd", request.ActualEnd), ("$actor", Current(ctx).EmpNo), ("$at", at)).ExecuteNonQuery();
+    return Results.Created($"/api/items/{itemId}/schedule/{id}", new { id, version = 1 });
+});
+app.MapPut("/api/items/{itemId}/schedule/{entryId}", (HttpContext ctx, Store store, string itemId, string entryId, ScheduleRequest request) =>
+{
+    using var db = store.Open();
+    using var tx = db.BeginTransaction();
+    var item = GetItem(db, itemId);
+    if (item is null) return Results.NotFound();
+    if (item.Section != "projects" || !CanMaintainProject(Current(ctx), item)) return Results.StatusCode(403);
+    if (!ValidSchedule(request)) return Results.BadRequest();
+    var current = ScheduleEntry(db, entryId);
+    if (current is null || current.ProjectId != itemId) return Results.NotFound();
+    if (request.BaseVersion != current.Version) return Results.Conflict(new { error = "stale schedule version", latest = current });
+    var baselineChanged = current.BaselineStart != request.BaselineStart || current.BaselineEnd != request.BaselineEnd;
+    if (baselineChanged && string.IsNullOrWhiteSpace(request.BaselineChangeReason)) return Results.BadRequest(new { error = "baselineChangeReason required" });
+    var at = DateTimeOffset.UtcNow.ToString("O");
+    Store.Sql(db, "UPDATE project_schedule_entries SET kind=$kind,name=$name,baseline_start=$baselineStart,baseline_end=$baselineEnd,forecast_start=$forecastStart,forecast_end=$forecastEnd,actual_start=$actualStart,actual_end=$actualEnd,version=version+1,updated_at=$at WHERE id=$id AND version=$version",
+        ("$kind", request.Kind!), ("$name", request.Name!.Trim()), ("$baselineStart", request.BaselineStart), ("$baselineEnd", request.BaselineEnd), ("$forecastStart", request.ForecastStart), ("$forecastEnd", request.ForecastEnd), ("$actualStart", request.ActualStart), ("$actualEnd", request.ActualEnd), ("$at", at), ("$id", entryId), ("$version", current.Version)).ExecuteNonQuery();
+    if (baselineChanged)
+        Store.Sql(db, "INSERT INTO project_baseline_history(entry_id,actor,at,before_baseline_start,before_baseline_end,after_baseline_start,after_baseline_end,reason) VALUES($entry,$actor,$at,$beforeStart,$beforeEnd,$afterStart,$afterEnd,$reason)",
+            ("$entry", entryId), ("$actor", Current(ctx).EmpNo), ("$at", at), ("$beforeStart", current.BaselineStart), ("$beforeEnd", current.BaselineEnd), ("$afterStart", request.BaselineStart), ("$afterEnd", request.BaselineEnd), ("$reason", request.BaselineChangeReason!.Trim())).ExecuteNonQuery();
+    tx.Commit();
+    return Results.Ok(new { version = current.Version + 1 });
+});
+app.MapGet("/api/items/{itemId}/schedule/{entryId}/baseline-history", (HttpContext ctx, Store store, string itemId, string entryId) =>
+{
+    using var db = store.Open();
+    var item = GetItem(db, itemId);
+    if (item is null) return Results.NotFound();
+    var user = Current(ctx);
+    if (item.Section != "projects" || !CanMaintainProject(user, item) && !IsProjectParticipant(db, itemId, user.Section)) return Results.StatusCode(403);
+    var entry = ScheduleEntry(db, entryId);
+    if (entry is null || entry.ProjectId != itemId) return Results.NotFound();
+    using var rows = Store.Sql(db, "SELECT actor,at,before_baseline_start,before_baseline_end,after_baseline_start,after_baseline_end,reason FROM project_baseline_history WHERE entry_id=$entry ORDER BY id", ("$entry", entryId)).ExecuteReader();
+    var history = new List<object>();
+    while (rows.Read()) history.Add(new { actor = rows.GetString(0), at = rows.GetString(1), beforeBaselineStart = NullableString(rows, 2), beforeBaselineEnd = NullableString(rows, 3), afterBaselineStart = NullableString(rows, 4), afterBaselineEnd = NullableString(rows, 5), reason = rows.GetString(6) });
+    return Results.Ok(history);
+});
 app.MapGet("/api/items/{itemId}", (HttpContext ctx, Store store, string itemId) =>
 {
     using var db = store.Open();
@@ -353,6 +417,20 @@ static bool IsProjectParticipant(SqliteConnection db, string itemId, string? sec
 static bool ValidSection(SqliteConnection db, string? section) => !string.IsNullOrWhiteSpace(section) && Store.Sql(db, "SELECT 1 FROM users WHERE role='Head' AND section=$section", ("$section", section.Trim())).ExecuteScalar() is not null;
 static bool Valid(string? title, string? content) => !string.IsNullOrWhiteSpace(title) && title.Length <= 200 && content is not null && content.Length <= 20000;
 static bool ValidProjectWork(string? work, string? scheduleProposal) => !string.IsNullOrWhiteSpace(work) && work.Length <= 20000 && (scheduleProposal is null || scheduleProposal.Length <= 2000);
+static bool ValidSchedule(ScheduleRequest request) => request.Kind is "phase" or "milestone" && !string.IsNullOrWhiteSpace(request.Name) && request.Name.Length <= 200 && (request.Kind == "phase" ? ValidDateRange(request.BaselineStart, request.BaselineEnd) && ValidDateRange(request.ForecastStart, request.ForecastEnd) && ValidDateRange(request.ActualStart, request.ActualEnd) : ValidMilestoneDates(request.BaselineStart, request.BaselineEnd) && ValidMilestoneDates(request.ForecastStart, request.ForecastEnd) && ValidMilestoneDates(request.ActualStart, request.ActualEnd));
+static bool ValidDateRange(string? start, string? end)
+{
+    if (start is null && end is null) return true;
+    if (start is null || end is null || !DateOnly.TryParseExact(start, "yyyy-MM-dd", out var startDate) || !DateOnly.TryParseExact(end, "yyyy-MM-dd", out var endDate)) return false;
+    return startDate <= endDate;
+}
+static bool ValidMilestoneDates(string? start, string? end)
+{
+    if (start is null && end is null) return true;
+    if (start is not null && !DateOnly.TryParseExact(start, "yyyy-MM-dd", out _)) return false;
+    if (end is not null && !DateOnly.TryParseExact(end, "yyyy-MM-dd", out _)) return false;
+    return start is null || end is null || string.CompareOrdinal(start, end) <= 0;
+}
 static bool ValidStatus(string status, string content) => status is "open" or "closed" && (status != "closed" || !string.IsNullOrWhiteSpace(content));
 static string Hash(string token) => Convert.ToHexString(SHA256.HashData(Encoding.ASCII.GetBytes(token)));
 static bool Matches(string token, string hash) => !string.IsNullOrWhiteSpace(token) && CryptographicOperations.FixedTimeEquals(Convert.FromHexString(Hash(token)), Convert.FromHexString(hash));
@@ -371,12 +449,28 @@ static Lease? GetLease(SqliteConnection db, string id)
 }
 static object? LeaseView(SqliteDataReader rows, int holderColumn) => rows.IsDBNull(holderColumn) ? null : new { holder = rows.GetString(holderColumn), expiresAt = rows.GetString(holderColumn + 1) };
 static object? LeaseObject(Lease? lease) => lease is null ? null : new { holder = lease.Holder, expiresAt = lease.ExpiresAt };
+static string? NullableString(SqliteDataReader rows, int ordinal) => rows.IsDBNull(ordinal) ? null : rows.GetString(ordinal);
+static List<ScheduleEntry> ScheduleEntries(SqliteConnection db, string itemId)
+{
+    using var rows = Store.Sql(db, "SELECT id,project_id,kind,name,baseline_start,baseline_end,forecast_start,forecast_end,actual_start,actual_end,version FROM project_schedule_entries WHERE project_id=$project ORDER BY rowid", ("$project", itemId)).ExecuteReader();
+    var entries = new List<ScheduleEntry>();
+    while (rows.Read()) entries.Add(new ScheduleEntry(rows.GetString(0), rows.GetString(1), rows.GetString(2), rows.GetString(3), NullableString(rows, 4), NullableString(rows, 5), NullableString(rows, 6), NullableString(rows, 7), NullableString(rows, 8), NullableString(rows, 9), rows.GetInt32(10)));
+    return entries;
+}
+static ScheduleEntry? ScheduleEntry(SqliteConnection db, string entryId)
+{
+    using var rows = Store.Sql(db, "SELECT id,project_id,kind,name,baseline_start,baseline_end,forecast_start,forecast_end,actual_start,actual_end,version FROM project_schedule_entries WHERE id=$id", ("$id", entryId)).ExecuteReader();
+    return rows.Read() ? new ScheduleEntry(rows.GetString(0), rows.GetString(1), rows.GetString(2), rows.GetString(3), NullableString(rows, 4), NullableString(rows, 5), NullableString(rows, 6), NullableString(rows, 7), NullableString(rows, 8), NullableString(rows, 9), rows.GetInt32(10)) : null;
+}
 static ReportSnapshot Snapshot(SqliteConnection db, string reportId)
 {
     var meetingDate = (string)Store.Sql(db, "SELECT meeting_date FROM reports WHERE id=$id", ("$id", reportId)).ExecuteScalar()!;
-    using var rows = Store.Sql(db, "SELECT id,continuity_id,section,owner_section,title,content,status,version FROM items WHERE report_id=$report AND version>0 ORDER BY rowid", ("$report", reportId)).ExecuteReader();
     var items = new List<PublishedItem>();
-    while (rows.Read()) items.Add(new PublishedItem(rows.GetString(0), rows.GetString(1), rows.GetString(2), rows.GetString(3), rows.GetString(4), rows.GetString(5), rows.GetString(6), rows.GetInt32(7)));
+    using (var rows = Store.Sql(db, "SELECT id,continuity_id,section,owner_section,title,content,status,version FROM items WHERE report_id=$report AND version>0 ORDER BY rowid", ("$report", reportId)).ExecuteReader())
+    {
+        while (rows.Read()) items.Add(new PublishedItem(rows.GetString(0), rows.GetString(1), rows.GetString(2), rows.GetString(3), rows.GetString(4), rows.GetString(5), rows.GetString(6), rows.GetInt32(7)));
+    }
+    items = items.Select(item => item with { Schedule = ScheduleEntries(db, item.Id) }).ToList();
     return new ReportSnapshot(meetingDate, items);
 }
 static ReportSnapshot? PreviousPublication(SqliteConnection db, string meetingDate)
@@ -414,9 +508,11 @@ record CreateReport(string MeetingDate);
 record CreateItem(string Section, string Title, string? OwnerSection);
 record ProjectParticipantRequest(string? Section);
 record ProjectWorkRequest(string? Section, string? Work, string? ScheduleProposal, int BaseVersion);
+record ScheduleRequest(string? Kind, string? Name, string? BaselineStart, string? BaselineEnd, string? ForecastStart, string? ForecastEnd, string? ActualStart, string? ActualEnd, string? BaselineChangeReason, int? BaseVersion);
 record AccessUserRequest(string EmpNo, string Name, string Role, string? Section, bool? ReaderAccess);
 record PublicationRequest(string? RequestId);
-record PublishedItem(string Id, string ContinuityId, string Section, string OwnerSection, string Title, string Content, string Status, int Version);
+record ScheduleEntry(string Id, string ProjectId, string Kind, string Name, string? BaselineStart, string? BaselineEnd, string? ForecastStart, string? ForecastEnd, string? ActualStart, string? ActualEnd, int Version);
+record PublishedItem(string Id, string ContinuityId, string Section, string OwnerSection, string Title, string Content, string Status, int Version, List<ScheduleEntry>? Schedule = null);
 record ReportSnapshot(string MeetingDate, List<PublishedItem> Items);
 record DraftRequest(string Title, string Content, string? Status);
 record TokenRequest(string Token);

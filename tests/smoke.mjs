@@ -76,6 +76,20 @@ try {
   const created = await call(`/api/reports/${reportId}/items`, 'H1', 'POST', { section: 'projects', title: 'Project A' });
   assert.equal(created.status, 201);
   const id = created.body.id;
+  assert.equal((await call(`/api/items/${id}/schedule`, 'H2', 'POST', { kind: 'phase', name: 'Build', baselineStart: '2026-10-01', baselineEnd: '2026-10-07', forecastStart: '2026-10-01', forecastEnd: '2026-10-08' })).status, 403);
+  const phase = await call(`/api/items/${id}/schedule`, 'H1', 'POST', { kind: 'phase', name: 'Build', baselineStart: '2026-10-01', baselineEnd: '2026-10-07', forecastStart: '2026-10-01', forecastEnd: '2026-10-08' });
+  assert.equal(phase.status, 201);
+  const milestone = await call(`/api/items/${id}/schedule`, 'H1', 'POST', { kind: 'milestone', name: 'Release', baselineEnd: '2026-10-08', forecastEnd: '2026-10-09' });
+  assert.equal(milestone.status, 201);
+  assert.equal((await call(`/api/items/${id}/schedule/${phase.body.id}`, 'H1', 'PUT', { kind: 'phase', name: 'Build', baselineStart: '2026-10-01', baselineEnd: '2026-10-10', forecastStart: '2026-10-01', forecastEnd: '2026-10-10', baseVersion: 1 })).status, 400);
+  const updatedPhase = await call(`/api/items/${id}/schedule/${phase.body.id}`, 'H1', 'PUT', { kind: 'phase', name: 'Build', baselineStart: '2026-10-01', baselineEnd: '2026-10-10', forecastStart: '2026-10-01', forecastEnd: '2026-10-10', baselineChangeReason: 'Integration scope increased', baseVersion: 1 });
+  assert.equal(updatedPhase.status, 200);
+  assert.equal(updatedPhase.body.version, 2);
+  const schedule = await call(`/api/items/${id}/schedule`, 'H1');
+  assert.equal(schedule.body.length, 2);
+  assert.equal(schedule.body.find(entry => entry.id === phase.body.id).baselineEnd, '2026-10-10');
+  const baselineHistory = await call(`/api/items/${id}/schedule/${phase.body.id}/baseline-history`, 'H1');
+  assert.equal(baselineHistory.body[0].reason, 'Integration scope increased');
   assert.equal((await call(`/api/items/${id}/project-participants`, 'H2', 'POST', { section: 's2' })).status, 403);
   assert.equal((await call(`/api/items/${id}/project-participants`, 'H1', 'POST', { section: 's2' })).status, 204);
   assert.equal((await call(`/api/items/${id}/project-work`, 'H3')).status, 403);
@@ -185,6 +199,7 @@ try {
   assert.equal(carried.title, 'Project A revised');
   assert.equal(carried.content, 'changed after publication');
   assert.equal(carried.version, 1);
+  assert.equal((await call(`/api/items/${carried.id}/schedule`, 'H1')).body.find(entry => entry.name === 'Build').baselineEnd, '2026-10-10');
   const closing = await call(`/api/reports/${reportId}/items`, 'G', 'POST', { section: 'summary', title: 'Closing summary' });
   const closingLease = await call(`/api/items/${closing.body.id}/lease`, 'G', 'POST', {});
   assert.equal((await call(`/api/items/${closing.body.id}/private-draft`, 'G', 'PUT', { title: 'Closing summary', content: '', status: 'closed' })).status, 400);

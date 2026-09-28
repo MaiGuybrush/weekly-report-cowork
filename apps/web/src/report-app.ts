@@ -8,8 +8,9 @@ import { Auth, editorGuard, entryGuard, readerGuard } from './auth';
 
 type User = { empNo: string; name: string; role: string; section: string | null };
 type Lease = { holder: string; expiresAt: string } | null;
-type Item = { id: string; continuityId: string; section: string; ownerSection: string; title: string; content: string; status: string; version: number; lease: Lease };
+type Item = { id: string; continuityId: string; section: string; ownerSection: string; title: string; content: string; status: string; version: number; lease: Lease; schedule?: ScheduleEntry[] };
 type ProjectWork = { section: string; work: string; scheduleProposal: string | null; version: number; updatedBy: string; updatedAt: string };
+type ScheduleEntry = { id: string; kind: 'phase' | 'milestone'; name: string; baselineStart: string | null; baselineEnd: string | null; forecastStart: string | null; forecastEnd: string | null; actualStart: string | null; actualEnd: string | null; version: number };
 type Report = { id: string; meetingDate: string; sections: string[]; items: Item[] };
 type Conflict = { latest: Item; draft: { title: string; content: string } | null; lease: Lease; error: string };
 const labels: Record<string, string> = {
@@ -78,6 +79,19 @@ export class Home implements OnInit {
         <div *ngIf="isParticipant"><label>我承擔的工作 <textarea rows="4" [(ngModel)]="myProjectWork"></textarea></label>
           <label>時程變更建議（選填） <input [(ngModel)]="myScheduleProposal"></label><button (click)="saveProjectWork()">送出給週報維護人</button></div>
       </section>
+      <section *ngIf="item.section === 'projects'" class="project-schedule"><h3>專案階段與重要里程碑</h3>
+        <ul><li *ngFor="let entry of scheduleEntries"><strong>{{entry.kind === 'phase' ? '階段' : '里程碑'}}：{{entry.name}}</strong>
+          · 基準 {{entry.baselineStart || '—'}}–{{entry.baselineEnd || '—'}} · 預估 {{entry.forecastStart || '—'}}–{{entry.forecastEnd || '—'}} · 實際 {{entry.actualStart || '—'}}–{{entry.actualEnd || '—'}}
+          <button *ngIf="canMaintain(item)" (click)="editSchedule(entry)">編輯</button></li></ul>
+        <div *ngIf="canMaintain(item)"><h4>{{editingSchedule ? '編輯時程' : '新增時程'}}</h4>
+          <label>類型 <select [(ngModel)]="scheduleDraft.kind"><option value="phase">階段</option><option value="milestone">重要里程碑</option></select></label>
+          <label>名稱 <input [(ngModel)]="scheduleDraft.name"></label>
+          <label>計畫基準開始 <input type="date" [(ngModel)]="scheduleDraft.baselineStart"></label><label>計畫基準結束 <input type="date" [(ngModel)]="scheduleDraft.baselineEnd"></label>
+          <label>目前預估開始 <input type="date" [(ngModel)]="scheduleDraft.forecastStart"></label><label>目前預估結束 <input type="date" [(ngModel)]="scheduleDraft.forecastEnd"></label>
+          <label>實際開始 <input type="date" [(ngModel)]="scheduleDraft.actualStart"></label><label>實際結束 <input type="date" [(ngModel)]="scheduleDraft.actualEnd"></label>
+          <label *ngIf="editingSchedule">基準異動原因 <input [(ngModel)]="scheduleDraft.baselineChangeReason"></label>
+          <button (click)="saveSchedule()">{{editingSchedule ? '儲存時程' : '新增時程'}}</button><button *ngIf="editingSchedule" (click)="resetScheduleDraft()">取消</button></div>
+      </section>
       <details><summary>修訂紀錄</summary><button (click)="loadHistory()">重新整理</button>
         <ul><li *ngFor="let entry of history">{{entry.at | date:'short'}} · {{entry.actor}} · {{entry.action}}
           <span *ngIf="entry.action === 'commit'"> {{entry.beforeVersion}} → {{entry.afterVersion}}</span>
@@ -107,6 +121,9 @@ export class ReportEditor implements OnInit, OnDestroy {
   myScheduleProposal = '';
   myProjectWorkVersion = 0;
   isParticipant = false;
+  scheduleEntries: ScheduleEntry[] = [];
+  editingSchedule: ScheduleEntry | null = null;
+  scheduleDraft = this.emptyScheduleDraft();
   takeoverReason = '';
   publicationUrl = '';
   private pendingPublicationRequestId = '';
@@ -162,7 +179,8 @@ export class ReportEditor implements OnInit, OnDestroy {
     this.selected = item; this.token = ''; this.conflict = null; this.history = []; this.message = '';
     this.draftTitle = item.title; this.draftContent = item.content; this.draftStatus = item.status;
     this.projectWork = []; this.myProjectWork = ''; this.myScheduleProposal = ''; this.myProjectWorkVersion = 0; this.isParticipant = false;
-    if (item.section === 'projects') await this.loadProjectWork();
+    this.scheduleEntries = []; this.resetScheduleDraft();
+    if (item.section === 'projects') { await this.loadProjectWork(); await this.loadSchedule(); }
     this.changes.detectChanges();
   }
   canMaintain(item: Item) { return item.section === 'projects' && (this.me?.role === 'Guy' || this.me?.role === 'Head' && this.me.section === item.ownerSection); }
@@ -191,6 +209,27 @@ export class ReportEditor implements OnInit, OnDestroy {
       await firstValueFrom(this.http.put(`/api/items/${this.selected.id}/project-work`, { work: this.myProjectWork, scheduleProposal: this.myScheduleProposal, baseVersion: this.myProjectWorkVersion }));
       await this.loadProjectWork(); this.message = '已送出給週報維護人。';
     } catch { this.message = '送出參與工作失敗。'; }
+    this.changes.detectChanges();
+  }
+  emptyScheduleDraft() { return { kind: 'phase' as 'phase' | 'milestone', name: '', baselineStart: '', baselineEnd: '', forecastStart: '', forecastEnd: '', actualStart: '', actualEnd: '', baselineChangeReason: '' }; }
+  async loadSchedule() {
+    if (!this.selected) return;
+    try { this.scheduleEntries = await firstValueFrom(this.http.get<ScheduleEntry[]>(`/api/items/${this.selected.id}/schedule`)); } catch { this.scheduleEntries = []; }
+  }
+  editSchedule(entry: ScheduleEntry) {
+    this.editingSchedule = entry;
+    this.scheduleDraft = { kind: entry.kind, name: entry.name, baselineStart: entry.baselineStart ?? '', baselineEnd: entry.baselineEnd ?? '', forecastStart: entry.forecastStart ?? '', forecastEnd: entry.forecastEnd ?? '', actualStart: entry.actualStart ?? '', actualEnd: entry.actualEnd ?? '', baselineChangeReason: '' };
+  }
+  resetScheduleDraft() { this.editingSchedule = null; this.scheduleDraft = this.emptyScheduleDraft(); }
+  async saveSchedule() {
+    if (!this.selected) return;
+    const value = (date: string) => date || null;
+    const body = { ...this.scheduleDraft, baselineStart: value(this.scheduleDraft.baselineStart), baselineEnd: value(this.scheduleDraft.baselineEnd), forecastStart: value(this.scheduleDraft.forecastStart), forecastEnd: value(this.scheduleDraft.forecastEnd), actualStart: value(this.scheduleDraft.actualStart), actualEnd: value(this.scheduleDraft.actualEnd) };
+    try {
+      if (this.editingSchedule) await firstValueFrom(this.http.put(`/api/items/${this.selected.id}/schedule/${this.editingSchedule.id}`, { ...body, baseVersion: this.editingSchedule.version }));
+      else await firstValueFrom(this.http.post(`/api/items/${this.selected.id}/schedule`, body));
+      await this.loadSchedule(); this.resetScheduleDraft(); this.message = '已儲存結構化時程。';
+    } catch { this.message = '無法儲存時程；基準異動須填寫原因。'; }
     this.changes.detectChanges();
   }
   async acquire() {
@@ -273,7 +312,10 @@ export class ReportEditor implements OnInit, OnDestroy {
 <header><h1>正式處會週報 <small>{{publication?.meetingDate}}</small></h1><a href="#/">週報清單</a></header>
 <main *ngIf="publication" class="publication"><p>版本 {{publication.version}} · 發布於 {{publication.publishedAt | date:'short'}}</p>
   <section *ngFor="let section of publication.sections"><h2>{{label(section)}}</h2>
-    <article *ngFor="let item of inSection(section)"><h3>{{item.title}}</h3><p>{{item.content}}</p></article>
+    <article *ngFor="let item of inSection(section)"><h3>{{item.title}}</h3><p>{{item.content}}</p>
+      <ul *ngIf="item.schedule?.length"><li *ngFor="let entry of item.schedule"><strong>{{entry.kind === 'phase' ? '階段' : '重要里程碑'}}：{{entry.name}}</strong>
+        · 基準 {{entry.baselineStart || '—'}}–{{entry.baselineEnd || '—'}} · 預估 {{entry.forecastStart || '—'}}–{{entry.forecastEnd || '—'}} · 實際 {{entry.actualStart || '—'}}–{{entry.actualEnd || '—'}}</li></ul>
+    </article>
   </section>
 </main>` })
 export class PublicationPage implements OnInit {
