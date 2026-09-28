@@ -1,0 +1,45 @@
+using Microsoft.Data.Sqlite;
+
+public sealed class Store(IConfiguration config)
+{
+    readonly string path = Path.GetFullPath(config["DatabasePath"] ?? "weekly-report.db");
+
+    public SqliteConnection Open()
+    {
+        Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+        var db = new SqliteConnection($"Data Source={path};Foreign Keys=True;Default Timeout=10");
+        db.Open();
+        return db;
+    }
+
+    public void Initialize()
+    {
+        using var db = Open();
+        Sql(db, "PRAGMA journal_mode=WAL").ExecuteNonQuery();
+        Sql(db, """
+            CREATE TABLE IF NOT EXISTS users(emp_no TEXT PRIMARY KEY, name TEXT NOT NULL, role TEXT NOT NULL, section TEXT);
+            CREATE TABLE IF NOT EXISTS reports(id TEXT PRIMARY KEY, meeting_date TEXT NOT NULL UNIQUE, created_by TEXT NOT NULL);
+            CREATE TABLE IF NOT EXISTS items(id TEXT PRIMARY KEY, report_id TEXT NOT NULL REFERENCES reports(id), section TEXT NOT NULL, owner_section TEXT NOT NULL, title TEXT NOT NULL, content TEXT NOT NULL DEFAULT '', version INTEGER NOT NULL DEFAULT 0, created_by TEXT NOT NULL);
+            CREATE TABLE IF NOT EXISTS leases(item_id TEXT PRIMARY KEY REFERENCES items(id), holder TEXT NOT NULL, token_hash TEXT NOT NULL, expires_at TEXT NOT NULL, base_version INTEGER NOT NULL);
+            CREATE TABLE IF NOT EXISTS drafts(item_id TEXT NOT NULL REFERENCES items(id), editor TEXT NOT NULL, title TEXT NOT NULL, content TEXT NOT NULL, saved_at TEXT NOT NULL, PRIMARY KEY(item_id,editor));
+            CREATE TABLE IF NOT EXISTS revisions(id INTEGER PRIMARY KEY AUTOINCREMENT, item_id TEXT NOT NULL, actor TEXT NOT NULL, at TEXT NOT NULL, before_version INTEGER NOT NULL, after_version INTEGER NOT NULL, before_title TEXT NOT NULL, after_title TEXT NOT NULL, before_content TEXT NOT NULL, after_content TEXT NOT NULL);
+            CREATE TABLE IF NOT EXISTS audit(id INTEGER PRIMARY KEY AUTOINCREMENT, item_id TEXT NOT NULL, actor TEXT NOT NULL, at TEXT NOT NULL, action TEXT NOT NULL, reason TEXT);
+            """).ExecuteNonQuery();
+        foreach (var user in config.GetSection("Access:Users").GetChildren())
+        {
+            var empNo = user["EmpNo"];
+            var role = user["Role"];
+            if (string.IsNullOrWhiteSpace(empNo) || role is not ("Guy" or "Head" or "Reader")) continue;
+            Sql(db, "INSERT INTO users(emp_no,name,role,section) VALUES($id,$name,$role,$section) ON CONFLICT(emp_no) DO NOTHING",
+                ("$id", empNo), ("$name", user["Name"] ?? empNo), ("$role", role), ("$section", user["Section"])).ExecuteNonQuery();
+        }
+    }
+
+    public static SqliteCommand Sql(SqliteConnection db, string query, params (string Name, object? Value)[] args)
+    {
+        var cmd = db.CreateCommand();
+        cmd.CommandText = query;
+        foreach (var (name, value) in args) cmd.Parameters.AddWithValue(name, value ?? DBNull.Value);
+        return cmd;
+    }
+}

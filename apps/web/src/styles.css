@@ -1,0 +1,10 @@
+:root { font-family: system-ui, 'Microsoft JhengHei', sans-serif; color: #15263b; background: #f4f7fa; }
+body { margin: 0; } header { background: #12385b; color: white; padding: 1rem 2rem; display: flex; justify-content: space-between; align-items: center; }
+header h1 { margin: 0; font-size: 1.4rem; } header small { font-size: .9rem; font-weight: normal; } header a { color: white; }
+main { max-width: 1200px; margin: 2rem auto; padding: 0 1rem; } .card, nav, article { background: white; border: 1px solid #d6e0e8; border-radius: 10px; padding: 1.5rem; }
+.editor { display: grid; grid-template-columns: 280px minmax(0, 1fr); gap: 1rem; } nav { max-height: calc(100vh - 9rem); overflow: auto; } nav h3 { margin-bottom: .4rem; font-size: 1rem; }
+button { cursor: pointer; border: 0; border-radius: 6px; padding: .55rem .8rem; margin: .25rem; background: #17678c; color: white; } button:hover { background: #0c4c69; }
+button.item { display: block; text-align: left; width: 100%; background: #eaf2f7; color: #173652; }
+label { display: block; margin: 1rem 0; } input, textarea { display: block; box-sizing: border-box; width: 100%; margin-top: .4rem; padding: .6rem; border: 1px solid #a8b9c8; border-radius: 5px; font: inherit; }
+.message { padding: .7rem; background: #eaf2f7; } .conflict { padding: 1rem; border: 2px solid #b55235; border-radius: 8px; margin-top: 1rem; } .compare { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; } .compare>div { background: #f7f8fa; padding: 1rem; white-space: pre-wrap; }
+@media (max-width: 700px) { .editor, .compare { grid-template-columns: 1fr; } nav { max-height: 20rem; } }
