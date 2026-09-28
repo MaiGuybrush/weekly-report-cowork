@@ -25,14 +25,42 @@ app.Use(async (context, next) =>
     var empNo = await context.RequestServices.GetRequiredService<JwtVerifier>().Verify(context.Request.Headers.Authorization);
     if (empNo is null) { context.Response.StatusCode = 401; return; }
     using var db = context.RequestServices.GetRequiredService<Store>().Open();
-    using var cmd = Store.Sql(db, "SELECT emp_no,name,role,section FROM users WHERE emp_no=$id COLLATE NOCASE", ("$id", empNo));
+    using var cmd = Store.Sql(db, "SELECT emp_no,name,role,section,reader_access FROM users WHERE emp_no=$id COLLATE NOCASE", ("$id", empNo));
     using var row = cmd.ExecuteReader();
     if (!row.Read()) { context.Response.StatusCode = 403; return; }
-    context.Items["user"] = new User(row.GetString(0), row.GetString(1), row.GetString(2), row.IsDBNull(3) ? null : row.GetString(3));
+    context.Items["user"] = new User(row.GetString(0), row.GetString(1), row.GetString(2), row.IsDBNull(3) ? null : row.GetString(3), row.GetInt32(4) == 1);
     await next();
 });
 
 app.MapGet("/api/me", (HttpContext ctx) => Results.Ok(Current(ctx)));
+app.MapPost("/api/access/users", (HttpContext ctx, Store store, AccessUserRequest request) =>
+{
+    if (Current(ctx).Role != "Guy") return Results.StatusCode(403);
+    if (string.IsNullOrWhiteSpace(request.EmpNo) || string.IsNullOrWhiteSpace(request.Name) || request.Role is not ("Guy" or "Head" or "Reader") || request.EmpNo.Length > 100 || request.Name.Length > 200)
+        return Results.BadRequest();
+    if (request.Role == "Head" && string.IsNullOrWhiteSpace(request.Section)) return Results.BadRequest(new { error = "section required for Head" });
+    if (request.Role != "Head" && request.Section is not null) return Results.BadRequest(new { error = "section is only valid for Head" });
+    using var db = store.Open();
+    using var tx = db.BeginTransaction();
+    var beforeRole = Store.Sql(db, "SELECT role FROM users WHERE emp_no=$id COLLATE NOCASE", ("$id", request.EmpNo.Trim())).ExecuteScalar() as string;
+    var beforeReaderAccess = Convert.ToInt32(Store.Sql(db, "SELECT COALESCE(reader_access,0) FROM users WHERE emp_no=$id COLLATE NOCASE", ("$id", request.EmpNo.Trim())).ExecuteScalar() ?? 0) == 1;
+    var readerAccess = request.ReaderAccess ?? (request.Role == "Reader" || beforeReaderAccess);
+    Store.Sql(db, "INSERT INTO users(emp_no,name,role,section,reader_access) VALUES($id,$name,$role,$section,$reader) ON CONFLICT(emp_no) DO UPDATE SET name=excluded.name,role=excluded.role,section=excluded.section,reader_access=excluded.reader_access",
+        ("$id", request.EmpNo.Trim()), ("$name", request.Name.Trim()), ("$role", request.Role), ("$section", request.Section?.Trim()), ("$reader", readerAccess ? 1 : 0)).ExecuteNonQuery();
+    Store.Sql(db, "INSERT INTO access_audit(actor,target_emp_no,at,action,before_role,after_role,before_reader_access,after_reader_access) VALUES($actor,$target,$at,'upsert',$before,$after,$beforeReader,$afterReader)",
+        ("$actor", Current(ctx).EmpNo), ("$target", request.EmpNo.Trim()), ("$at", DateTimeOffset.UtcNow.ToString("O")), ("$before", beforeRole), ("$after", request.Role), ("$beforeReader", beforeReaderAccess ? 1 : 0), ("$afterReader", readerAccess ? 1 : 0)).ExecuteNonQuery();
+    tx.Commit();
+    return Results.Ok(new { readerAccess });
+});
+app.MapGet("/api/access/audit", (HttpContext ctx, Store store) =>
+{
+    if (Current(ctx).Role != "Guy") return Results.StatusCode(403);
+    using var db = store.Open();
+    using var rows = Store.Sql(db, "SELECT actor,target_emp_no,at,action,before_role,after_role,before_reader_access,after_reader_access FROM access_audit ORDER BY id DESC").ExecuteReader();
+    var entries = new List<object>();
+    while (rows.Read()) entries.Add(new { actor = rows.GetString(0), empNo = rows.GetString(1), at = rows.GetString(2), action = rows.GetString(3), beforeRole = rows.IsDBNull(4) ? null : rows.GetString(4), afterRole = rows.GetString(5), beforeReaderAccess = !rows.IsDBNull(6) && rows.GetInt32(6) == 1, afterReaderAccess = rows.GetInt32(7) == 1 });
+    return Results.Ok(entries);
+});
 app.MapGet("/api/reports", (HttpContext ctx, Store store) =>
 {
     if (!Editor(Current(ctx))) return Results.StatusCode(403);
@@ -88,10 +116,11 @@ app.MapPost("/api/reports/{reportId}/publications", (HttpContext ctx, Store stor
     using var db = store.Open();
     using var tx = db.BeginTransaction();
     if (Store.Sql(db, "SELECT 1 FROM reports WHERE id=$id", ("$id", reportId)).ExecuteScalar() is null) return Results.NotFound();
-    using var existingRows = Store.Sql(db, "SELECT id,version,published_at FROM publications WHERE report_id=$report AND request_id=$request", ("$report", reportId), ("$request", request.RequestId)).ExecuteReader();
+    using var existingRows = Store.Sql(db, "SELECT id,version,published_at,published_by FROM publications WHERE report_id=$report AND request_id=$request", ("$report", reportId), ("$request", request.RequestId)).ExecuteReader();
     if (existingRows.Read())
     {
-        var existing = new { id = existingRows.GetString(0), version = existingRows.GetInt32(1), publishedAt = existingRows.GetString(2) };
+        var existingId = existingRows.GetString(0);
+        var existing = new { id = existingId, version = existingRows.GetInt32(1), publishedAt = existingRows.GetString(2), publishedBy = existingRows.GetString(3), url = $"/#/publications/{existingId}" };
         return Results.Ok(existing);
     }
     existingRows.Close();
@@ -102,7 +131,7 @@ app.MapPost("/api/reports/{reportId}/publications", (HttpContext ctx, Store stor
     Store.Sql(db, "INSERT INTO publications(id,report_id,version,request_id,published_by,published_at,snapshot) VALUES($id,$report,$version,$request,$actor,$at,$snapshot)",
         ("$id", id), ("$report", reportId), ("$version", version), ("$request", request.RequestId), ("$actor", Current(ctx).EmpNo), ("$at", publishedAt), ("$snapshot", System.Text.Json.JsonSerializer.Serialize(snapshot))).ExecuteNonQuery();
     tx.Commit();
-    return Results.Created($"/api/publications/{id}", new { id, version, publishedAt });
+    return Results.Created($"/api/publications/{id}", new { id, version, publishedAt, publishedBy = Current(ctx).EmpNo, url = $"/#/publications/{id}" });
 });
 app.MapGet("/api/publications/{publicationId}", (HttpContext ctx, Store store, string publicationId) =>
 {
@@ -112,6 +141,13 @@ app.MapGet("/api/publications/{publicationId}", (HttpContext ctx, Store store, s
     if (!rows.Read()) return Results.NotFound();
     var snapshot = System.Text.Json.JsonSerializer.Deserialize<ReportSnapshot>(rows.GetString(3));
     return Results.Ok(new { id = publicationId, version = rows.GetInt32(0), publishedAt = rows.GetString(1), publishedBy = rows.GetString(2), meetingDate = snapshot!.MeetingDate, sections = ReportSections.All, items = snapshot.Items });
+});
+app.MapGet("/api/publications/latest", (HttpContext ctx, Store store) =>
+{
+    if (!CanReadPublication(Current(ctx))) return Results.StatusCode(403);
+    using var db = store.Open();
+    var id = Store.Sql(db, "SELECT id FROM publications ORDER BY published_at DESC LIMIT 1").ExecuteScalar() as string;
+    return id is null ? Results.NotFound() : Results.Ok(new { id });
 });
 app.MapPost("/api/reports/{reportId}/items", (HttpContext ctx, Store store, string reportId, CreateItem request) =>
 {
@@ -195,7 +231,7 @@ app.MapPut("/api/items/{itemId}/private-draft", (HttpContext ctx, Store store, s
     var user = Current(ctx);
     if (!CanEdit(user, item.OwnerSection)) return Results.StatusCode(403);
     var status = request.Status ?? item.Status;
-    if (!Valid(request.Title, request.Content) || status is not ("open" or "closed")) return Results.BadRequest();
+    if (!Valid(request.Title, request.Content) || !ValidStatus(status, request.Content)) return Results.BadRequest();
     Store.Sql(db, "INSERT INTO drafts(item_id,editor,title,content,status,saved_at) VALUES($id,$actor,$title,$content,$status,$at) ON CONFLICT(item_id,editor) DO UPDATE SET title=excluded.title,content=excluded.content,status=excluded.status,saved_at=excluded.saved_at",
         ("$id", itemId), ("$actor", user.EmpNo), ("$title", request.Title.Trim()), ("$content", request.Content), ("$status", status), ("$at", DateTimeOffset.UtcNow.ToString("O"))).ExecuteNonQuery();
     return Results.NoContent();
@@ -218,7 +254,7 @@ app.MapPost("/api/items/{itemId}/commit", (HttpContext ctx, Store store, string 
     var draftStatus = draftRows.GetString(2);
     draftRows.Close();
     var status = request.Status ?? draftStatus;
-    if (!Valid(title, content) || status is not ("open" or "closed")) return Results.BadRequest();
+    if (!Valid(title, content) || !ValidStatus(status, content)) return Results.BadRequest();
     Store.Sql(db, "UPDATE items SET title=$title,content=$content,status=$status,version=version+1 WHERE id=$id AND version=$version", ("$title", title), ("$content", content), ("$status", status), ("$id", itemId), ("$version", item.Version)).ExecuteNonQuery();
     Store.Sql(db, "INSERT INTO revisions(item_id,actor,at,before_version,after_version,before_title,after_title,before_content,after_content) VALUES($id,$actor,$at,$before,$after,$oldTitle,$newTitle,$oldContent,$newContent)",
         ("$id", itemId), ("$actor", user.EmpNo), ("$at", DateTimeOffset.UtcNow.ToString("O")), ("$before", item.Version), ("$after", item.Version + 1), ("$oldTitle", item.Title), ("$newTitle", title), ("$oldContent", item.Content), ("$newContent", content)).ExecuteNonQuery();
@@ -253,9 +289,10 @@ app.Run();
 
 static User Current(HttpContext context) => (User)context.Items["user"]!;
 static bool Editor(User user) => user.Role is "Guy" or "Head";
-static bool CanReadPublication(User user) => user.Role is "Guy" or "Reader";
+static bool CanReadPublication(User user) => user.Role == "Guy" || user.ReaderAccess;
 static bool CanEdit(User user, string ownerSection) => user.Role == "Guy" || user.Role == "Head" && user.Section == ownerSection;
 static bool Valid(string? title, string? content) => !string.IsNullOrWhiteSpace(title) && title.Length <= 200 && content is not null && content.Length <= 20000;
+static bool ValidStatus(string status, string content) => status is "open" or "closed" && (status != "closed" || !string.IsNullOrWhiteSpace(content));
 static string Hash(string token) => Convert.ToHexString(SHA256.HashData(Encoding.ASCII.GetBytes(token)));
 static bool Matches(string token, string hash) => !string.IsNullOrWhiteSpace(token) && CryptographicOperations.FixedTimeEquals(Convert.FromHexString(Hash(token)), Convert.FromHexString(hash));
 static int LeaseSeconds(IConfiguration config) => Math.Max(1, config.GetValue<int?>("LeaseDurationSeconds") ?? 1800);
@@ -309,11 +346,12 @@ static IResult ChangeLease(HttpContext ctx, Store store, IConfiguration config, 
     return Results.NoContent();
 }
 
-record User(string EmpNo, string Name, string Role, string? Section);
+record User(string EmpNo, string Name, string Role, string? Section, bool ReaderAccess);
 record Item(string Id, string ContinuityId, string Section, string OwnerSection, string Title, string Content, string Status, int Version);
 record Lease(string Holder, string TokenHash, DateTimeOffset ExpiresAt, int BaseVersion);
 record CreateReport(string MeetingDate);
 record CreateItem(string Section, string Title, string? OwnerSection);
+record AccessUserRequest(string EmpNo, string Name, string Role, string? Section, bool? ReaderAccess);
 record PublicationRequest(string? RequestId);
 record PublishedItem(string Id, string ContinuityId, string Section, string OwnerSection, string Title, string Content, string Status, int Version);
 record ReportSnapshot(string MeetingDate, List<PublishedItem> Items);

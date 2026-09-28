@@ -4,7 +4,7 @@ import { FormsModule } from '@angular/forms';
 import { HttpClient } from '@angular/common/http';
 import { ActivatedRoute, Router, RouterOutlet, Routes } from '@angular/router';
 import { firstValueFrom } from 'rxjs';
-import { Auth, editorGuard } from './auth';
+import { Auth, editorGuard, entryGuard, readerGuard } from './auth';
 
 type User = { empNo: string; name: string; role: string; section: string | null };
 type Lease = { holder: string; expiresAt: string } | null;
@@ -243,13 +243,33 @@ export class PublicationPage implements OnInit {
   async ngOnInit() { this.publication = await firstValueFrom(this.http.get<typeof this.publication>(`/api/publications/${this.publicationId}`)); this.changes.detectChanges(); }
 }
 
+@Component({ standalone: true, imports: [CommonModule], template: `
+<header><h1>正式處會週報</h1></header>
+<main><p *ngIf="message">{{message}}</p><a *ngIf="publicationUrl" [href]="publicationUrl">開啟最新正式發布版</a></main>` })
+export class ReaderEntrance implements OnInit {
+  private http = inject(HttpClient);
+  private changes = inject(ChangeDetectorRef);
+  publicationUrl = '';
+  message = '';
+  async ngOnInit() {
+    try {
+      const latest = await firstValueFrom(this.http.get<{ id: string }>('/api/publications/latest'));
+      this.publicationUrl = `#/publications/${latest.id}`;
+    } catch (error: any) {
+      this.message = error.status === 404 ? '尚無正式發布版' : '無法載入正式發布版。';
+    }
+    this.changes.detectChanges();
+  }
+}
+
 @Component({ standalone: true, template: '<main><h1>無權限</h1><p>此帳號無法編輯處會週報。</p></main>' })
 export class Forbidden {}
 
 export const routes: Routes = [
-  { path: '', component: Home, canActivate: [editorGuard] },
+  { path: '', component: Home, canActivate: [entryGuard] },
   { path: 'reports/:id', component: ReportEditor, canActivate: [editorGuard] },
-  { path: 'publications/:id', component: PublicationPage },
+  { path: 'publications/:id', component: PublicationPage, canActivate: [readerGuard] },
+  { path: 'reader', component: ReaderEntrance, canActivate: [readerGuard] },
   { path: 'forbidden', component: Forbidden },
   { path: '**', redirectTo: '' }
 ];

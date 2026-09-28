@@ -52,16 +52,40 @@ export const apiToken: HttpInterceptorFn = (request, next) => {
   return next(token && request.url.startsWith('/api/') ? request.clone({ setHeaders: { Authorization: `Bearer ${token}` } }) : request);
 };
 
+type SessionUser = { role: string; readerAccess: boolean };
+
+async function signedInUser(auth: Auth, http: HttpClient, state: { url: string }): Promise<SessionUser | null> {
+  if (!auth.token()) { await auth.enter(state.url); return null; }
+  try {
+    return await firstValueFrom(http.get<SessionUser>('/api/me'));
+  } catch (error: any) {
+    if (error.status === 401) { auth.clear(); await auth.enter(state.url); }
+    return null;
+  }
+}
+
 export const editorGuard: CanActivateFn = async (_route, state) => {
   const auth = inject(Auth);
   const http = inject(HttpClient);
   const router = inject(Router);
-  if (!auth.token()) { await auth.enter(state.url); return false; }
-  try {
-    const me = await firstValueFrom(http.get<{ role: string }>('/api/me'));
-    return me.role === 'Guy' || me.role === 'Head' ? true : router.parseUrl('/forbidden');
-  } catch (error: any) {
-    if (error.status === 401) { auth.clear(); await auth.enter(state.url); return false; }
-    return router.parseUrl('/forbidden');
-  }
+  const me = await signedInUser(auth, http, state);
+  return me ? (me.role === 'Guy' || me.role === 'Head' ? true : router.parseUrl('/forbidden')) : auth.token() ? router.parseUrl('/forbidden') : false;
+};
+
+export const readerGuard: CanActivateFn = async (_route, state) => {
+  const auth = inject(Auth);
+  const http = inject(HttpClient);
+  const router = inject(Router);
+  const me = await signedInUser(auth, http, state);
+  return me ? (me.role === 'Guy' || me.readerAccess ? true : router.parseUrl('/forbidden')) : auth.token() ? router.parseUrl('/forbidden') : false;
+};
+
+export const entryGuard: CanActivateFn = async (_route, state) => {
+  const auth = inject(Auth);
+  const http = inject(HttpClient);
+  const router = inject(Router);
+  const me = await signedInUser(auth, http, state);
+  if (!me) return auth.token() ? router.parseUrl('/forbidden') : false;
+  if (me.role === 'Reader') return router.parseUrl('/reader');
+  return me.role === 'Guy' || me.role === 'Head' ? true : router.parseUrl('/forbidden');
 };
