@@ -88,8 +88,8 @@ app.MapPost("/api/reports", (HttpContext ctx, Store store, CreateReport request)
             foreach (var item in snapshot.Items.Where(item => item.Status != "closed"))
             {
                 var carriedId = Guid.NewGuid().ToString();
-                Store.Sql(db, "INSERT INTO items(id,report_id,continuity_id,section,owner_section,title,content,status,version,created_by) VALUES($id,$report,$continuity,$section,$owner,$title,$content,$status,1,$actor)",
-                    ("$id", carriedId), ("$report", newReportId), ("$continuity", item.ContinuityId), ("$section", item.Section), ("$owner", item.OwnerSection), ("$title", item.Title), ("$content", item.Content), ("$status", item.Status), ("$actor", Current(ctx).EmpNo)).ExecuteNonQuery();
+                Store.Sql(db, "INSERT INTO items(id,report_id,continuity_id,section,owner_section,title,content,details,status,version,created_by) VALUES($id,$report,$continuity,$section,$owner,$title,$content,$details,$status,1,$actor)",
+                    ("$id", carriedId), ("$report", newReportId), ("$continuity", item.ContinuityId), ("$section", item.Section), ("$owner", item.OwnerSection), ("$title", item.Title), ("$content", item.Content), ("$details", item.Details), ("$status", item.Status), ("$actor", Current(ctx).EmpNo)).ExecuteNonQuery();
                 foreach (var entry in item.Schedule ?? [])
                     Store.Sql(db, "INSERT INTO project_schedule_entries(id,project_id,kind,name,baseline_start,baseline_end,forecast_start,forecast_end,actual_start,actual_end,version,created_by,updated_at) VALUES($id,$project,$kind,$name,$baselineStart,$baselineEnd,$forecastStart,$forecastEnd,$actualStart,$actualEnd,$version,$actor,$at)",
                         ("$id", Guid.NewGuid().ToString()), ("$project", carriedId), ("$kind", entry.Kind), ("$name", entry.Name), ("$baselineStart", entry.BaselineStart), ("$baselineEnd", entry.BaselineEnd), ("$forecastStart", entry.ForecastStart), ("$forecastEnd", entry.ForecastEnd), ("$actualStart", entry.ActualStart), ("$actualEnd", entry.ActualEnd), ("$version", entry.Version), ("$actor", Current(ctx).EmpNo), ("$at", DateTimeOffset.UtcNow.ToString("O"))).ExecuteNonQuery();
@@ -179,14 +179,14 @@ app.MapGet("/api/reports/{reportId}", (HttpContext ctx, Store store, string repo
     using var db = store.Open();
     var date = Store.Sql(db, "SELECT meeting_date FROM reports WHERE id=$id", ("$id", reportId)).ExecuteScalar() as string;
     if (date is null) return Results.NotFound();
-    using var rows = Store.Sql(db, "SELECT i.id,i.continuity_id,i.section,i.owner_section,CASE WHEN i.version=0 THEN COALESCE(d.title,i.title) ELSE i.title END,i.content,i.status,i.version,l.holder,l.expires_at FROM items i LEFT JOIN leases l ON l.item_id=i.id LEFT JOIN drafts d ON d.item_id=i.id AND d.editor=$actor WHERE i.report_id=$id AND (i.version>0 OR i.created_by=$actor OR (i.section='personnel' AND i.owner_section=$userSection)) ORDER BY i.rowid", ("$id", reportId), ("$actor", user.EmpNo), ("$userSection", user.Section)).ExecuteReader();
+    using var rows = Store.Sql(db, "SELECT i.id,i.continuity_id,i.section,i.owner_section,CASE WHEN i.version=0 THEN COALESCE(d.title,i.title) ELSE i.title END,i.content,i.details,i.status,i.version,l.holder,l.expires_at FROM items i LEFT JOIN leases l ON l.item_id=i.id LEFT JOIN drafts d ON d.item_id=i.id AND d.editor=$actor WHERE i.report_id=$id AND (i.version>0 OR i.created_by=$actor OR (i.section='personnel' AND i.owner_section=$userSection)) ORDER BY i.rowid", ("$id", reportId), ("$actor", user.EmpNo), ("$userSection", user.Section)).ExecuteReader();
     var items = new List<object>();
     while (rows.Read())
     {
         var section = rows.GetString(2);
         var ownerSection = rows.GetString(3);
         if (!CanEdit(user, ownerSection)) continue;
-        items.Add(new { id = rows.GetString(0), continuityId = rows.GetString(1), section, ownerSection, title = rows.GetString(4), content = rows.GetString(5), status = rows.GetString(6), version = rows.GetInt32(7), lease = LeaseView(rows, 8) });
+        items.Add(new { id = rows.GetString(0), continuityId = rows.GetString(1), section, ownerSection, title = rows.GetString(4), content = rows.GetString(5), details = System.Text.Json.JsonSerializer.Deserialize<System.Text.Json.JsonElement>(rows.GetString(6)), status = rows.GetString(7), version = rows.GetInt32(8), lease = LeaseView(rows, 9) });
     }
     return Results.Ok(new { id = reportId, meetingDate = date, sections = ReportSections.All, items });
 });
@@ -416,8 +416,8 @@ app.MapGet("/api/items/{itemId}/private-draft", (HttpContext ctx, Store store, s
     if (item is null) return Results.NotFound();
     var user = Current(ctx);
     if (!CanEdit(user, item.OwnerSection)) return Results.StatusCode(403);
-    using var rows = Store.Sql(db, "SELECT title,content,status,saved_at FROM drafts WHERE item_id=$id AND editor=$actor", ("$id", itemId), ("$actor", user.EmpNo)).ExecuteReader();
-    return rows.Read() ? Results.Ok(new { title = rows.GetString(0), content = rows.GetString(1), status = rows.GetString(2), savedAt = rows.GetString(3) }) : Results.NotFound();
+    using var rows = Store.Sql(db, "SELECT title,content,details,status,saved_at FROM drafts WHERE item_id=$id AND editor=$actor", ("$id", itemId), ("$actor", user.EmpNo)).ExecuteReader();
+    return rows.Read() ? Results.Ok(new { title = rows.GetString(0), content = rows.GetString(1), details = System.Text.Json.JsonSerializer.Deserialize<System.Text.Json.JsonElement>(rows.GetString(2)), status = rows.GetString(3), savedAt = rows.GetString(4) }) : Results.NotFound();
 });
 app.MapPut("/api/items/{itemId}/private-draft", (HttpContext ctx, Store store, string itemId, DraftRequest request) =>
 {
@@ -427,9 +427,10 @@ app.MapPut("/api/items/{itemId}/private-draft", (HttpContext ctx, Store store, s
     var user = Current(ctx);
     if (!CanEdit(user, item.OwnerSection)) return Results.StatusCode(403);
     var status = request.Status ?? item.Status;
-    if (!Valid(request.Title, request.Content) || !ValidStatus(status, request.Content)) return Results.BadRequest();
-    Store.Sql(db, "INSERT INTO drafts(item_id,editor,title,content,status,saved_at) VALUES($id,$actor,$title,$content,$status,$at) ON CONFLICT(item_id,editor) DO UPDATE SET title=excluded.title,content=excluded.content,status=excluded.status,saved_at=excluded.saved_at",
-        ("$id", itemId), ("$actor", user.EmpNo), ("$title", request.Title.Trim()), ("$content", request.Content), ("$status", status), ("$at", DateTimeOffset.UtcNow.ToString("O"))).ExecuteNonQuery();
+    var details = request.Details?.GetRawText() ?? item.Details;
+    if (!Valid(request.Title, request.Content) || !ValidStatus(status, request.Content) || !ValidDetails(item.Section, request.Content, details, status)) return Results.BadRequest();
+    Store.Sql(db, "INSERT INTO drafts(item_id,editor,title,content,details,status,saved_at) VALUES($id,$actor,$title,$content,$details,$status,$at) ON CONFLICT(item_id,editor) DO UPDATE SET title=excluded.title,content=excluded.content,details=excluded.details,status=excluded.status,saved_at=excluded.saved_at",
+        ("$id", itemId), ("$actor", user.EmpNo), ("$title", request.Title.Trim()), ("$content", request.Content), ("$details", details), ("$status", status), ("$at", DateTimeOffset.UtcNow.ToString("O"))).ExecuteNonQuery();
     return Results.NoContent();
 });
 app.MapPost("/api/items/{itemId}/commit", (HttpContext ctx, Store store, string itemId, CommitRequest request) =>
@@ -443,15 +444,15 @@ app.MapPost("/api/items/{itemId}/commit", (HttpContext ctx, Store store, string 
     var lease = GetLease(db, itemId);
     if (lease is null || lease.Holder != user.EmpNo || lease.ExpiresAt <= DateTimeOffset.UtcNow || !Matches(request.Token, lease.TokenHash) || request.BaseVersion != item.Version || lease.BaseVersion != item.Version)
         return Conflict(db, itemId, user.EmpNo, "stale lease or version", lease);
-    using var draftRows = Store.Sql(db, "SELECT title,content,status FROM drafts WHERE item_id=$id AND editor=$actor", ("$id", itemId), ("$actor", user.EmpNo)).ExecuteReader();
+    using var draftRows = Store.Sql(db, "SELECT title,content,details,status FROM drafts WHERE item_id=$id AND editor=$actor", ("$id", itemId), ("$actor", user.EmpNo)).ExecuteReader();
     if (!draftRows.Read()) return Results.BadRequest(new { error = "private draft required" });
     var title = draftRows.GetString(0);
     var content = draftRows.GetString(1);
-    var draftStatus = draftRows.GetString(2);
+    var details = draftRows.GetString(2); var draftStatus = draftRows.GetString(3);
     draftRows.Close();
     var status = request.Status ?? draftStatus;
-    if (!Valid(title, content) || !ValidStatus(status, content)) return Results.BadRequest();
-    Store.Sql(db, "UPDATE items SET title=$title,content=$content,status=$status,version=version+1 WHERE id=$id AND version=$version", ("$title", title), ("$content", content), ("$status", status), ("$id", itemId), ("$version", item.Version)).ExecuteNonQuery();
+    if (!Valid(title, content) || !ValidStatus(status, content) || !ValidDetails(item.Section, content, details, status)) return Results.BadRequest();
+    Store.Sql(db, "UPDATE items SET title=$title,content=$content,details=$details,status=$status,version=version+1 WHERE id=$id AND version=$version", ("$title", title), ("$content", content), ("$details", details), ("$status", status), ("$id", itemId), ("$version", item.Version)).ExecuteNonQuery();
     Store.Sql(db, "INSERT INTO revisions(item_id,actor,at,before_version,after_version,before_title,after_title,before_content,after_content) VALUES($id,$actor,$at,$before,$after,$oldTitle,$newTitle,$oldContent,$newContent)",
         ("$id", itemId), ("$actor", user.EmpNo), ("$at", DateTimeOffset.UtcNow.ToString("O")), ("$before", item.Version), ("$after", item.Version + 1), ("$oldTitle", item.Title), ("$newTitle", title), ("$oldContent", item.Content), ("$newContent", content)).ExecuteNonQuery();
     Store.Sql(db, "INSERT INTO audit(item_id,actor,at,action) VALUES($id,$actor,$at,'commit')",
@@ -510,14 +511,19 @@ static bool ValidMilestoneDates(string? start, string? end)
     return start is null || end is null || string.CompareOrdinal(start, end) <= 0;
 }
 static bool ValidStatus(string status, string content) => status is "open" or "closed" && (status != "closed" || !string.IsNullOrWhiteSpace(content));
+static bool ValidDetails(string section, string content, string details, string status)
+{
+    try { using var document = System.Text.Json.JsonDocument.Parse(details); var root = document.RootElement; return section != "personnel" || string.IsNullOrWhiteSpace(content) && root.TryGetProperty("effectiveDate", out var date) && DateOnly.TryParseExact(date.GetString(), "yyyy-MM-dd", out _) && new[] { "handover", "impact", "nextStep" }.All(name => root.TryGetProperty(name, out var value) && !string.IsNullOrWhiteSpace(value.GetString())); }
+    catch { return false; }
+}
 static string Hash(string token) => Convert.ToHexString(SHA256.HashData(Encoding.ASCII.GetBytes(token)));
 static bool Matches(string token, string hash) => !string.IsNullOrWhiteSpace(token) && CryptographicOperations.FixedTimeEquals(Convert.FromHexString(Hash(token)), Convert.FromHexString(hash));
 static int LeaseSeconds(IConfiguration config) => Math.Max(1, config.GetValue<int?>("LeaseDurationSeconds") ?? 1800);
 
 static Item? GetItem(SqliteConnection db, string id)
 {
-    using var rows = Store.Sql(db, "SELECT id,continuity_id,section,owner_section,title,content,status,version FROM items WHERE id=$id", ("$id", id)).ExecuteReader();
-    return rows.Read() ? new Item(rows.GetString(0), rows.GetString(1), rows.GetString(2), rows.GetString(3), rows.GetString(4), rows.GetString(5), rows.GetString(6), rows.GetInt32(7)) : null;
+    using var rows = Store.Sql(db, "SELECT id,continuity_id,section,owner_section,title,content,details,status,version FROM items WHERE id=$id", ("$id", id)).ExecuteReader();
+    return rows.Read() ? new Item(rows.GetString(0), rows.GetString(1), rows.GetString(2), rows.GetString(3), rows.GetString(4), rows.GetString(5), rows.GetString(6), rows.GetString(7), rows.GetInt32(8)) : null;
 }
 static string? Creator(SqliteConnection db, string id) => Store.Sql(db, "SELECT created_by FROM items WHERE id=$id", ("$id", id)).ExecuteScalar() as string;
 static Lease? GetLease(SqliteConnection db, string id)
@@ -544,9 +550,9 @@ static ReportSnapshot Snapshot(SqliteConnection db, string reportId, IConfigurat
 {
     var meetingDate = (string)Store.Sql(db, "SELECT meeting_date FROM reports WHERE id=$id", ("$id", reportId)).ExecuteScalar()!;
     var items = new List<PublishedItem>();
-    using (var rows = Store.Sql(db, "SELECT id,continuity_id,section,owner_section,title,content,status,version FROM items WHERE report_id=$report AND version>0 ORDER BY rowid", ("$report", reportId)).ExecuteReader())
+    using (var rows = Store.Sql(db, "SELECT id,continuity_id,section,owner_section,title,content,details,status,version FROM items WHERE report_id=$report AND version>0 ORDER BY rowid", ("$report", reportId)).ExecuteReader())
     {
-        while (rows.Read()) items.Add(new PublishedItem(rows.GetString(0), rows.GetString(1), rows.GetString(2), rows.GetString(3), rows.GetString(4), rows.GetString(5), rows.GetString(6), rows.GetInt32(7)));
+        while (rows.Read()) items.Add(new PublishedItem(rows.GetString(0), rows.GetString(1), rows.GetString(2), rows.GetString(3), rows.GetString(4), rows.GetString(5), rows.GetString(7), rows.GetInt32(8), rows.GetString(6)));
     }
     items = items.Select(item => item with { Schedule = ScheduleEntries(db, item.Id) }).ToList();
     var sections = EcimMembers(config).Select(member => member.Section).ToHashSet();
@@ -593,7 +599,7 @@ static IResult ChangeLease(HttpContext ctx, Store store, IConfiguration config, 
 }
 
 record User(string EmpNo, string Name, string Role, string? Section, bool ReaderAccess);
-record Item(string Id, string ContinuityId, string Section, string OwnerSection, string Title, string Content, string Status, int Version);
+record Item(string Id, string ContinuityId, string Section, string OwnerSection, string Title, string Content, string Details, string Status, int Version);
 record Lease(string Holder, string TokenHash, DateTimeOffset ExpiresAt, int BaseVersion);
 record CreateReport(string MeetingDate);
 record CreateItem(string Section, string Title, string? OwnerSection);
@@ -604,10 +610,10 @@ record ScheduleRequest(string? Kind, string? Name, string? BaselineStart, string
 record AccessUserRequest(string EmpNo, string Name, string Role, string? Section, bool? ReaderAccess);
 record PublicationRequest(string? RequestId);
 record ScheduleEntry(string Id, string ProjectId, string Kind, string Name, string? BaselineStart, string? BaselineEnd, string? ForecastStart, string? ForecastEnd, string? ActualStart, string? ActualEnd, int Version);
-record PublishedItem(string Id, string ContinuityId, string Section, string OwnerSection, string Title, string Content, string Status, int Version, List<ScheduleEntry>? Schedule = null);
+record PublishedItem(string Id, string ContinuityId, string Section, string OwnerSection, string Title, string Content, string Status, int Version, string Details = "{}", List<ScheduleEntry>? Schedule = null);
 record SourceStatus(string Section, string Status, string? PeriodFrom, string? PeriodTo, string? FinishedAt);
 record ReportSnapshot(string MeetingDate, List<PublishedItem> Items, List<SourceStatus>? SourceStatus = null);
-record DraftRequest(string Title, string Content, string? Status);
+record DraftRequest(string Title, string Content, System.Text.Json.JsonElement? Details, string? Status);
 record TokenRequest(string Token);
 record CommitRequest(string Token, int BaseVersion, string? Status);
 record TakeoverRequest(string Reason);
