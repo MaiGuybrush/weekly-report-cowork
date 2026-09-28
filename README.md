@@ -10,6 +10,8 @@ API 從 `apps/api/appsettings.json` 讀取 `JwksUrl` 與 `DatabasePath`。`Acces
 
 `DatabasePath` 預設在 API 工作目錄的 `weekly-report.db`。正式部署時請設為持久磁碟上的絕對路徑。資料庫以 `CREATE TABLE IF NOT EXISTS` 建立初始結構；保存正式資料前需加入 migration 和備份流程。
 
+eCIM 同步設定在 `Ecim`：`BaseUrl`、選用的 `ReviewWorkPath` 與每位工程師的 `Members` 設定。每筆成員設定需包含 `Section`、`UserId`、`UpdateDateFrom`、`UpdateDateTo`，並可附上 `TimeFrom`、`TimeTo`、`Division`、`Dept`、`TeamId`。服務端憑證可用部署秘密的 `Ecim:ApiKey` 提供；不會傳給瀏覽器。
+
 ## 啟動
 
 ```powershell

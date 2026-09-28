@@ -15,6 +15,15 @@ const jwk = publicKey.export({ format: 'jwk' });
 const jwks = createServer((_req, res) => { res.setHeader('content-type', 'application/json'); res.end(JSON.stringify({ keys: [{ ...jwk, kid: 'test', alg: 'RS256' }] })); });
 await new Promise(resolve => jwks.listen(0, '127.0.0.1', resolve));
 const jwksPort = jwks.address().port;
+const failedEcimUsers = new Set(['ecim-fail']);
+const ecim = createServer((request, response) => {
+  const userId = new URL(request.url, 'http://localhost').searchParams.get('userId');
+  if (failedEcimUsers.has(userId)) { response.statusCode = 502; response.end('upstream failure'); return; }
+  response.setHeader('content-type', 'application/json');
+  response.end(JSON.stringify([{ workId: `${userId}-work-1`, summary: 'Imported work' }]));
+});
+await new Promise(resolve => ecim.listen(0, '127.0.0.1', resolve));
+const ecimPort = ecim.address().port;
 const port = await new Promise(resolve => { const s = createTcpServer(); s.listen(0, '127.0.0.1', () => { const p = s.address().port; s.close(() => resolve(p)); }); });
 const api = spawn('dotnet', [join(root, 'apps/api/bin/Debug/net9.0/WeeklyReport.Api.dll'), '--urls', `http://127.0.0.1:${port}`], {
   cwd: join(root, 'apps/api'),
@@ -23,7 +32,9 @@ const api = spawn('dotnet', [join(root, 'apps/api/bin/Debug/net9.0/WeeklyReport.
     Access__Users__1__EmpNo: 'H1', Access__Users__1__Name: 'Head One', Access__Users__1__Role: 'Head', Access__Users__1__Section: 's1',
     Access__Users__2__EmpNo: 'H2', Access__Users__2__Name: 'Head Two', Access__Users__2__Role: 'Head', Access__Users__2__Section: 's2',
     Access__Users__3__EmpNo: 'R', Access__Users__3__Name: 'Reader', Access__Users__3__Role: 'Reader',
-    Access__Users__4__EmpNo: 'H3', Access__Users__4__Name: 'Head Three', Access__Users__4__Role: 'Head', Access__Users__4__Section: 's3' }
+    Access__Users__4__EmpNo: 'H3', Access__Users__4__Name: 'Head Three', Access__Users__4__Role: 'Head', Access__Users__4__Section: 's3',
+    Ecim__BaseUrl: `http://127.0.0.1:${ecimPort}`, Ecim__Members__0__Section: 's1', Ecim__Members__0__UserId: 'ecim-ok', Ecim__Members__0__UpdateDateFrom: '2026-09-25', Ecim__Members__0__UpdateDateTo: '2026-10-01',
+    Ecim__Members__1__Section: 's1', Ecim__Members__1__UserId: 'ecim-fail', Ecim__Members__1__UpdateDateFrom: '2026-09-25', Ecim__Members__1__UpdateDateTo: '2026-10-01' }
 });
 let logs = '';
 api.stdout.on('data', chunk => logs = (logs + chunk).slice(-10000));
@@ -71,6 +82,24 @@ try {
   const retry = await call('/api/reports', 'G', 'POST', { meetingDate: '2026-10-01' });
   assert.equal(retry.body.id, first.body.id);
   const reportId = first.body.id;
+  assert.equal((await call(`/api/reports/${reportId}/ecim-sync`, 'H2', 'POST')).status, 400);
+  const firstSync = await call(`/api/reports/${reportId}/ecim-sync`, 'H1', 'POST');
+  assert.equal(firstSync.status, 200);
+  assert.equal(firstSync.body.memberResults.find(result => result.userId === 'ecim-ok').status, 'succeeded');
+  assert.equal(firstSync.body.memberResults.find(result => result.userId === 'ecim-fail').status, 'failed');
+  const firstSyncStatus = await call(`/api/reports/${reportId}/ecim-sync`, 'H1');
+  assert.equal(firstSyncStatus.status, 200);
+  assert.equal(firstSyncStatus.body.members.find(member => member.userId === 'ecim-fail').status, 'failed');
+  assert.equal(firstSyncStatus.body.members.find(member => member.userId === 'ecim-fail').periodFrom, '2026-09-25');
+  assert.equal(firstSyncStatus.body.members.find(member => member.userId === 'ecim-ok').lastSuccessAt, firstSync.body.memberResults.find(result => result.userId === 'ecim-ok').lastSuccessAt);
+  assert.equal((await call(`/api/reports/${reportId}/ecim-candidates`, 'H1')).body.length, 1);
+  failedEcimUsers.delete('ecim-fail');
+  const retrySync = await call(`/api/reports/${reportId}/ecim-sync`, 'H1', 'POST');
+  assert.equal(retrySync.body.memberResults.every(result => result.status === 'succeeded'), true);
+  assert.equal((await call(`/api/reports/${reportId}/ecim-candidates`, 'H1')).body.length, 2);
+  const repeatedSync = await call(`/api/reports/${reportId}/ecim-sync`, 'H1', 'POST');
+  assert.equal(repeatedSync.status, 200);
+  assert.equal((await call(`/api/reports/${reportId}/ecim-candidates`, 'H1')).body.length, 2);
   assert.equal((await call(`/api/reports/${reportId}`, 'H1')).body.items.length, 0);
   assert.equal((await call(`/api/reports/${reportId}/items`, 'H1', 'POST', { section: 'operations', ownerSection: 's2', title: 'bad' })).status, 403);
   const created = await call(`/api/reports/${reportId}/items`, 'H1', 'POST', { section: 'projects', title: 'Project A' });
@@ -215,5 +244,6 @@ try {
   api.kill();
   if (api.exitCode === null) await once(api, 'exit');
   jwks.close();
+  ecim.close();
   await rm(temporary, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
 }

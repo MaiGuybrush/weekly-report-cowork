@@ -9,6 +9,7 @@ builder.Logging.ClearProviders();
 builder.Logging.AddConsole();
 builder.Services.AddSingleton<Store>();
 builder.Services.AddHttpClient<JwtVerifier>();
+builder.Services.AddHttpClient<EcimClient>();
 var app = builder.Build();
 app.Services.GetRequiredService<Store>().Initialize();
 var webRoot = Path.GetFullPath(Path.Combine(app.Environment.ContentRootPath, "../web/dist/weekly-report-web/browser"));
@@ -96,6 +97,80 @@ app.MapPost("/api/reports", (HttpContext ctx, Store store, CreateReport request)
     }
     tx.Commit();
     return Results.Ok(new { id, request.MeetingDate, sections = ReportSections.All });
+});
+app.MapPost("/api/reports/{reportId}/ecim-sync", async (HttpContext ctx, Store store, EcimClient ecim, IConfiguration config, string reportId, CancellationToken cancellationToken) =>
+{
+    var user = Current(ctx);
+    if (user.Role != "Head" || string.IsNullOrWhiteSpace(user.Section)) return Results.StatusCode(403);
+    var members = EcimMembers(config).Where(member => member.Section == user.Section).ToList();
+    if (members.Count == 0) return Results.BadRequest(new { error = "No eCIM members configured for this section" });
+    using var db = store.Open();
+    if (Store.Sql(db, "SELECT 1 FROM reports WHERE id=$id", ("$id", reportId)).ExecuteScalar() is null) return Results.NotFound();
+    var runId = Guid.NewGuid().ToString();
+    var startedAt = DateTimeOffset.UtcNow.ToString("O");
+    var periodFrom = members.Select(member => member.UpdateDateFrom).Where(value => !string.IsNullOrWhiteSpace(value)).Min();
+    var periodTo = members.Select(member => member.UpdateDateTo).Where(value => !string.IsNullOrWhiteSpace(value)).Max();
+    Store.Sql(db, "INSERT INTO ecim_import_runs(id,report_id,section,period_from,period_to,started_at,status) VALUES($id,$report,$section,$from,$to,$at,'running')", ("$id", runId), ("$report", reportId), ("$section", user.Section), ("$from", periodFrom), ("$to", periodTo), ("$at", startedAt)).ExecuteNonQuery();
+    var results = new List<SyncMemberResult>();
+    foreach (var member in members)
+    {
+        try
+        {
+            var work = await ecim.ReviewWork(member, cancellationToken);
+            var succeededAt = DateTimeOffset.UtcNow.ToString("O");
+            using var tx = db.BeginTransaction();
+            foreach (var entry in work)
+            {
+                var sourceId = Guid.NewGuid().ToString();
+                var inserted = Store.Sql(db, "INSERT INTO ecim_sources(id,report_id,section,work_id,period_from,period_to,payload,import_run_id) VALUES($id,$report,$section,$work,$from,$to,$payload,$run) ON CONFLICT(report_id,work_id,period_from,period_to) DO NOTHING", ("$id", sourceId), ("$report", reportId), ("$section", user.Section), ("$work", entry.WorkId), ("$from", member.UpdateDateFrom ?? ""), ("$to", member.UpdateDateTo ?? ""), ("$payload", entry.Payload), ("$run", runId)).ExecuteNonQuery() == 1;
+                if (inserted) Store.Sql(db, "INSERT INTO ecim_candidates(id,report_id,source_id,section) VALUES($id,$report,$source,$section)", ("$id", Guid.NewGuid().ToString()), ("$report", reportId), ("$source", sourceId), ("$section", user.Section)).ExecuteNonQuery();
+            }
+            Store.Sql(db, "INSERT INTO ecim_member_results(run_id,user_id,status,work_count,last_success_at) VALUES($run,$user,'succeeded',$count,$at)", ("$run", runId), ("$user", member.UserId), ("$count", work.Count), ("$at", succeededAt)).ExecuteNonQuery();
+            Store.Sql(db, "INSERT INTO ecim_member_sync_state(section,user_id,last_success_at) VALUES($section,$user,$at) ON CONFLICT(section,user_id) DO UPDATE SET last_success_at=excluded.last_success_at", ("$section", user.Section), ("$user", member.UserId), ("$at", succeededAt)).ExecuteNonQuery();
+            tx.Commit();
+            results.Add(new SyncMemberResult(member.UserId, "succeeded", work.Count, succeededAt, null));
+        }
+        catch (Exception exception)
+        {
+            var error = exception.Message.Length > 500 ? exception.Message[..500] : exception.Message;
+            Store.Sql(db, "INSERT INTO ecim_member_results(run_id,user_id,status,error) VALUES($run,$user,'failed',$error)", ("$run", runId), ("$user", member.UserId), ("$error", error)).ExecuteNonQuery();
+            results.Add(new SyncMemberResult(member.UserId, "failed", 0, null, error));
+        }
+    }
+    var status = results.Any(result => result.Status == "failed") ? "partial" : "succeeded";
+    Store.Sql(db, "UPDATE ecim_import_runs SET finished_at=$at,status=$status WHERE id=$id", ("$at", DateTimeOffset.UtcNow.ToString("O")), ("$status", status), ("$id", runId)).ExecuteNonQuery();
+    return Results.Ok(new { id = runId, section = user.Section, status, periodFrom, periodTo, memberResults = results });
+});
+app.MapGet("/api/reports/{reportId}/ecim-sync", (HttpContext ctx, Store store, IConfiguration config, string reportId) =>
+{
+    var user = Current(ctx);
+    if (user.Role != "Head" || string.IsNullOrWhiteSpace(user.Section)) return Results.StatusCode(403);
+    using var db = store.Open();
+    if (Store.Sql(db, "SELECT 1 FROM reports WHERE id=$id", ("$id", reportId)).ExecuteScalar() is null) return Results.NotFound();
+    var members = new List<object>();
+    foreach (var member in EcimMembers(config).Where(member => member.Section == user.Section))
+    {
+        using var latest = Store.Sql(db, "SELECT mr.status,mr.error,r.period_from,r.period_to FROM ecim_member_results mr JOIN ecim_import_runs r ON r.id=mr.run_id WHERE r.report_id=$report AND r.section=$section AND mr.user_id=$user ORDER BY mr.id DESC LIMIT 1", ("$report", reportId), ("$section", user.Section), ("$user", member.UserId)).ExecuteReader();
+        var hasLatest = latest.Read();
+        var status = hasLatest ? latest.GetString(0) : "not-run";
+        var error = hasLatest && !latest.IsDBNull(1) ? latest.GetString(1) : null;
+        var periodFrom = hasLatest && !latest.IsDBNull(2) ? latest.GetString(2) : member.UpdateDateFrom;
+        var periodTo = hasLatest && !latest.IsDBNull(3) ? latest.GetString(3) : member.UpdateDateTo;
+        latest.Close();
+        var lastSuccessAt = Store.Sql(db, "SELECT last_success_at FROM ecim_member_sync_state WHERE section=$section AND user_id=$user", ("$section", user.Section), ("$user", member.UserId)).ExecuteScalar() as string;
+        members.Add(new { userId = member.UserId, periodFrom, periodTo, status, error, lastSuccessAt });
+    }
+    return Results.Ok(new { section = user.Section, members });
+});
+app.MapGet("/api/reports/{reportId}/ecim-candidates", (HttpContext ctx, Store store, string reportId) =>
+{
+    var user = Current(ctx);
+    if (user.Role != "Head" || string.IsNullOrWhiteSpace(user.Section)) return Results.StatusCode(403);
+    using var db = store.Open();
+    using var rows = Store.Sql(db, "SELECT c.id,c.status,s.work_id,s.period_from,s.period_to,s.payload FROM ecim_candidates c JOIN ecim_sources s ON s.id=c.source_id WHERE c.report_id=$report AND c.section=$section ORDER BY s.rowid", ("$report", reportId), ("$section", user.Section)).ExecuteReader();
+    var candidates = new List<object>();
+    while (rows.Read()) candidates.Add(new { id = rows.GetString(0), status = rows.GetString(1), workId = rows.GetString(2), periodFrom = rows.GetString(3), periodTo = rows.GetString(4), source = System.Text.Json.JsonSerializer.Deserialize<System.Text.Json.JsonElement>(rows.GetString(5)) });
+    return Results.Ok(candidates);
 });
 app.MapGet("/api/reports/{reportId}", (HttpContext ctx, Store store, string reportId) =>
 {
@@ -410,6 +485,9 @@ app.Run();
 
 static User Current(HttpContext context) => (User)context.Items["user"]!;
 static bool Editor(User user) => user.Role is "Guy" or "Head";
+static List<EcimMember> EcimMembers(IConfiguration config) => config.GetSection("Ecim:Members").GetChildren()
+    .Select(member => new EcimMember(member["Section"] ?? "", member["UserId"] ?? "", member["UpdateDateFrom"], member["UpdateDateTo"], member["TimeFrom"], member["TimeTo"], member["Division"], member["Dept"], member["TeamId"]))
+    .Where(member => !string.IsNullOrWhiteSpace(member.Section) && !string.IsNullOrWhiteSpace(member.UserId)).ToList();
 static bool CanReadPublication(User user) => user.Role == "Guy" || user.ReaderAccess;
 static bool CanEdit(User user, string ownerSection) => user.Role == "Guy" || user.Role == "Head" && user.Section == ownerSection;
 static bool CanMaintainProject(User user, Item item) => item.Section == "projects" && CanEdit(user, item.OwnerSection);
@@ -508,6 +586,7 @@ record CreateReport(string MeetingDate);
 record CreateItem(string Section, string Title, string? OwnerSection);
 record ProjectParticipantRequest(string? Section);
 record ProjectWorkRequest(string? Section, string? Work, string? ScheduleProposal, int BaseVersion);
+record SyncMemberResult(string UserId, string Status, int WorkCount, string? LastSuccessAt, string? Error);
 record ScheduleRequest(string? Kind, string? Name, string? BaselineStart, string? BaselineEnd, string? ForecastStart, string? ForecastEnd, string? ActualStart, string? ActualEnd, string? BaselineChangeReason, int? BaseVersion);
 record AccessUserRequest(string EmpNo, string Name, string Role, string? Section, bool? ReaderAccess);
 record PublicationRequest(string? RequestId);

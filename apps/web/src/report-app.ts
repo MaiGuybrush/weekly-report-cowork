@@ -11,6 +11,8 @@ type Lease = { holder: string; expiresAt: string } | null;
 type Item = { id: string; continuityId: string; section: string; ownerSection: string; title: string; content: string; status: string; version: number; lease: Lease; schedule?: ScheduleEntry[] };
 type ProjectWork = { section: string; work: string; scheduleProposal: string | null; version: number; updatedBy: string; updatedAt: string };
 type ScheduleEntry = { id: string; kind: 'phase' | 'milestone'; name: string; baselineStart: string | null; baselineEnd: string | null; forecastStart: string | null; forecastEnd: string | null; actualStart: string | null; actualEnd: string | null; version: number };
+type EcimMember = { userId: string; periodFrom: string | null; periodTo: string | null; status: string; error: string | null; lastSuccessAt: string | null };
+type EcimCandidate = { id: string; status: string; workId: string; periodFrom: string; periodTo: string };
 type Report = { id: string; meetingDate: string; sections: string[]; items: Item[] };
 type Conflict = { latest: Item; draft: { title: string; content: string } | null; lease: Lease; error: string };
 const labels: Record<string, string> = {
@@ -55,7 +57,11 @@ export class Home implements OnInit {
 @Component({ standalone: true, imports: [CommonModule, FormsModule], template: `
 <header><h1>處會週報 <small>{{report?.meetingDate}}</small></h1><span><button *ngIf="me?.role === 'Guy'" (click)="publish()">發布正式版</button><a href="#/">週報清單</a></span></header>
 <main *ngIf="report" class="editor">
-  <nav><h2>章節與項目</h2><p *ngIf="publicationUrl"><a [href]="publicationUrl">查看剛發布的固定版本</a></p><section *ngFor="let section of report.sections">
+  <nav><h2>章節與項目</h2><p *ngIf="publicationUrl"><a [href]="publicationUrl">查看剛發布的固定版本</a></p>
+  <section *ngIf="me?.role === 'Head'" class="source-sync"><h3>eCIM 來源同步</h3><button (click)="syncEcim()">同步本課工程師工作</button>
+    <p *ngIf="ecimMessage">{{ecimMessage}}</p><ul><li *ngFor="let member of ecimMembers">{{member.userId}} · {{member.periodFrom || '未設定'}}–{{member.periodTo || '未設定'}} · {{member.status === 'succeeded' ? '成功' : member.status === 'failed' ? '失敗' : '尚未同步'}} · 上次成功：{{member.lastSuccessAt ? (member.lastSuccessAt | date:'short') : '尚未成功'}}<span *ngIf="member.error"> · {{member.error}}</span></li></ul>
+    <p *ngIf="ecimCandidates.length">新來源候選</p><ul><li *ngFor="let candidate of ecimCandidates">{{candidate.workId}} · {{candidate.periodFrom}}–{{candidate.periodTo}}</li></ul>
+  </section><section *ngFor="let section of report.sections">
     <h3>{{label(section)}}</h3><button *ngIf="canAdd(section)" (click)="add(section)">新增項目</button>
     <button class="item" *ngFor="let item of inSection(section)" (click)="select(item)">{{item.title}} <span *ngIf="item.lease">🔒</span></button>
   </section></nav>
@@ -124,6 +130,9 @@ export class ReportEditor implements OnInit, OnDestroy {
   scheduleEntries: ScheduleEntry[] = [];
   editingSchedule: ScheduleEntry | null = null;
   scheduleDraft = this.emptyScheduleDraft();
+  ecimMembers: EcimMember[] = [];
+  ecimCandidates: EcimCandidate[] = [];
+  ecimMessage = '';
   takeoverReason = '';
   publicationUrl = '';
   private pendingPublicationRequestId = '';
@@ -133,7 +142,7 @@ export class ReportEditor implements OnInit, OnDestroy {
   label(section: string) { return labels[section] ?? section; }
   inSection(section: string) { return this.report?.items.filter(item => item.section === section) ?? []; }
   canAdd(_section: string) { return this.me?.role === 'Guy' || this.me?.role === 'Head'; }
-  async ngOnInit() { this.me = await firstValueFrom(this.http.get<User>('/api/me')); await this.refresh(); }
+  async ngOnInit() { this.me = await firstValueFrom(this.http.get<User>('/api/me')); await this.refresh(); await this.loadEcimStatus(); }
   ngOnDestroy() { clearTimeout(this.saveTimer); clearInterval(this.renewTimer); this.releaseOnExit(); }
   @HostListener('window:pagehide') onPageHide() { this.releaseOnExit(); }
   private releaseOnExit() {
@@ -156,6 +165,22 @@ export class ReportEditor implements OnInit, OnDestroy {
     this.report = await firstValueFrom(this.http.get<Report>(`/api/reports/${this.reportId}`));
     if (this.selected) this.selected = this.report.items.find(item => item.id === this.selected?.id) ?? null;
     this.changes.detectChanges();
+  }
+  async loadEcimStatus() {
+    if (this.me?.role !== 'Head') return;
+    try {
+      const status = await firstValueFrom(this.http.get<{ members: EcimMember[] }>(`/api/reports/${this.reportId}/ecim-sync`));
+      this.ecimMembers = status.members;
+      this.ecimCandidates = await firstValueFrom(this.http.get<EcimCandidate[]>(`/api/reports/${this.reportId}/ecim-candidates`));
+    } catch { this.ecimMessage = '尚未設定或無法載入 eCIM 來源狀態。'; }
+    this.changes.detectChanges();
+  }
+  async syncEcim() {
+    try {
+      const run = await firstValueFrom(this.http.post<{ status: string }>(`/api/reports/${this.reportId}/ecim-sync`, {}));
+      this.ecimMessage = run.status === 'succeeded' ? '本課來源同步完成。' : '同步完成，但部分成員失敗。';
+      await this.loadEcimStatus();
+    } catch { this.ecimMessage = '來源同步失敗。'; this.changes.detectChanges(); }
   }
   async add(section: string) {
     const title = prompt('項目標題');
