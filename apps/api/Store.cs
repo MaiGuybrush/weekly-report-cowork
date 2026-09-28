@@ -26,6 +26,9 @@ public sealed class Store(IConfiguration config)
             CREATE TABLE IF NOT EXISTS audit(id INTEGER PRIMARY KEY AUTOINCREMENT, item_id TEXT NOT NULL, actor TEXT NOT NULL, at TEXT NOT NULL, action TEXT NOT NULL, reason TEXT);
             CREATE TABLE IF NOT EXISTS access_audit(id INTEGER PRIMARY KEY AUTOINCREMENT, actor TEXT NOT NULL, target_emp_no TEXT NOT NULL, at TEXT NOT NULL, action TEXT NOT NULL, before_role TEXT, after_role TEXT NOT NULL, before_reader_access INTEGER, after_reader_access INTEGER NOT NULL DEFAULT 0);
             CREATE TABLE IF NOT EXISTS publications(id TEXT PRIMARY KEY, report_id TEXT NOT NULL REFERENCES reports(id), version INTEGER NOT NULL, request_id TEXT, published_by TEXT NOT NULL, published_at TEXT NOT NULL, snapshot TEXT NOT NULL, UNIQUE(report_id, version), UNIQUE(report_id, request_id));
+            CREATE TABLE IF NOT EXISTS project_participants(project_id TEXT NOT NULL REFERENCES items(id), section TEXT NOT NULL, PRIMARY KEY(project_id, section));
+            CREATE TABLE IF NOT EXISTS project_work(project_id TEXT NOT NULL REFERENCES items(id), section TEXT NOT NULL, work TEXT NOT NULL, schedule_proposal TEXT, version INTEGER NOT NULL DEFAULT 0, updated_by TEXT NOT NULL, updated_at TEXT NOT NULL, PRIMARY KEY(project_id, section));
+            CREATE TABLE IF NOT EXISTS project_work_revisions(id INTEGER PRIMARY KEY AUTOINCREMENT, project_id TEXT NOT NULL REFERENCES items(id), section TEXT NOT NULL, actor TEXT NOT NULL, at TEXT NOT NULL, before_version INTEGER NOT NULL, after_version INTEGER NOT NULL, before_work TEXT NOT NULL, after_work TEXT NOT NULL, before_schedule_proposal TEXT, after_schedule_proposal TEXT);
             """).ExecuteNonQuery();
         EnsureColumn(db, "items", "continuity_id", "TEXT");
         EnsureColumn(db, "items", "status", "TEXT NOT NULL DEFAULT 'open'");
@@ -33,6 +36,7 @@ public sealed class Store(IConfiguration config)
         EnsureColumn(db, "users", "reader_access", "INTEGER NOT NULL DEFAULT 0");
         EnsureColumn(db, "access_audit", "before_reader_access", "INTEGER");
         EnsureColumn(db, "access_audit", "after_reader_access", "INTEGER NOT NULL DEFAULT 0");
+        EnsureColumn(db, "project_work", "version", "INTEGER NOT NULL DEFAULT 0");
         Sql(db, "UPDATE items SET continuity_id=id WHERE continuity_id IS NULL OR continuity_id='' ").ExecuteNonQuery();
         Sql(db, "UPDATE users SET reader_access=1 WHERE role='Reader'").ExecuteNonQuery();
         foreach (var user in config.GetSection("Access:Users").GetChildren())

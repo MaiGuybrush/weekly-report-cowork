@@ -9,6 +9,7 @@ import { Auth, editorGuard, entryGuard, readerGuard } from './auth';
 type User = { empNo: string; name: string; role: string; section: string | null };
 type Lease = { holder: string; expiresAt: string } | null;
 type Item = { id: string; continuityId: string; section: string; ownerSection: string; title: string; content: string; status: string; version: number; lease: Lease };
+type ProjectWork = { section: string; work: string; scheduleProposal: string | null; version: number; updatedBy: string; updatedAt: string };
 type Report = { id: string; meetingDate: string; sections: string[]; items: Item[] };
 type Conflict = { latest: Item; draft: { title: string; content: string } | null; lease: Lease; error: string };
 const labels: Record<string, string> = {
@@ -71,6 +72,12 @@ export class Home implements OnInit {
         <button (click)="reloadAndAcquire()">重新取得租約並套用我的草稿</button></div>
       <div *ngIf="me?.role === 'Guy' && item.lease && item.lease.holder !== me?.empNo">
         <label>接管理由 <input [(ngModel)]="takeoverReason"></label><button (click)="takeover()">接管租約</button></div>
+      <section *ngIf="item.section === 'projects'" class="project-work"><h3>參與課別工作與時程建議</h3>
+        <button *ngIf="canMaintain(item)" (click)="assignParticipant()">指定參與課別</button>
+        <ul *ngIf="projectWork.length"><li *ngFor="let entry of projectWork"><strong>{{entry.section}}</strong> · {{entry.work}}<span *ngIf="entry.scheduleProposal"> · 時程建議：{{entry.scheduleProposal}}</span></li></ul>
+        <div *ngIf="isParticipant"><label>我承擔的工作 <textarea rows="4" [(ngModel)]="myProjectWork"></textarea></label>
+          <label>時程變更建議（選填） <input [(ngModel)]="myScheduleProposal"></label><button (click)="saveProjectWork()">送出給週報維護人</button></div>
+      </section>
       <details><summary>修訂紀錄</summary><button (click)="loadHistory()">重新整理</button>
         <ul><li *ngFor="let entry of history">{{entry.at | date:'short'}} · {{entry.actor}} · {{entry.action}}
           <span *ngIf="entry.action === 'commit'"> {{entry.beforeVersion}} → {{entry.afterVersion}}</span>
@@ -95,6 +102,11 @@ export class ReportEditor implements OnInit, OnDestroy {
   message = '';
   conflict: Conflict | null = null;
   history: any[] = [];
+  projectWork: ProjectWork[] = [];
+  myProjectWork = '';
+  myScheduleProposal = '';
+  myProjectWorkVersion = 0;
+  isParticipant = false;
   takeoverReason = '';
   publicationUrl = '';
   private pendingPublicationRequestId = '';
@@ -131,8 +143,10 @@ export class ReportEditor implements OnInit, OnDestroy {
   async add(section: string) {
     const title = prompt('項目標題');
     if (!title?.trim()) return;
+    const ownerSection = section === 'personnel' && this.me?.role === 'Guy' ? prompt('相關課別（例如 s1）')?.trim() : undefined;
+    if (section === 'personnel' && this.me?.role === 'Guy' && !ownerSection) return;
     try {
-      const item = await firstValueFrom(this.http.post<{ id: string }>(`/api/reports/${this.reportId}/items`, { section, title }));
+      const item = await firstValueFrom(this.http.post<{ id: string }>(`/api/reports/${this.reportId}/items`, { section, title, ownerSection }));
       await this.refresh();
       this.select(this.report!.items.find(i => i.id === item.id)!);
     } catch { this.message = '無法新增項目。'; this.changes.detectChanges(); }
@@ -147,6 +161,36 @@ export class ReportEditor implements OnInit, OnDestroy {
     clearInterval(this.renewTimer); clearTimeout(this.saveTimer);
     this.selected = item; this.token = ''; this.conflict = null; this.history = []; this.message = '';
     this.draftTitle = item.title; this.draftContent = item.content; this.draftStatus = item.status;
+    this.projectWork = []; this.myProjectWork = ''; this.myScheduleProposal = ''; this.myProjectWorkVersion = 0; this.isParticipant = false;
+    if (item.section === 'projects') await this.loadProjectWork();
+    this.changes.detectChanges();
+  }
+  canMaintain(item: Item) { return item.section === 'projects' && (this.me?.role === 'Guy' || this.me?.role === 'Head' && this.me.section === item.ownerSection); }
+  async assignParticipant() {
+    if (!this.selected) return;
+    const section = prompt('參與課別（例如 s2）');
+    if (!section?.trim()) return;
+    try { await firstValueFrom(this.http.post(`/api/items/${this.selected.id}/project-participants`, { section: section.trim() })); this.message = '已指定參與課別。'; }
+    catch { this.message = '無法指定參與課別。'; }
+    this.changes.detectChanges();
+  }
+  async loadProjectWork() {
+    if (!this.selected) return;
+    try {
+      this.projectWork = await firstValueFrom(this.http.get<ProjectWork[]>(`/api/items/${this.selected.id}/project-work`));
+      const mine = this.projectWork.find(entry => entry.section === this.me?.section);
+      this.isParticipant = !!mine || !this.canMaintain(this.selected);
+      this.myProjectWork = mine?.work ?? '';
+      this.myScheduleProposal = mine?.scheduleProposal ?? '';
+      this.myProjectWorkVersion = mine?.version ?? 0;
+    } catch { this.isParticipant = false; }
+  }
+  async saveProjectWork() {
+    if (!this.selected) return;
+    try {
+      await firstValueFrom(this.http.put(`/api/items/${this.selected.id}/project-work`, { work: this.myProjectWork, scheduleProposal: this.myScheduleProposal, baseVersion: this.myProjectWorkVersion }));
+      await this.loadProjectWork(); this.message = '已送出給週報維護人。';
+    } catch { this.message = '送出參與工作失敗。'; }
     this.changes.detectChanges();
   }
   async acquire() {

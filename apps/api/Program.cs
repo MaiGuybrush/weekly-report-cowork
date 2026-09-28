@@ -98,7 +98,7 @@ app.MapGet("/api/reports/{reportId}", (HttpContext ctx, Store store, string repo
     using var db = store.Open();
     var date = Store.Sql(db, "SELECT meeting_date FROM reports WHERE id=$id", ("$id", reportId)).ExecuteScalar() as string;
     if (date is null) return Results.NotFound();
-    using var rows = Store.Sql(db, "SELECT i.id,i.continuity_id,i.section,i.owner_section,CASE WHEN i.version=0 THEN d.title ELSE i.title END,i.content,i.status,i.version,l.holder,l.expires_at FROM items i LEFT JOIN leases l ON l.item_id=i.id LEFT JOIN drafts d ON d.item_id=i.id AND d.editor=$actor WHERE i.report_id=$id AND (i.version>0 OR i.created_by=$actor) ORDER BY i.rowid", ("$id", reportId), ("$actor", user.EmpNo)).ExecuteReader();
+    using var rows = Store.Sql(db, "SELECT i.id,i.continuity_id,i.section,i.owner_section,CASE WHEN i.version=0 THEN COALESCE(d.title,i.title) ELSE i.title END,i.content,i.status,i.version,l.holder,l.expires_at FROM items i LEFT JOIN leases l ON l.item_id=i.id LEFT JOIN drafts d ON d.item_id=i.id AND d.editor=$actor WHERE i.report_id=$id AND (i.version>0 OR i.created_by=$actor OR (i.section='personnel' AND i.owner_section=$userSection)) ORDER BY i.rowid", ("$id", reportId), ("$actor", user.EmpNo), ("$userSection", user.Section)).ExecuteReader();
     var items = new List<object>();
     while (rows.Read())
     {
@@ -157,15 +157,72 @@ app.MapPost("/api/reports/{reportId}/items", (HttpContext ctx, Store store, stri
     if (string.IsNullOrWhiteSpace(request.Title) || request.Title.Length > 200 || !ReportSections.All.Contains(request.Section)) return Results.BadRequest();
     if (string.IsNullOrWhiteSpace(ownerSection)) return Results.BadRequest();
     using var db = store.Open();
+    if (request.Section == "personnel" && !ValidSection(db, ownerSection)) return Results.BadRequest(new { error = "personnel items require a relevant section" });
     using var tx = db.BeginTransaction();
     if (Store.Sql(db, "SELECT 1 FROM reports WHERE id=$id", ("$id", reportId)).ExecuteScalar() is null) return Results.NotFound();
     var id = Guid.NewGuid().ToString();
-    Store.Sql(db, "INSERT INTO items(id,report_id,continuity_id,section,owner_section,title,created_by) VALUES($id,$report,$continuity,$section,$owner,'',$actor)",
-        ("$id", id), ("$report", reportId), ("$continuity", Guid.NewGuid().ToString()), ("$section", request.Section), ("$owner", ownerSection), ("$actor", user.EmpNo)).ExecuteNonQuery();
+    Store.Sql(db, "INSERT INTO items(id,report_id,continuity_id,section,owner_section,title,created_by) VALUES($id,$report,$continuity,$section,$owner,$title,$actor)",
+        ("$id", id), ("$report", reportId), ("$continuity", Guid.NewGuid().ToString()), ("$section", request.Section), ("$owner", ownerSection), ("$title", request.Title.Trim()), ("$actor", user.EmpNo)).ExecuteNonQuery();
     Store.Sql(db, "INSERT INTO drafts(item_id,editor,title,content,status,saved_at) VALUES($id,$actor,$title,'','open',$at)",
         ("$id", id), ("$actor", user.EmpNo), ("$title", request.Title.Trim()), ("$at", DateTimeOffset.UtcNow.ToString("O"))).ExecuteNonQuery();
     tx.Commit();
     return Results.Created($"/api/items/{id}", new { id, version = 0 });
+});
+app.MapPost("/api/items/{itemId}/project-participants", (HttpContext ctx, Store store, string itemId, ProjectParticipantRequest request) =>
+{
+    using var db = store.Open();
+    var item = GetItem(db, itemId);
+    if (item is null) return Results.NotFound();
+    var participantSection = request.Section?.Trim();
+    if (item.Section != "projects" || !CanMaintainProject(Current(ctx), item) || !ValidSection(db, participantSection)) return Results.StatusCode(403);
+    Store.Sql(db, "INSERT INTO project_participants(project_id,section) VALUES($project,$section) ON CONFLICT(project_id,section) DO NOTHING", ("$project", itemId), ("$section", participantSection)).ExecuteNonQuery();
+    return Results.NoContent();
+});
+app.MapGet("/api/items/{itemId}/project-work", (HttpContext ctx, Store store, string itemId) =>
+{
+    using var db = store.Open();
+    var item = GetItem(db, itemId);
+    if (item is null) return Results.NotFound();
+    var user = Current(ctx);
+    if (item.Section != "projects") return Results.BadRequest();
+    var maintains = CanMaintainProject(user, item);
+    if (!maintains && !IsProjectParticipant(db, itemId, user.Section)) return Results.StatusCode(403);
+    using var rows = Store.Sql(db, maintains
+        ? "SELECT section,work,schedule_proposal,version,updated_by,updated_at FROM project_work WHERE project_id=$project ORDER BY section"
+        : "SELECT section,work,schedule_proposal,version,updated_by,updated_at FROM project_work WHERE project_id=$project AND section=$section",
+        ("$project", itemId), ("$section", user.Section)).ExecuteReader();
+    var work = new List<object>();
+    while (rows.Read()) work.Add(new { section = rows.GetString(0), work = rows.GetString(1), scheduleProposal = rows.IsDBNull(2) ? null : rows.GetString(2), version = rows.GetInt32(3), updatedBy = rows.GetString(4), updatedAt = rows.GetString(5) });
+    return Results.Ok(work);
+});
+app.MapPut("/api/items/{itemId}/project-work", (HttpContext ctx, Store store, string itemId, ProjectWorkRequest request) =>
+{
+    using var db = store.Open();
+    var item = GetItem(db, itemId);
+    if (item is null) return Results.NotFound();
+    var user = Current(ctx);
+    var work = request.Work?.Trim();
+    if (item.Section != "projects" || !ValidProjectWork(work, request.ScheduleProposal)) return Results.BadRequest();
+    var section = CanMaintainProject(user, item) ? request.Section?.Trim() : user.Section;
+    if (string.IsNullOrWhiteSpace(section) || !IsProjectParticipant(db, itemId, section) || !CanMaintainProject(user, item) && section != user.Section) return Results.StatusCode(403);
+    var proposal = string.IsNullOrWhiteSpace(request.ScheduleProposal) ? null : request.ScheduleProposal.Trim();
+    using var tx = db.BeginTransaction();
+    using var currentRows = Store.Sql(db, "SELECT work,schedule_proposal,version FROM project_work WHERE project_id=$project AND section=$section", ("$project", itemId), ("$section", section)).ExecuteReader();
+    var exists = currentRows.Read();
+    var beforeWork = exists ? currentRows.GetString(0) : "";
+    var beforeProposal = exists && !currentRows.IsDBNull(1) ? currentRows.GetString(1) : null;
+    var beforeVersion = exists ? currentRows.GetInt32(2) : 0;
+    currentRows.Close();
+    if (request.BaseVersion != beforeVersion) return Results.Conflict(new { error = "stale project work version", latest = new { work = beforeWork, scheduleProposal = beforeProposal, version = beforeVersion } });
+    var at = DateTimeOffset.UtcNow.ToString("O");
+    if (exists)
+        Store.Sql(db, "UPDATE project_work SET work=$work,schedule_proposal=$proposal,version=version+1,updated_by=$actor,updated_at=$at WHERE project_id=$project AND section=$section AND version=$version", ("$work", work), ("$proposal", proposal), ("$actor", user.EmpNo), ("$at", at), ("$project", itemId), ("$section", section), ("$version", beforeVersion)).ExecuteNonQuery();
+    else
+        Store.Sql(db, "INSERT INTO project_work(project_id,section,work,schedule_proposal,version,updated_by,updated_at) VALUES($project,$section,$work,$proposal,1,$actor,$at)", ("$project", itemId), ("$section", section), ("$work", work), ("$proposal", proposal), ("$actor", user.EmpNo), ("$at", at)).ExecuteNonQuery();
+    Store.Sql(db, "INSERT INTO project_work_revisions(project_id,section,actor,at,before_version,after_version,before_work,after_work,before_schedule_proposal,after_schedule_proposal) VALUES($project,$section,$actor,$at,$before,$after,$beforeWork,$afterWork,$beforeProposal,$afterProposal)", ("$project", itemId), ("$section", section), ("$actor", user.EmpNo), ("$at", at), ("$before", beforeVersion), ("$after", beforeVersion + 1), ("$beforeWork", beforeWork), ("$afterWork", work), ("$beforeProposal", beforeProposal), ("$afterProposal", proposal)).ExecuteNonQuery();
+    Store.Sql(db, "INSERT INTO audit(item_id,actor,at,action) VALUES($id,$actor,$at,'project-work')", ("$id", itemId), ("$actor", user.EmpNo), ("$at", at)).ExecuteNonQuery();
+    tx.Commit();
+    return Results.Ok(new { version = beforeVersion + 1 });
 });
 app.MapGet("/api/items/{itemId}", (HttpContext ctx, Store store, string itemId) =>
 {
@@ -173,7 +230,7 @@ app.MapGet("/api/items/{itemId}", (HttpContext ctx, Store store, string itemId) 
     var item = GetItem(db, itemId);
     if (item is null) return Results.NotFound();
     if (!CanEdit(Current(ctx), item.OwnerSection)) return Results.StatusCode(403);
-    if (item.Version == 0 && Current(ctx).EmpNo != Creator(db, itemId)) return Results.NotFound();
+    if (item.Version == 0 && item.Section != "personnel" && Current(ctx).EmpNo != Creator(db, itemId)) return Results.NotFound();
     return Results.Ok(new { item.Id, item.ContinuityId, item.Section, item.OwnerSection, item.Title, item.Content, item.Status, item.Version, lease = LeaseObject(GetLease(db, itemId)) });
 });
 app.MapPost("/api/items/{itemId}/lease", (HttpContext ctx, Store store, IConfiguration config, string itemId) =>
@@ -291,7 +348,11 @@ static User Current(HttpContext context) => (User)context.Items["user"]!;
 static bool Editor(User user) => user.Role is "Guy" or "Head";
 static bool CanReadPublication(User user) => user.Role == "Guy" || user.ReaderAccess;
 static bool CanEdit(User user, string ownerSection) => user.Role == "Guy" || user.Role == "Head" && user.Section == ownerSection;
+static bool CanMaintainProject(User user, Item item) => item.Section == "projects" && CanEdit(user, item.OwnerSection);
+static bool IsProjectParticipant(SqliteConnection db, string itemId, string? section) => !string.IsNullOrWhiteSpace(section) && Store.Sql(db, "SELECT 1 FROM project_participants WHERE project_id=$project AND section=$section", ("$project", itemId), ("$section", section)).ExecuteScalar() is not null;
+static bool ValidSection(SqliteConnection db, string? section) => !string.IsNullOrWhiteSpace(section) && Store.Sql(db, "SELECT 1 FROM users WHERE role='Head' AND section=$section", ("$section", section.Trim())).ExecuteScalar() is not null;
 static bool Valid(string? title, string? content) => !string.IsNullOrWhiteSpace(title) && title.Length <= 200 && content is not null && content.Length <= 20000;
+static bool ValidProjectWork(string? work, string? scheduleProposal) => !string.IsNullOrWhiteSpace(work) && work.Length <= 20000 && (scheduleProposal is null || scheduleProposal.Length <= 2000);
 static bool ValidStatus(string status, string content) => status is "open" or "closed" && (status != "closed" || !string.IsNullOrWhiteSpace(content));
 static string Hash(string token) => Convert.ToHexString(SHA256.HashData(Encoding.ASCII.GetBytes(token)));
 static bool Matches(string token, string hash) => !string.IsNullOrWhiteSpace(token) && CryptographicOperations.FixedTimeEquals(Convert.FromHexString(Hash(token)), Convert.FromHexString(hash));
@@ -351,6 +412,8 @@ record Item(string Id, string ContinuityId, string Section, string OwnerSection,
 record Lease(string Holder, string TokenHash, DateTimeOffset ExpiresAt, int BaseVersion);
 record CreateReport(string MeetingDate);
 record CreateItem(string Section, string Title, string? OwnerSection);
+record ProjectParticipantRequest(string? Section);
+record ProjectWorkRequest(string? Section, string? Work, string? ScheduleProposal, int BaseVersion);
 record AccessUserRequest(string EmpNo, string Name, string Role, string? Section, bool? ReaderAccess);
 record PublicationRequest(string? RequestId);
 record PublishedItem(string Id, string ContinuityId, string Section, string OwnerSection, string Title, string Content, string Status, int Version);
