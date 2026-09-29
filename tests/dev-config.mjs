@@ -21,7 +21,7 @@ const server = spawn(process.execPath, ['node_modules/@angular/cli/bin/ng.js', '
 
 try {
   let ready = false;
-  for (let attempt = 0; attempt < 100; attempt++) {
+  for (let attempt = 0; attempt < 200; attempt++) {
     if (server.exitCode !== null) throw new Error('Angular dev server exited before becoming ready');
     try {
       ready = (await fetch(origin)).ok;
@@ -31,13 +31,12 @@ try {
   }
   assert.ok(ready, 'Angular dev server did not become ready');
 
-  const response = await fetch(`${origin}/api/me`);
-  const contentType = response.headers.get('content-type') ?? '';
-  assert.ok(
-    !(response.status === 200 && contentType.includes('text/html')),
-    '/api/me must be proxied to the API, not answered with the Angular index page'
-  );
-  console.log('Angular dev server proxies /api/me');
+  const config = await fetch(`${origin}/assets/config.json`);
+  assert.equal(config.status, 200);
+  assert.equal((await config.json()).apiBaseUrl, 'http://localhost:5080');
+  const apiPath = await fetch(`${origin}/api/me`);
+  assert.match(apiPath.headers.get('content-type') ?? '', /text\/html/, 'dev server must not proxy /api');
+  console.log('Angular dev server serves runtime config without an API proxy');
 } finally {
   server.kill();
   if (server.exitCode === null) await once(server, 'exit');

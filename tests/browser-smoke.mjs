@@ -18,9 +18,11 @@ const jwks = createServer((_req, res) => { res.setHeader('content-type', 'applic
 await new Promise(resolve => jwks.listen(0, '127.0.0.1', resolve));
 const port = await new Promise(resolve => { const s = createTcpServer(); s.listen(0, '127.0.0.1', () => { const p = s.address().port; s.close(() => resolve(p)); }); });
 const base = `http://127.0.0.1:${port}`;
+const webPort = await new Promise(resolve => { const s = createTcpServer(); s.listen(0, '127.0.0.1', () => { const p = s.address().port; s.close(() => resolve(p)); }); });
+const webOrigin = `http://127.0.0.1:${webPort}`;
 const api = spawn('dotnet', [process.env.WEEKLY_REPORT_API_DLL ?? join(root, 'apps/api/bin/Debug/net9.0/WeeklyReport.Api.dll'), '--urls', base], {
   cwd: join(root, 'apps/api'),
-  env: { ...process.env, DatabasePath: join(temporary, 'report.db'), JwksUrl: `http://127.0.0.1:${jwks.address().port}/jwks`,
+  env: { ...process.env, DatabasePath: join(temporary, 'report.db'), JwksUrl: `http://127.0.0.1:${jwks.address().port}/jwks`, Cors__AllowedOrigins__0: webOrigin,
     Access__Users__0__EmpNo: 'G', Access__Users__0__Name: 'Guy', Access__Users__0__Role: 'Guy',
     Access__Users__1__EmpNo: 'H1', Access__Users__1__Name: 'Head One', Access__Users__1__Role: 'Head', Access__Users__1__Section: 's1',
     Access__Users__2__EmpNo: 'H2', Access__Users__2__Name: 'Head Two', Access__Users__2__Role: 'Head', Access__Users__2__Section: 's2',
@@ -48,6 +50,7 @@ async function createCommittedItem(reportId, section, title, content) {
   assert.equal((await apiCall(`/api/items/${created.body.id}/commit`, 'POST', { token: lease.body.token, baseVersion: lease.body.baseVersion })).status, 200);
 }
 let browser;
+let webServer;
 try {
   let ready = false;
   for (let i = 0; i < 100; i++) {
@@ -55,6 +58,18 @@ try {
     await new Promise(resolve => setTimeout(resolve, 100));
   }
   assert.ok(ready, `API did not serve Angular app: ${logs}`);
+  const configResponse = await fetch(base + '/assets/config.json');
+  assert.equal(configResponse.status, 200);
+  assert.equal(configResponse.headers.get('cache-control'), 'no-cache');
+  webServer = createServer(async (request, response) => {
+    try {
+      const upstream = await fetch(base + request.url);
+      response.statusCode = upstream.status;
+      response.setHeader('content-type', upstream.headers.get('content-type') ?? 'application/octet-stream');
+      response.end(Buffer.from(await upstream.arrayBuffer()));
+    } catch { response.statusCode = 502; response.end(); }
+  });
+  await new Promise(resolve => webServer.listen(webPort, '127.0.0.1', resolve));
   const report = await fetch(base + '/api/reports', { method: 'POST', headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' }, body: JSON.stringify({ meetingDate: '2026-10-01' }) });
   assert.equal(report.status, 200);
   const { id } = await report.json();
@@ -62,11 +77,17 @@ try {
   for (const [section, title] of [['summary', '管理摘要'], ['projects', '專案摘要'], ['projects', '專案摘要（二）'], ['operations', '維運狀態'], ['personnel', '人事交接'], ['technology', '技術評估'], ['appendix', '來源附錄']])
     await createCommittedItem(id, section, title, longContent);
   browser = await chromium.launch({ headless: true, executablePath: process.env.CHROME_PATH || 'C:/Program Files/Google/Chrome/Application/chrome.exe', args: ['--no-sandbox'] });
-  const page = await browser.newPage();
+  const context = await browser.newContext();
+  let runtimeConfig = { apiBaseUrl: base, uacBaseUrl: 'http://mock-uac.test/auth' };
+  await context.route('**/assets/config.json', route => route.fulfill({
+    status: 200, contentType: 'application/json', body: JSON.stringify(runtimeConfig)
+  }));
+  const page = await context.newPage();
   page.on('pageerror', error => console.error('Browser page error:', error.message));
   const refreshCalls = [];
   const verifyCalls = [];
   const mockUac = async route => {
+    assert.equal(route.request().headers()['authorization'], undefined, 'API bearer token must not reach UAC');
     const url = route.request().url();
     const isPost = route.request().method() === 'POST';
     const requestBody = isPost ? route.request().postDataJSON() : null;
@@ -79,7 +100,7 @@ try {
     const body = url.endsWith('/SsoUrl') ? { loginPage: 'http://mock-sso.test/login' } : { token, refreshToken: 'test-refresh' };
     await route.fulfill({ status: rejected ? 401 : 200, contentType: 'application/json', headers: { 'access-control-allow-origin': '*', 'access-control-allow-headers': '*', 'access-control-allow-methods': 'GET, POST, OPTIONS' }, body: JSON.stringify(body) });
   };
-  await page.route('http://tncimweb1.cminl.oa/uacapi/adAuth/**', mockUac);
+  await page.route('http://mock-uac.test/auth/**', mockUac);
   await page.route('http://mock-sso.test/**', async route => {
     const callback = new URL(route.request().url()).searchParams.get('url');
     assert.ok(callback);
@@ -87,7 +108,7 @@ try {
     target.searchParams.set('CertificateKey', 'test-cert');
     await route.fulfill({ status: 200, contentType: 'text/html', body: `<script>location.replace(${JSON.stringify(target.toString())})</script>` });
   });
-  await page.goto(`${base}/#/reports/${id}`);
+  await page.goto(`${webOrigin}/#/reports/${id}`);
   await page.getByRole('heading', { name: /處會週報/ }).waitFor({ timeout: 15000 });
   await page.waitForURL(url => url.hash === `#/reports/${id}` && !url.searchParams.has('CertificateKey'), { timeout: 15000 });
   await page.getByText('2026-10-01').waitFor({ timeout: 15000 });
@@ -100,23 +121,23 @@ try {
   assert.deepEqual(refreshCalls, [null, 'test-refresh'], 'reload should refresh an existing session');
   assert.equal(new URL(page.url()).hash, `#/reports/${id}`);
 
-  const hashPage = await browser.newPage();
-  await hashPage.route('http://tncimweb1.cminl.oa/uacapi/adAuth/**', mockUac);
-  await hashPage.goto(`${base}/#/reports/${id}?CertificateKey=hash-cert`);
+  const hashPage = await context.newPage();
+  await hashPage.route('http://mock-uac.test/auth/**', mockUac);
+  await hashPage.goto(`${webOrigin}/#/reports/${id}?CertificateKey=hash-cert`);
   await hashPage.getByText('2026-10-01').waitFor({ timeout: 15000 });
   assert.ok(verifyCalls.includes('hash-cert'), 'hash certificate should be exchanged');
   assert.equal(new URL(hashPage.url()).hash, `#/reports/${id}`);
   assert.equal(await hashPage.evaluate(() => localStorage.getItem('CIM_TK')), token);
   await hashPage.close();
 
-  const failedPage = await browser.newPage();
-  await failedPage.route('http://tncimweb1.cminl.oa/uacapi/adAuth/**', mockUac);
+  const failedPage = await context.newPage();
+  await failedPage.route('http://mock-uac.test/auth/**', mockUac);
   let failedReturnUrl;
   await failedPage.route('http://mock-sso.test/**', async route => {
     failedReturnUrl = new URL(route.request().url()).searchParams.get('url');
     await route.fulfill({ status: 200, contentType: 'text/html', body: 'SSO login' });
   });
-  await failedPage.goto(`${base}/?CertificateKey=bad-cert#/reports/${id}`);
+  await failedPage.goto(`${webOrigin}/?CertificateKey=bad-cert#/reports/${id}`);
   await failedPage.waitForURL('http://mock-sso.test/**', { timeout: 15000 });
   assert.ok(verifyCalls.includes('bad-cert'));
   assert.equal(new URL(failedReturnUrl).searchParams.has('CertificateKey'), false);
@@ -199,9 +220,18 @@ try {
   assert.equal(await page.locator('.publication article').first().evaluate(element => getComputedStyle(element).breakInside), 'avoid');
   const pdf = await page.pdf({ format: 'A4', printBackground: true });
   assert.ok(pdf.length > 1000, 'print PDF should contain the representative publication');
+  runtimeConfig = { ...runtimeConfig, apiBaseUrl: '' };
+  await page.goto(`${base}/${new URL(page.url()).hash}`);
+  await page.getByRole('heading', { name: '正式處會週報' }).waitFor({ timeout: 15000 });
+  runtimeConfig = { ...runtimeConfig, apiBaseUrl: '/\\evil.test' };
+  const refreshCount = refreshCalls.length;
+  await page.reload();
+  await page.getByRole('alert').getByText(/apiBaseUrl must not contain a backslash/).waitFor({ timeout: 15000 });
+  assert.equal(refreshCalls.length, refreshCount, 'invalid config must stop before login');
   console.log('Browser smoke passed: SSO return, item commit, publication, and print layout');
 } finally {
   await browser?.close();
+  if (webServer) await new Promise(resolve => webServer.close(resolve));
   api.kill();
   if (api.exitCode === null) await once(api, 'exit');
   jwks.close();

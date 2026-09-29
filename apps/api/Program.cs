@@ -13,7 +13,7 @@ builder.Services.AddSingleton<JwtVerifier>();
 builder.Services.AddHttpClient<EcimClient>();
 builder.Services.AddCors(options => options.AddPolicy("web", policy =>
 {
-    var origins = builder.Configuration.GetSection("Cors:AllowedOrigins").Get<string[]>() ?? ["http://localhost:4200"];
+    var origins = builder.Configuration.GetSection("Cors:AllowedOrigins").Get<string[]>() ?? [];
     policy.WithOrigins(origins).AllowAnyHeader().AllowAnyMethod();
 }));
 var app = builder.Build();
@@ -23,7 +23,15 @@ if (Directory.Exists(webRoot))
 {
     var files = new PhysicalFileProvider(webRoot);
     app.UseDefaultFiles(new DefaultFilesOptions { FileProvider = files });
-    app.UseStaticFiles(new StaticFileOptions { FileProvider = files });
+    app.UseStaticFiles(new StaticFileOptions
+    {
+        FileProvider = files,
+        OnPrepareResponse = context =>
+        {
+            if (context.Context.Request.Path.Equals("/assets/config.json", StringComparison.OrdinalIgnoreCase))
+                context.Context.Response.Headers.CacheControl = "no-cache";
+        }
+    });
 }
 
 app.MapGet("/api/health", () => Results.Ok(new { status = "ok" }));

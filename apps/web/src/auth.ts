@@ -3,11 +3,11 @@ import { HttpClient, HttpInterceptorFn } from '@angular/common/http';
 import { CanActivateFn, Router } from '@angular/router';
 import { firstValueFrom } from 'rxjs';
 
-const uac = 'http://tncimweb1.cminl.oa/uacapi/adAuth';
 const tokenKey = 'CIM_TK';
 const refreshKey = 'CIM_RTK';
 
 export const API_BASE_URL = new InjectionToken<string>('API_BASE_URL');
+export const UAC_BASE_URL = new InjectionToken<string>('UAC_BASE_URL');
 
 export function apiUrl(baseUrl: string, path: string): string {
   const normalizedBaseUrl = baseUrl.replace(/\/+$/, '');
@@ -17,6 +17,7 @@ export function apiUrl(baseUrl: string, path: string): string {
 @Injectable({ providedIn: 'root' })
 export class Auth {
   private http = inject(HttpClient);
+  private uac = inject(UAC_BASE_URL);
   token() { return localStorage.getItem(tokenKey); }
 
   async initialize() {
@@ -37,9 +38,9 @@ export class Auth {
     try {
       let result: { token: string; refreshToken: string };
       if (certificateKey) {
-        result = await firstValueFrom(this.http.post<{ token: string; refreshToken: string }>(`${uac}/VerifyCert`, { CertificateKey: certificateKey }));
+        result = await firstValueFrom(this.http.post<{ token: string; refreshToken: string }>(`${this.uac}/VerifyCert`, { CertificateKey: certificateKey }));
       } else {
-        result = await firstValueFrom(this.http.post<{ token: string; refreshToken: string }>(`${uac}/RefreshToken`, { refreshToken: localStorage.getItem(refreshKey) }));
+        result = await firstValueFrom(this.http.post<{ token: string; refreshToken: string }>(`${this.uac}/RefreshToken`, { refreshToken: localStorage.getItem(refreshKey) }));
       }
       this.save(result);
       this.restoreReturnPath(url);
@@ -53,7 +54,7 @@ export class Auth {
 
   async enter(path: string) {
     sessionStorage.setItem('reportReturnPath', path);
-    const urls = await firstValueFrom(this.http.get<{ loginPage: string }>(`${uac}/SsoUrl`));
+    const urls = await firstValueFrom(this.http.get<{ loginPage: string }>(`${this.uac}/SsoUrl`));
     const returnUrl = new URL(location.href);
     returnUrl.searchParams.delete('CertificateKey');
     returnUrl.hash = '';

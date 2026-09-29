@@ -1,0 +1,4 @@
+{
+  "apiBaseUrl": "http://localhost:5080",
+  "uacBaseUrl": "http://tncimweb1.cminl.oa/uacapi/adAuth"
+}

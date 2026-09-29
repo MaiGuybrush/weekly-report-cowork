@@ -21,12 +21,15 @@ dotnet run --project apps/api/WeeklyReport.Api.csproj --no-launch-profile --urls
 pnpm --dir apps/web start
 ```
 
-開啟 `http://localhost:4200`。開發伺服器會把 `/api` 轉送到 `http://localhost:5080`。
+開啟 `http://localhost:4200`。瀏覽器會讀取 `apps/web/src/assets/config.json`，直接連接其中的 API URL；
+開發伺服器不轉送 `/api`。跨來源部署時，請在 API 的 `Cors:AllowedOrigins` 明確列出 Web 來源，
+UAC 服務也必須允許 Web 來源的跨來源請求。
 
-若 Web 與 API 部署在不同的主機或連接埠，請在部署前設定 `apps/web/src/index.html` 的
-`weekly-report-api-base-url` meta 標籤，例如 `content="http://api.example.internal:5080"`。
-保留空字串則使用同源 `/api`（也相容開發 proxy）。跨來源部署時，API 也必須允許 Web
-來源的 CORS 請求。
+前端建置會把設定複製到 `/assets/config.json`。部署同一份建置到不同環境時，只需替換該 JSON 中的
+`apiBaseUrl` 與 `uacBaseUrl`；例如 `apiBaseUrl` 設為 `https://api.example.internal`。
+同源部署可將 `apiBaseUrl` 設為空字串，使用相對 `/api`。設定缺失或無效會阻止前端啟動；
+JSON 為公開檔案，不可放入密鑰。設定檔應以 `Cache-Control: no-cache` 提供，讓使用者重新整理後取得新值；
+本專案 API 提供前端靜態檔時已設定此回應標頭。HTTPS 網站的 API 與 UAC URL 也必須使用 HTTPS。
 
 部署為單一同源站點時，先建置 Web，再啟動 API；API 會提供 `apps/web/dist/weekly-report-web/browser` 內的靜態檔：
 
