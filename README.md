@@ -1,6 +1,34 @@
 # 處會週報共同編輯
 
-依 [實作規格](docs/implementation-spec.md) 建置的處會週報工作區。已具備 UAC JWT 身分驗證、按課別共編、私有草稿與租約、結構化專案時程、人事權限、不可變發布版、跨週延續、正式讀者入口，以及 eCIM 課別同步。
+依 [實作規格](docs/implementation-spec.md) 建置的處會週報工作區。已具備 UAC JWT 身分驗證、按課別共編、私有草稿與租約、結構化專案時程與甘特圖、人事權限、不可變發布版、跨週延續、正式讀者入口，以及 eCIM 課別同步與候選決策。
+
+## 建置與啟動
+
+首次使用時，在專案根目錄還原 API 與 Web 相依：
+
+```powershell
+dotnet restore apps/api/WeeklyReport.Api.csproj --configfile NuGet.Config
+pnpm --dir apps/web install
+```
+
+開發模式請分別啟動 API 與 Angular 開發伺服器：
+
+```powershell
+# 終端機 1：API
+dotnet run --project apps/api/WeeklyReport.Api.csproj --no-launch-profile --urls http://localhost:5080
+
+# 終端機 2：Web
+pnpm --dir apps/web start
+```
+
+開啟 `http://localhost:4200`。開發伺服器會把 `/api` 轉送到 `http://localhost:5080`。
+
+部署為單一同源站點時，先建置 Web，再啟動 API；API 會提供 `apps/web/dist/weekly-report-web/browser` 內的靜態檔：
+
+```powershell
+pnpm --dir apps/web build
+dotnet run --project apps/api/WeeklyReport.Api.csproj --no-launch-profile --urls http://localhost:5080
+```
 
 ## 設定
 
@@ -14,22 +42,19 @@ API 從 `apps/api/appsettings.json` 讀取 `JwksUrl` 與 `DatabasePath`。`Acces
 
 eCIM 同步設定在 `Ecim`：`BaseUrl`、選用的 `ReviewWorkPath` 與每位工程師的 `Members` 設定。每筆成員設定需包含 `Section`、`UserId`、`UpdateDateFrom`、`UpdateDateTo`，並可附上 `TimeFrom`、`TimeTo`、`Division`、`Dept`、`TeamId`。服務端憑證可用部署秘密的 `Ecim:ApiKey` 提供；不會傳給瀏覽器。
 
-## 啟動
+## 使用方式
 
-```powershell
-dotnet restore apps/api/WeeklyReport.Api.csproj --configfile NuGet.Config
-dotnet run --project apps/api/WeeklyReport.Api.csproj --no-launch-profile --urls http://localhost:5080
-```
+登入後，系統會依 UAC JWT 中的 `empNo` 對應本機帳號權限。
 
-另開終端機：
+- **Guy**：從首頁建立指定會議日期的週報、維護跨課內容、接管卡住的租約，並發布正式版。發布後仍可編輯草稿；每次發布都會產生不可變的固定連結。
+- **課長（Head）**：在自己的課別新增與編輯項目。按「開始編輯」取得 30 分鐘租約，內容先自動存為私有草稿；按「儲存完成」才會更新共用內容。
+- **專案週報維護人**：在專案項目中維護階段與重要里程碑的基準、預估與實際日期。調整基準必須填理由，可查看基準歷史。甘特圖的橫條僅供檢視；點選項目後仍以日期表單修改。
+- **eCIM 候選決策**：課長按「同步本課工程師工作」後，可針對來源候選建立項目、合併至既有項目、暫緩或忽略。已有人工修改的欄位會同時顯示上次來源、最新來源與目前週報值；可選擇維持人工版或套用來源。
+- **正式版讀者（Reader）**：僅能進入正式版與固定版本連結；可在正式頁檢視時程甘特圖與偏差，並使用瀏覽器列印。
 
-```powershell
-cd apps/web
-pnpm install
-pnpm start
-```
+一般項目可附多個來源 URL 與待決策事項。若前週延續的待決策尚未處理，發布下週週報前必須填寫決策結果或新的期限。
 
-瀏覽 `http://localhost:4200`。Angular 開發伺服器將 `/api` 轉送到本機 API。部署同源版本時，先執行 `pnpm --dir apps/web build`，API 會從 `apps/web/dist/weekly-report-web/browser` 提供靜態檔。UAC 登入需企業內網與可用的 `CertificateKey` 或 refresh token。
+UAC 登入需企業內網與可用的 `CertificateKey` 或 refresh token。
 
 ## 驗證
 
