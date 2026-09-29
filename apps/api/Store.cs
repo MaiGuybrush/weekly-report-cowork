@@ -62,12 +62,14 @@ public sealed class Store(IConfiguration config)
         EnsureColumn(db, "project_schedule_entries", "baseline_date", "TEXT");
         EnsureColumn(db, "project_schedule_entries", "forecast_date", "TEXT");
         EnsureColumn(db, "project_schedule_entries", "actual_date", "TEXT");
+        EnsureColumn(db, "project_schedule_entries", "continuity_id", "TEXT");
         EnsureColumn(db, "ecim_candidates", "candidate_type", "TEXT NOT NULL DEFAULT 'new-source'");
         EnsureColumn(db, "ecim_candidates", "reason", "TEXT");
         EnsureColumn(db, "ecim_candidates", "target_item_id", "TEXT");
         EnsureColumn(db, "ecim_candidates", "decided_by", "TEXT");
         EnsureColumn(db, "ecim_candidates", "decided_at", "TEXT");
         Sql(db, "UPDATE items SET continuity_id=id WHERE continuity_id IS NULL OR continuity_id='' ").ExecuteNonQuery();
+        Sql(db, "UPDATE project_schedule_entries SET continuity_id=id WHERE continuity_id IS NULL OR continuity_id='' ").ExecuteNonQuery();
         Sql(db, "UPDATE users SET reader_access=1 WHERE role='Reader'").ExecuteNonQuery();
         foreach (var user in config.GetSection("Access:Users").GetChildren())
         {

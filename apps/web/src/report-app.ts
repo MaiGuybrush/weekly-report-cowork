@@ -135,6 +135,7 @@ type ScheduleRevisionView = {
 };
 type ScheduleEntry = {
   id: string;
+  continuityId?: string;
   kind: "phase" | "task" | "milestone";
   name: string;
   owner?: string | null;
@@ -1047,6 +1048,15 @@ export class Home implements OnInit {
                     }
                   </div>
                 }
+                @if (hasContinuedSchedule()) {
+                  <div class="schedule-continuation-banner">
+                    <span class="continuation-icon">📌</span>
+                    <div class="continuation-info">
+                      <strong>本專案時程已延續自前週發布版</strong>
+                      <p>穩定邏輯身分、內部前置關聯、跨部門外部相依與歷史修訂已完整延續；新週修改與前週發布版完全隔離。</p>
+                    </div>
+                  </div>
+                }
                 <ul>
                   @for (entry of scheduleDisplayEntries(); track entry.id) {
                     <li [class.schedule-task]="entry.kind === 'task'" [class.schedule-milestone]="entry.kind === 'milestone'" [class.schedule-phase]="entry.kind === 'phase'">
@@ -1055,6 +1065,9 @@ export class Home implements OnInit {
                           entry.name
                         }}</strong
                       >
+                      @if (entry.continuityId) {
+                        <span class="continuity-badge" [title]="'跨週穩定身分: ' + entry.continuityId">身分 #{{ entry.continuityId.slice(0, 6) }}</span>
+                      }
                       <span class="schedule-state" [attr.data-state]="entry.state">{{ scheduleStateLabel(entry.state) }}</span>
                       @if (entry.kind === 'task') { <span class="schedule-owner">負責 {{ entry.owner }} · {{ phaseName(entry.phaseId) }}</span> }
                       @if (entry.kind === 'milestone') {
@@ -1137,6 +1150,9 @@ export class Home implements OnInit {
                               <strong class="cancelled-name">
                                 <del>{{ entry.kind === "phase" ? "階段" : entry.kind === "task" ? "關鍵任務" : "重要里程碑" }}：{{ entry.name }}</del>
                               </strong>
+                              @if (entry.continuityId) {
+                                <span class="continuity-badge" [title]="'跨週穩定身分: ' + entry.continuityId">身分 #{{ entry.continuityId.slice(0, 6) }}</span>
+                              }
                               <span class="schedule-state" data-state="cancelled">已取消</span>
                               @if (entry.kind === 'task' && entry.owner) {
                                 <span class="schedule-owner">原負責 {{ entry.owner }}</span>
@@ -2213,6 +2229,9 @@ export class ReportEditor implements OnInit, OnDestroy {
   phaseName(id: string | null | undefined) {
     return id ? this.scheduleEntries.find(entry => entry.id === id)?.name ?? "未知階段" : "專案直屬";
   }
+  hasContinuedSchedule(): boolean {
+    return this.scheduleEntries.some(e => !!e.continuityId && e.continuityId !== e.id);
+  }
   scheduleDisplayEntries() {
     const active = this.scheduleEntries.filter(entry => entry.state !== "cancelled");
     const phases = active.filter(entry => entry.kind === "phase");
@@ -2925,6 +2944,9 @@ export class ReportEditor implements OnInit, OnDestroy {
                             entry.kind === "phase" ? "階段" : entry.kind === "task" ? "關鍵任務" : "重要里程碑"
                           }}：{{ entry.name }}</strong
                         >
+                        @if (entry.continuityId) {
+                          <span class="continuity-badge" [title]="'跨週穩定身分: ' + entry.continuityId">身分 #{{ entry.continuityId.slice(0, 6) }}</span>
+                        }
                         @if (entry.kind === 'task') { · 負責 {{ entry.owner }} }
                         @if (entry.kind === 'milestone') {
                           · {{ entry.state === 'achieved' ? '實際達成' : '最新目標' }} {{ (entry.state === 'achieved' ? entry.actualDate : entry.forecastDate) || "—" }}
@@ -3000,6 +3022,9 @@ export class ReportEditor implements OnInit, OnDestroy {
                         @for (entry of cancelledPublicationEntries(item.schedule || []); track entry.id) {
                           <li>
                             <del><strong>{{ entry.kind === "phase" ? "階段" : entry.kind === "task" ? "關鍵任務" : "重要里程碑" }}：{{ entry.name }}</strong></del>
+                            @if (entry.continuityId) {
+                              <span class="continuity-badge" [title]="'跨週穩定身分: ' + entry.continuityId">身分 #{{ entry.continuityId.slice(0, 6) }}</span>
+                            }
                             <span class="schedule-state" data-state="cancelled">已取消</span>
                             @if (entry.kind === 'task' && entry.owner) { <span> · 原負責 {{ entry.owner }}</span> }
                             @if (entry.kind === 'milestone') {

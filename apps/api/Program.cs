@@ -104,17 +104,211 @@ app.MapPost("/api/reports", (HttpContext ctx, Store store, CreateReport request)
     {
         var snapshot = PreviousPublication(db, request.MeetingDate);
         if (snapshot is not null)
+        {
             foreach (var item in snapshot.Items.Where(item => item.Status != "closed"))
             {
                 var carriedId = Guid.NewGuid().ToString();
                 Store.Sql(db, "INSERT INTO items(id,report_id,continuity_id,section,owner_section,title,content,details,status,version,created_by) VALUES($id,$report,$continuity,$section,$owner,$title,$content,$details,$status,1,$actor)",
                     ("$id", carriedId), ("$report", newReportId), ("$continuity", item.ContinuityId), ("$section", item.Section), ("$owner", item.OwnerSection), ("$title", item.Title), ("$content", item.Content), ("$details", CarryDetails(item)), ("$status", item.Status), ("$actor", Current(ctx).EmpNo)).ExecuteNonQuery();
+
+                using (var pRows = Store.Sql(db, "SELECT section FROM project_participants WHERE project_id=$oldProject", ("$oldProject", item.Id)).ExecuteReader())
+                {
+                    var parts = new List<string>();
+                    while (pRows.Read()) parts.Add(pRows.GetString(0));
+                    pRows.Close();
+                    foreach (var p in parts)
+                    {
+                        Store.Sql(db, "INSERT INTO project_participants(project_id,section) VALUES($project,$section) ON CONFLICT DO NOTHING",
+                            ("$project", carriedId), ("$section", p)).ExecuteNonQuery();
+                    }
+                }
+
                 var schedule = item.Schedule ?? [];
                 var carriedIds = schedule.ToDictionary(entry => entry.Id, _ => Guid.NewGuid().ToString());
+
                 foreach (var entry in schedule.Where(entry => entry.Kind == "phase").Concat(schedule.Where(entry => entry.Kind != "phase")))
-                    Store.Sql(db, "INSERT INTO project_schedule_entries(id,project_id,kind,name,baseline_start,baseline_end,forecast_start,forecast_end,actual_start,actual_end,state,owner,phase_id,version,created_by,updated_at,baseline_date,forecast_date,actual_date) VALUES($id,$project,$kind,$name,$baselineStart,$baselineEnd,$forecastStart,$forecastEnd,$actualStart,$actualEnd,$state,$owner,$phase,$version,$actor,$at,$baselineDate,$forecastDate,$actualDate)",
-                        ("$id", carriedIds[entry.Id]), ("$project", carriedId), ("$kind", entry.Kind), ("$name", entry.Name), ("$baselineStart", entry.BaselineStart), ("$baselineEnd", entry.BaselineEnd), ("$forecastStart", entry.ForecastStart), ("$forecastEnd", entry.ForecastEnd), ("$actualStart", entry.ActualStart), ("$actualEnd", entry.ActualEnd), ("$state", entry.State), ("$owner", entry.Owner), ("$phase", entry.PhaseId is null ? null : carriedIds.GetValueOrDefault(entry.PhaseId)), ("$version", entry.Version), ("$actor", Current(ctx).EmpNo), ("$at", DateTimeOffset.UtcNow.ToString("O")), ("$baselineDate", entry.BaselineDate), ("$forecastDate", entry.ForecastDate), ("$actualDate", entry.ActualDate)).ExecuteNonQuery();
+                {
+                    var newEntryId = carriedIds[entry.Id];
+                    var continuityId = !string.IsNullOrWhiteSpace(entry.ContinuityId) ? entry.ContinuityId : entry.Id;
+                    Store.Sql(db, """
+                        INSERT INTO project_schedule_entries(
+                            id,project_id,continuity_id,kind,name,baseline_start,baseline_end,
+                            forecast_start,forecast_end,actual_start,actual_end,state,owner,
+                            phase_id,version,created_by,updated_at,baseline_date,forecast_date,actual_date
+                        ) VALUES(
+                            $id,$project,$continuityId,$kind,$name,$baselineStart,$baselineEnd,
+                            $forecastStart,$forecastEnd,$actualStart,$actualEnd,$state,$owner,
+                            $phase,$version,$actor,$at,$baselineDate,$forecastDate,$actualDate
+                        )
+                        """,
+                        ("$id", newEntryId), ("$project", carriedId), ("$continuityId", continuityId),
+                        ("$kind", entry.Kind), ("$name", entry.Name), ("$baselineStart", entry.BaselineStart),
+                        ("$baselineEnd", entry.BaselineEnd), ("$forecastStart", entry.ForecastStart),
+                        ("$forecastEnd", entry.ForecastEnd), ("$actualStart", entry.ActualStart),
+                        ("$actualEnd", entry.ActualEnd), ("$state", entry.State), ("$owner", entry.Owner),
+                        ("$phase", entry.PhaseId is null ? null : carriedIds.GetValueOrDefault(entry.PhaseId)),
+                        ("$version", entry.Version), ("$actor", Current(ctx).EmpNo), ("$at", DateTimeOffset.UtcNow.ToString("O")),
+                        ("$baselineDate", entry.BaselineDate), ("$forecastDate", entry.ForecastDate),
+                        ("$actualDate", entry.ActualDate)).ExecuteNonQuery();
+
+                    if (entry.History is not null && entry.History.Count > 0)
+                    {
+                        foreach (var rev in entry.History)
+                        {
+                            Store.Sql(db, """
+                                INSERT INTO project_schedule_revisions(entry_id,actor,at,action,reason,before_state,after_state)
+                                VALUES($entry,$actor,$at,$action,$reason,$before,$after)
+                                """,
+                                ("$entry", newEntryId), ("$actor", rev.Actor), ("$at", rev.At),
+                                ("$action", rev.Action), ("$reason", rev.Reason),
+                                ("$before", rev.Before is null ? null : System.Text.Json.JsonSerializer.Serialize(rev.Before)),
+                                ("$after", rev.After is null ? "{}" : System.Text.Json.JsonSerializer.Serialize(rev.After))).ExecuteNonQuery();
+                        }
+                    }
+                    else
+                    {
+                        using var revRows = Store.Sql(db, "SELECT actor,at,action,reason,before_state,after_state FROM project_schedule_revisions WHERE entry_id=$oldId ORDER BY id", ("$oldId", entry.Id)).ExecuteReader();
+                        var revList = new List<(string actor, string at, string action, string? reason, string? before, string after)>();
+                        while (revRows.Read())
+                        {
+                            revList.Add((revRows.GetString(0), revRows.GetString(1), revRows.GetString(2), NullableString(revRows, 3), NullableString(revRows, 4), revRows.GetString(5)));
+                        }
+                        revRows.Close();
+                        foreach (var r in revList)
+                        {
+                            Store.Sql(db, """
+                                INSERT INTO project_schedule_revisions(entry_id,actor,at,action,reason,before_state,after_state)
+                                VALUES($entry,$actor,$at,$action,$reason,$before,$after)
+                                """,
+                                ("$entry", newEntryId), ("$actor", r.actor), ("$at", r.at),
+                                ("$action", r.action), ("$reason", r.reason), ("$before", r.before),
+                                ("$after", r.after)).ExecuteNonQuery();
+                        }
+                    }
+
+                    using (var bRows = Store.Sql(db, "SELECT actor,at,before_baseline_start,before_baseline_end,after_baseline_start,after_baseline_end,reason FROM project_baseline_history WHERE entry_id=$oldId ORDER BY id", ("$oldId", entry.Id)).ExecuteReader())
+                    {
+                        var bList = new List<(string actor, string at, string? bsStart, string? bsEnd, string? asStart, string? asEnd, string reason)>();
+                        while (bRows.Read())
+                        {
+                            bList.Add((bRows.GetString(0), bRows.GetString(1), NullableString(bRows, 2), NullableString(bRows, 3), NullableString(bRows, 4), NullableString(bRows, 5), bRows.GetString(6)));
+                        }
+                        bRows.Close();
+                        foreach (var b in bList)
+                        {
+                            Store.Sql(db, """
+                                INSERT INTO project_baseline_history(entry_id,actor,at,before_baseline_start,before_baseline_end,after_baseline_start,after_baseline_end,reason)
+                                VALUES($entry,$actor,$at,$bsStart,$bsEnd,$asStart,$asEnd,$reason)
+                                """,
+                                ("$entry", newEntryId), ("$actor", b.actor), ("$at", b.at),
+                                ("$bsStart", b.bsStart), ("$bsEnd", b.bsEnd), ("$asStart", b.asStart),
+                                ("$asEnd", b.asEnd), ("$reason", b.reason)).ExecuteNonQuery();
+                        }
+                    }
+                }
+
+                using (var depRows = Store.Sql(db, "SELECT predecessor_id, successor_id, created_by, created_at, reason FROM project_schedule_dependencies WHERE project_id=$oldProject", ("$oldProject", item.Id)).ExecuteReader())
+                {
+                    var depList = new List<(string pred, string succ, string actor, string at, string reason)>();
+                    while (depRows.Read())
+                    {
+                        var p = depRows.GetString(0);
+                        var s = depRows.GetString(1);
+                        if (carriedIds.ContainsKey(p) && carriedIds.ContainsKey(s))
+                        {
+                            depList.Add((carriedIds[p], carriedIds[s], depRows.GetString(2), depRows.GetString(3), depRows.GetString(4)));
+                        }
+                    }
+                    depRows.Close();
+                    foreach (var dep in depList)
+                    {
+                        Store.Sql(db, """
+                            INSERT INTO project_schedule_dependencies(id,project_id,predecessor_id,successor_id,created_by,created_at,reason)
+                            VALUES($id,$project,$pred,$succ,$actor,$at,$reason)
+                            ON CONFLICT(predecessor_id, successor_id) DO NOTHING
+                            """,
+                            ("$id", Guid.NewGuid().ToString()), ("$project", carriedId),
+                            ("$pred", dep.pred), ("$succ", dep.succ),
+                            ("$actor", dep.actor), ("$at", dep.at), ("$reason", dep.reason)).ExecuteNonQuery();
+                    }
+                }
+
+                foreach (var entry in schedule)
+                {
+                    if (entry.Predecessors is not null)
+                    {
+                        foreach (var p in entry.Predecessors)
+                        {
+                            if (carriedIds.TryGetValue(p.Id, out var newPredId) && carriedIds.TryGetValue(entry.Id, out var newSuccId))
+                            {
+                                Store.Sql(db, """
+                                    INSERT INTO project_schedule_dependencies(id,project_id,predecessor_id,successor_id,created_by,created_at,reason)
+                                    VALUES($id,$project,$pred,$succ,$actor,$at,$reason)
+                                    ON CONFLICT(predecessor_id, successor_id) DO NOTHING
+                                    """,
+                                    ("$id", Guid.NewGuid().ToString()), ("$project", carriedId),
+                                    ("$pred", newPredId), ("$succ", newSuccId),
+                                    ("$actor", Current(ctx).EmpNo), ("$at", DateTimeOffset.UtcNow.ToString("O")),
+                                    ("$reason", "跨週延續內部前置相依")).ExecuteNonQuery();
+                            }
+                        }
+                    }
+                }
+
+                var externalDeps = item.ExternalDependencies ?? [];
+                var carriedDepIds = externalDeps.ToDictionary(dep => dep.Id, _ => Guid.NewGuid().ToString());
+                foreach (var dep in externalDeps)
+                {
+                    var newDepId = carriedDepIds[dep.Id];
+                    Store.Sql(db, """
+                        INSERT INTO project_external_dependencies(id,project_id,description,supplier,due_date,status,created_by,created_at,updated_at)
+                        VALUES($id,$project,$desc,$supplier,$dueDate,$status,$actor,$createdAt,$updatedAt)
+                        """,
+                        ("$id", newDepId), ("$project", carriedId), ("$desc", dep.Description),
+                        ("$supplier", dep.Supplier), ("$dueDate", dep.DueDate), ("$status", dep.Status),
+                        ("$actor", dep.CreatedBy), ("$createdAt", dep.CreatedAt), ("$updatedAt", dep.UpdatedAt)).ExecuteNonQuery();
+
+                    foreach (var h in dep.History ?? [])
+                    {
+                        Store.Sql(db, """
+                            INSERT INTO project_external_dependency_history(external_dependency_id,actor,at,action,reason,schedule_entry_id,schedule_entry_name)
+                            VALUES($depId,$actor,$at,$action,$reason,$schedId,$schedName)
+                            """,
+                            ("$depId", newDepId), ("$actor", h.Actor), ("$at", h.At),
+                            ("$action", h.Action), ("$reason", h.Reason),
+                            ("$schedId", h.ScheduleEntryId is not null && carriedIds.ContainsKey(h.ScheduleEntryId) ? carriedIds[h.ScheduleEntryId] : null),
+                            ("$schedName", h.ScheduleEntryName)).ExecuteNonQuery();
+                    }
+
+                    foreach (var link in dep.LinkedScheduleEntries ?? [])
+                    {
+                        if (carriedIds.TryGetValue(link.ScheduleEntryId, out var newSchedEntryId))
+                        {
+                            var linkInfo = Store.Sql(db, "SELECT created_by,created_at,reason FROM project_external_dependency_links WHERE external_dependency_id=$oldDep AND schedule_entry_id=$oldSched", ("$oldDep", dep.Id), ("$oldSched", link.ScheduleEntryId)).ExecuteReader();
+                            string lActor = dep.CreatedBy;
+                            string lAt = dep.CreatedAt;
+                            string lReason = "延續跨部門相依關聯";
+                            if (linkInfo.Read())
+                            {
+                                lActor = linkInfo.GetString(0);
+                                lAt = linkInfo.GetString(1);
+                                lReason = linkInfo.GetString(2);
+                            }
+                            linkInfo.Close();
+
+                            Store.Sql(db, """
+                                INSERT INTO project_external_dependency_links(id,project_id,external_dependency_id,schedule_entry_id,created_by,created_at,reason)
+                                VALUES($id,$project,$depId,$schedId,$actor,$at,$reason)
+                                ON CONFLICT(external_dependency_id, schedule_entry_id) DO NOTHING
+                                """,
+                                ("$id", Guid.NewGuid().ToString()), ("$project", carriedId),
+                                ("$depId", newDepId), ("$schedId", newSchedEntryId),
+                                ("$actor", lActor), ("$at", lAt), ("$reason", lReason)).ExecuteNonQuery();
+                        }
+                    }
+                }
             }
+        }
     }
     tx.Commit();
     return Results.Ok(new { id, request.MeetingDate, sections = ReportSections.All });
@@ -676,8 +870,8 @@ app.MapPost("/api/items/{itemId}/schedule", (HttpContext ctx, Store store, strin
         if (conflict is not null) return conflict;
         var id = Guid.NewGuid().ToString();
         var at = DateTimeOffset.UtcNow.ToString("O");
-        Store.Sql(db, "INSERT INTO project_schedule_entries(id,project_id,kind,name,baseline_date,forecast_date,actual_date,state,created_by,updated_at) VALUES($id,$project,'milestone',$name,$targetDate,$targetDate,NULL,'pending',$actor,$at)",
-            ("$id", id), ("$project", itemId), ("$name", request.Name.Trim()), ("$targetDate", targetDate), ("$actor", Current(ctx).EmpNo), ("$at", at)).ExecuteNonQuery();
+        Store.Sql(db, "INSERT INTO project_schedule_entries(id,continuity_id,project_id,kind,name,baseline_date,forecast_date,actual_date,state,created_by,updated_at) VALUES($id,$continuity,$project,'milestone',$name,$targetDate,$targetDate,NULL,'pending',$actor,$at)",
+            ("$id", id), ("$continuity", id), ("$project", itemId), ("$name", request.Name.Trim()), ("$targetDate", targetDate), ("$actor", Current(ctx).EmpNo), ("$at", at)).ExecuteNonQuery();
         var created = ScheduleEntry(db, id)!;
         SaveScheduleRevision(db, id, Current(ctx).EmpNo, at, "create", null, null, created);
         AdvanceProjectVersion(db, item);
@@ -689,8 +883,8 @@ app.MapPost("/api/items/{itemId}/schedule", (HttpContext ctx, Store store, strin
     if (conflictPhaseTask is not null) return conflictPhaseTask;
     var phaseTaskId = Guid.NewGuid().ToString();
     var phaseTaskAt = DateTimeOffset.UtcNow.ToString("O");
-    Store.Sql(db, "INSERT INTO project_schedule_entries(id,project_id,kind,name,baseline_start,baseline_end,forecast_start,forecast_end,actual_start,actual_end,state,owner,phase_id,created_by,updated_at) VALUES($id,$project,$kind,$name,$baselineStart,$baselineEnd,$forecastStart,$forecastEnd,$actualStart,$actualEnd,$state,$owner,$phase,$actor,$at)",
-        ("$id", phaseTaskId), ("$project", itemId), ("$kind", request.Kind), ("$name", request.Name!.Trim()), ("$baselineStart", request.BaselineStart), ("$baselineEnd", request.BaselineEnd), ("$forecastStart", request.ForecastStart), ("$forecastEnd", request.ForecastEnd), ("$actualStart", request.ActualStart), ("$actualEnd", request.ActualEnd), ("$state", request.State), ("$owner", request.Kind == "task" ? request.Owner!.Trim() : null), ("$phase", request.PhaseId), ("$actor", Current(ctx).EmpNo), ("$at", phaseTaskAt)).ExecuteNonQuery();
+    Store.Sql(db, "INSERT INTO project_schedule_entries(id,continuity_id,project_id,kind,name,baseline_start,baseline_end,forecast_start,forecast_end,actual_start,actual_end,state,owner,phase_id,created_by,updated_at) VALUES($id,$continuity,$project,$kind,$name,$baselineStart,$baselineEnd,$forecastStart,$forecastEnd,$actualStart,$actualEnd,$state,$owner,$phase,$actor,$at)",
+        ("$id", phaseTaskId), ("$continuity", phaseTaskId), ("$project", itemId), ("$kind", request.Kind), ("$name", request.Name!.Trim()), ("$baselineStart", request.BaselineStart), ("$baselineEnd", request.BaselineEnd), ("$forecastStart", request.ForecastStart), ("$forecastEnd", request.ForecastEnd), ("$actualStart", request.ActualStart), ("$actualEnd", request.ActualEnd), ("$state", request.State), ("$owner", request.Kind == "task" ? request.Owner!.Trim() : null), ("$phase", request.PhaseId), ("$actor", Current(ctx).EmpNo), ("$at", phaseTaskAt)).ExecuteNonQuery();
     var createdPhaseTask = ScheduleEntry(db, phaseTaskId)!;
     SaveScheduleRevision(db, phaseTaskId, Current(ctx).EmpNo, phaseTaskAt, "create", null, null, createdPhaseTask);
     AdvanceProjectVersion(db, item);
@@ -1754,10 +1948,10 @@ static List<ExternalDependencyView> GetExternalDependencies(SqliteConnection db,
 }
 static List<ScheduleEntry> ScheduleEntries(SqliteConnection db, string itemId, bool includeHistory = false)
 {
-    using var rows = Store.Sql(db, "SELECT id,project_id,kind,name,baseline_start,baseline_end,forecast_start,forecast_end,actual_start,actual_end,version,state,owner,phase_id,baseline_date,forecast_date,actual_date FROM project_schedule_entries WHERE project_id=$project ORDER BY rowid", ("$project", itemId)).ExecuteReader();
+    using var rows = Store.Sql(db, "SELECT id,project_id,kind,name,baseline_start,baseline_end,forecast_start,forecast_end,actual_start,actual_end,version,state,owner,phase_id,baseline_date,forecast_date,actual_date,continuity_id FROM project_schedule_entries WHERE project_id=$project ORDER BY rowid", ("$project", itemId)).ExecuteReader();
     var rawEntries = new List<ScheduleEntry>();
     while (rows.Read())
-        rawEntries.Add(new ScheduleEntry(rows.GetString(0), rows.GetString(1), rows.GetString(2), rows.GetString(3), NullableString(rows, 4), NullableString(rows, 5), NullableString(rows, 6), NullableString(rows, 7), NullableString(rows, 8), NullableString(rows, 9), rows.GetInt32(10), rows.GetString(11), NullableString(rows, 12), NullableString(rows, 13), null, NullableString(rows, 14), NullableString(rows, 15), NullableString(rows, 16)));
+        rawEntries.Add(new ScheduleEntry(rows.GetString(0), rows.GetString(1), rows.GetString(2), rows.GetString(3), NullableString(rows, 4), NullableString(rows, 5), NullableString(rows, 6), NullableString(rows, 7), NullableString(rows, 8), NullableString(rows, 9), rows.GetInt32(10), rows.GetString(11), NullableString(rows, 12), NullableString(rows, 13), null, NullableString(rows, 14), NullableString(rows, 15), NullableString(rows, 16), null, null, null, null, null, NullableString(rows, 17) ?? rows.GetString(0)));
     rows.Close();
 
     var links = new List<(string PredecessorId, string SuccessorId)>();
@@ -1853,8 +2047,8 @@ static List<ScheduleEntry> ScheduleEntries(SqliteConnection db, string itemId, b
 }
 static ScheduleEntry? ScheduleEntry(SqliteConnection db, string entryId)
 {
-    using var rows = Store.Sql(db, "SELECT id,project_id,kind,name,baseline_start,baseline_end,forecast_start,forecast_end,actual_start,actual_end,version,state,owner,phase_id,baseline_date,forecast_date,actual_date FROM project_schedule_entries WHERE id=$id", ("$id", entryId)).ExecuteReader();
-    return rows.Read() ? new ScheduleEntry(rows.GetString(0), rows.GetString(1), rows.GetString(2), rows.GetString(3), NullableString(rows, 4), NullableString(rows, 5), NullableString(rows, 6), NullableString(rows, 7), NullableString(rows, 8), NullableString(rows, 9), rows.GetInt32(10), rows.GetString(11), NullableString(rows, 12), NullableString(rows, 13), null, NullableString(rows, 14), NullableString(rows, 15), NullableString(rows, 16)) : null;
+    using var rows = Store.Sql(db, "SELECT id,project_id,kind,name,baseline_start,baseline_end,forecast_start,forecast_end,actual_start,actual_end,version,state,owner,phase_id,baseline_date,forecast_date,actual_date,continuity_id FROM project_schedule_entries WHERE id=$id", ("$id", entryId)).ExecuteReader();
+    return rows.Read() ? new ScheduleEntry(rows.GetString(0), rows.GetString(1), rows.GetString(2), rows.GetString(3), NullableString(rows, 4), NullableString(rows, 5), NullableString(rows, 6), NullableString(rows, 7), NullableString(rows, 8), NullableString(rows, 9), rows.GetInt32(10), rows.GetString(11), NullableString(rows, 12), NullableString(rows, 13), null, NullableString(rows, 14), NullableString(rows, 15), NullableString(rows, 16), null, null, null, null, null, NullableString(rows, 17) ?? rows.GetString(0)) : null;
 }
 static ReportSnapshot Snapshot(SqliteConnection db, string reportId, IConfiguration config)
 {
@@ -1941,7 +2135,7 @@ record ExternalDependencyView(string Id, string ProjectId, string Description, s
 record ExternalDependencyRequest(string? Description, string? Supplier, string? DueDate, string? Status, string? Reason, string? Token, int? BaseProjectVersion);
 record ExternalDependencyLinkRequest(string? ScheduleEntryId, string? Reason, string? Token, int? BaseProjectVersion);
 record ScheduleRevisionView(string Actor, string At, string Action, string? Reason, System.Text.Json.JsonElement? Before, System.Text.Json.JsonElement? After);
-record ScheduleEntry(string Id, string ProjectId, string Kind, string Name, string? BaselineStart, string? BaselineEnd, string? ForecastStart, string? ForecastEnd, string? ActualStart, string? ActualEnd, int Version, string State = "open", string? Owner = null, string? PhaseId = null, List<string>? UnfinishedTasks = null, string? BaselineDate = null, string? ForecastDate = null, string? ActualDate = null, List<DependencyRef>? Predecessors = null, List<DependencyRef>? Successors = null, List<DependencyWarning>? Warnings = null, List<ExternalDeliveryNotice>? ExternalNotices = null, List<ScheduleRevisionView>? History = null);
+record ScheduleEntry(string Id, string ProjectId, string Kind, string Name, string? BaselineStart, string? BaselineEnd, string? ForecastStart, string? ForecastEnd, string? ActualStart, string? ActualEnd, int Version, string State = "open", string? Owner = null, string? PhaseId = null, List<string>? UnfinishedTasks = null, string? BaselineDate = null, string? ForecastDate = null, string? ActualDate = null, List<DependencyRef>? Predecessors = null, List<DependencyRef>? Successors = null, List<DependencyWarning>? Warnings = null, List<ExternalDeliveryNotice>? ExternalNotices = null, List<ScheduleRevisionView>? History = null, string? ContinuityId = null);
 record PublishedItem(string Id, string ContinuityId, string Section, string OwnerSection, string Title, string Content, string Status, int Version, string Details = "{}", List<ScheduleEntry>? Schedule = null, List<ExternalDependencyView>? ExternalDependencies = null);
 record SourceStatus(string Section, string Status, string? PeriodFrom, string? PeriodTo, string? FinishedAt);
 record FieldOrigin(string? LastSourceValue, string LatestSourceValue, string ReportValue, bool HumanOverride);

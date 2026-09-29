@@ -426,6 +426,7 @@ try {
   await page.getByRole('button', { name: '發布正式版' }).click();
   const publication = page.getByRole('link', { name: '查看剛發布的固定版本' });
   await publication.waitFor({ timeout: 15000 });
+  const publicationHref = await publication.getAttribute('href');
   await publication.click();
   await page.getByRole('heading', { name: '正式處會週報' }).waitFor({ timeout: 15000 });
   await page.getByText('版本 1').waitFor({ timeout: 15000 });
@@ -440,6 +441,7 @@ try {
   assert.ok(!pubMilestoneText.includes('–'), 'publication milestone must not display date range');
   assert.ok(pubMilestoneText.includes('實際達成 2026-10-18'), 'publication milestone should display actual date');
   assert.ok(pubMilestoneText.includes('前置：驗收階段'), 'publication milestone should display predecessor chip');
+  assert.ok(await page.locator('.continuity-badge').count() > 0, 'continuity badge should be displayed on published schedule entries');
   assert.equal(await page.getByRole('heading', { name: '交接維運系統', exact: true }).count(), 1);
   assert.equal(await page.getByText('完成簽收').waitFor({ timeout: 15000 }), undefined);
   assert.ok(await page.locator('.publication-cancelled-section').count() > 0, 'cancelled section should exist in publication');
@@ -453,8 +455,6 @@ try {
   assert.ok(await page.getByText('時程修訂歷程').count() > 0, 'history modal should open and display title');
   assert.ok(await page.locator('.history-timeline-entry').count() > 0, 'history timeline should show entries');
   await page.locator('.history-modal-footer .btn-ghost').click();
-  await page.locator('.history-modal').waitFor({ state: 'detached', timeout: 5000 });
-
   await page.getByRole('link', { name: '來源' }).waitFor({ timeout: 15000 });
   await page.getByText('確認負責人', { exact: false }).waitFor({ timeout: 15000 });
   assert.match(page.url(), new RegExp(`#/publications/`));
@@ -465,8 +465,27 @@ try {
   assert.equal(await page.locator('.publication article').first().evaluate(element => getComputedStyle(element).breakInside), 'avoid');
   const pdf = await page.pdf({ format: 'A4', printBackground: true });
   assert.ok(pdf.length > 1000, 'print PDF should contain the representative publication');
+  await page.emulateMedia({ media: 'screen' });
+
+  // 驗證新週時程延續工作畫面 (Issue #9)
+  await page.goto(`${webOrigin}/#/`);
+  await page.locator('input[type="date"]').fill('2026-10-08');
+  await page.getByRole('button', { name: '建立或開啟週報' }).click();
+  await page.waitForURL(/.*#\/reports\/.+/);
+  await page.getByRole('heading', { name: '處會週報' }).waitFor({ timeout: 15000 });
+  const carriedItemBtn = page.getByRole('button', { name: '專案摘要', exact: true });
+  await carriedItemBtn.waitFor({ timeout: 15000 });
+  await carriedItemBtn.click();
+  const newWeekSchedulePanel = page.locator('.project-schedule');
+  await newWeekSchedulePanel.waitFor({ timeout: 15000 });
+  await newWeekSchedulePanel.locator('.schedule-continuation-banner').waitFor({ timeout: 15000 });
+  assert.ok(await newWeekSchedulePanel.locator('.schedule-continuation-banner').count() > 0, 'continuation banner should show on carried project schedule');
+  await newWeekSchedulePanel.locator('.continuity-badge').first().waitFor({ timeout: 15000 });
+  assert.ok(await newWeekSchedulePanel.locator('.continuity-badge').count() > 0, 'continuity badges should show on carried schedule entries');
+  assert.ok(await newWeekSchedulePanel.locator('.cancelled-section').count() > 0, 'cancelled section should remain hidden by default in new week');
+  assert.equal(await newWeekSchedulePanel.locator('ul.cancelled-list').isVisible(), false, 'cancelled items should be collapsed by default');
   runtimeConfig = { ...runtimeConfig, apiBaseUrl: '' };
-  await page.goto(`${base}/${new URL(page.url()).hash}`);
+  await page.goto(`${base}/${publicationHref}`);
   await page.getByRole('heading', { name: '正式處會週報' }).waitFor({ timeout: 15000 });
   runtimeConfig = { ...runtimeConfig, apiBaseUrl: '/\\evil.test' };
   const refreshCount = refreshCalls.length;

@@ -1093,6 +1093,107 @@ try {
   assert.equal(carriedSchedule.find(entry => entry.name === 'Build accepted').baselineEnd, '2026-10-08');
   assert.equal(carriedSchedule.find(entry => entry.name === 'Cross-phase handoff').phaseId, carriedSchedule.find(entry => entry.name === 'Build accepted').id);
   assert.equal(carriedSchedule.find(entry => entry.name === 'Acceptance and security checks').owner, 'Partner division');
+
+  // Issue #9 完整時程跨週延續驗證：
+  // 1. 驗證穩定邏輯身分 (ContinuityId) 跨週一致性
+  const originalMilestone = currentSchedList.find(e => e.id === milestone.body.id);
+  const carriedMilestone = carriedSchedule.find(entry => entry.name === 'Design Review');
+  assert.ok(carriedMilestone, 'Design Review milestone must be carried over');
+  assert.notEqual(carriedMilestone.id, originalMilestone.id, 'Carried milestone must have new independent ID');
+  assert.equal(carriedMilestone.continuityId, originalMilestone.continuityId, 'Carried milestone must retain same continuityId');
+
+  const originalBuild = currentSchedList.find(e => e.name === 'Build accepted');
+  const carriedBuild = carriedSchedule.find(e => e.name === 'Build accepted');
+  assert.ok(carriedBuild, 'Build accepted phase must be carried over');
+  assert.notEqual(carriedBuild.id, originalBuild.id, 'Carried phase must have new independent ID');
+  assert.equal(carriedBuild.continuityId, originalBuild.continuityId, 'Carried phase must retain same continuityId');
+
+  // 2. 驗證建立與修改歷程跨週延續
+  const carriedMilestoneHistory = await call(`/api/items/${scheduleCarried.id}/schedule/${carriedMilestone.id}/history`, 'H1');
+  assert.equal(carriedMilestoneHistory.status, 200);
+  assert.ok(carriedMilestoneHistory.body.length >= secondPubMilestone.history.length, 'Carried milestone must retain full revision history from previous publication');
+  assert.ok(carriedMilestoneHistory.body.some(h => h.action === 'create'), 'Must include initial creation in carried history');
+  assert.ok(carriedMilestoneHistory.body.some(h => (h.action === 'update' || h.action === 'reschedule') && h.reason?.includes('延後上線時程')), 'Must include update/reschedule in carried history');
+
+  // 3. 驗證已完成和已取消項目的延續
+  const carriedCancelledTask = carriedSchedule.find(e => e.name === 'Temp Child Task');
+  assert.ok(carriedCancelledTask, 'Cancelled task must be carried over');
+  assert.equal(carriedCancelledTask.state, 'cancelled', 'Cancelled state must be preserved');
+  assert.notEqual(carriedCancelledTask.id, tempTask.body.id);
+  assert.equal(carriedCancelledTask.continuityId, tempTask.body.id);
+
+  const carriedCancelledPhase = carriedSchedule.find(e => e.name === 'Temp Phase for Cancellation');
+  assert.ok(carriedCancelledPhase, 'Cancelled phase must be carried over');
+  assert.equal(carriedCancelledPhase.state, 'cancelled');
+
+  // 4. 驗證內部前置連結延續：指向新週項目的獨立 ID，而非前週 ID
+  const carriedHandoff = carriedSchedule.find(e => e.name === 'Cross-phase handoff');
+  assert.ok(carriedHandoff, 'Cross-phase handoff must be carried over');
+  if (carriedHandoff.predecessors?.length) {
+    for (const pred of carriedHandoff.predecessors) {
+      assert.ok(carriedSchedule.some(e => e.id === pred.id), 'Predecessor link must point to carried item in new week');
+      assert.notEqual(pred.id, originalBuild.id, 'Predecessor link must not point to previous week entity');
+    }
+  }
+
+  // 5. 驗證跨部門相依事項與關聯延續
+  const carriedExtDeps = await call(`/api/items/${scheduleCarried.id}/external-dependencies`, 'H1');
+  assert.equal(carriedExtDeps.status, 200);
+  assert.ok(carriedExtDeps.body.length > 0, 'External dependencies must be carried over');
+  const carriedExt1 = carriedExtDeps.body.find(d => d.description === '機房伺服器配電施工');
+  assert.ok(carriedExt1, 'Carried external dependency must exist');
+  assert.equal(carriedExt1.supplier, '廠務處');
+  assert.notEqual(carriedExt1.id, extDep1.body.id, 'Carried external dep must have independent ID');
+
+  // 6. 驗證兩週工作版與正式版的隔離性：
+  // 在第二週工作版本中修改時程（改期），驗證第一週正式版與第一週工作版不受影響
+  const carriedSchedLease = await call(`/api/items/${scheduleCarried.id}/lease`, 'H1', 'POST', {});
+  assert.equal(carriedSchedLease.status, 200);
+  const editCarriedMilestone = await call(`/api/items/${scheduleCarried.id}/schedule/${carriedMilestone.id}`, 'H1', 'PUT', {
+    kind: 'milestone',
+    name: carriedMilestone.name,
+    baselineDate: carriedMilestone.baselineDate,
+    forecastDate: '2026-11-01',
+    state: 'pending',
+    action: 'update',
+    reason: '新週工作版單獨改期',
+    token: carriedSchedLease.body.token,
+    baseVersion: carriedMilestone.version,
+    baseProjectVersion: scheduleCarried.version
+  });
+  assert.equal(editCarriedMilestone.status, 200);
+
+  // 驗證第一週正式版快照依然不變
+  const verifyFirstPub = await call(`/api/publications/${firstPublication.body.id}`, 'R');
+  const verifyMilestonePub1 = verifyFirstPub.body.items.find(i => i.id === scheduleId).schedule.find(e => e.id === milestone.body.id);
+  assert.equal(verifyMilestonePub1.forecastDate, '2026-10-18', 'First publication snapshot must remain untouched');
+
+  const verifySecondPub = await call(`/api/publications/${secondPublication.body.id}`, 'R');
+  const verifyMilestonePub2 = verifySecondPub.body.items.find(i => i.id === scheduleId).schedule.find(e => e.id === milestone.body.id);
+  assert.equal(verifyMilestonePub2.forecastDate, '2026-10-25', 'Second publication snapshot must remain untouched');
+
+  // 驗證第一週工作版中的 milestone 依然保持原樣
+  const prevWeekMilestone = (await call(taskPath, 'H1')).body.find(e => e.id === milestone.body.id);
+  assert.equal(prevWeekMilestone.forecastDate, '2026-10-25', 'Previous week working draft must not be affected by edits in new week');
+
+  // 修改第一週工作版，驗證不靜默改變已建立的第二週工作版
+  const editFirstWeekMilestone = await call(`${taskPath}/${milestone.body.id}`, 'H1', 'PUT', {
+    kind: 'milestone',
+    name: prevWeekMilestone.name,
+    baselineDate: prevWeekMilestone.baselineDate,
+    forecastDate: '2026-10-28',
+    state: 'pending',
+    action: 'update',
+    reason: '第一週發布後再度更動草稿',
+    token: schedLease.body.token,
+    baseVersion: prevWeekMilestone.version,
+    baseProjectVersion: (await call(`/api/items/${scheduleId}`, 'H1')).body.version
+  });
+  assert.equal(editFirstWeekMilestone.status, 200);
+
+  // 檢查第二週工作版的 milestone：仍然是 2026-11-01，未被第一週修改靜默改動！
+  const checkNewWeekMilestone = (await call(`/api/items/${scheduleCarried.id}/schedule`, 'H1')).body.find(e => e.id === carriedMilestone.id);
+  assert.equal(checkNewWeekMilestone.forecastDate, '2026-11-01', 'New week working draft must NOT be silently changed by previous week edits');
   const closing = await call(`/api/reports/${reportId}/items`, 'G', 'POST', { section: 'summary', title: 'Closing summary' });
   const closingLease = await call(`/api/items/${closing.body.id}/lease`, 'G', 'POST', {});
   assert.equal((await call(`/api/items/${closing.body.id}/private-draft`, 'G', 'PUT', { title: 'Closing summary', content: '', status: 'closed' })).status, 400);

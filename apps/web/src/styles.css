@@ -328,5 +328,58 @@ label { display: block; margin: 1rem 0; } input, textarea { display: block; box-
   .history-modal { display: none !important; }
 }
 
+/* Issue #9: Weekly Schedule Continuation & Continuity Identity */
+.continuity-badge {
+  display: inline-flex;
+  align-items: center;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: .72rem;
+  font-weight: 600;
+  padding: .1rem .45rem;
+  border-radius: 4px;
+  background: #eff6ff;
+  color: #1d4ed8;
+  border: 1px solid #bfdbfe;
+  margin-left: .45rem;
+  vertical-align: middle;
+  letter-spacing: .02em;
+}
+.continuity-badge:hover {
+  background: #dbeafe;
+  border-color: #93c5fd;
+}
+.schedule-continuation-banner {
+  display: flex;
+  align-items: flex-start;
+  gap: .75rem;
+  padding: .85rem 1.1rem;
+  margin-bottom: 1.1rem;
+  background: #f0fdf4;
+  border: 1px solid #bbf7d0;
+  border-left: 4px solid #16a34a;
+  border-radius: 8px;
+  box-shadow: 0 1px 2px rgba(22, 163, 74, 0.05);
+}
+.continuation-icon {
+  font-size: 1.25rem;
+  flex-shrink: 0;
+  line-height: 1;
+}
+.continuation-info {
+  display: flex;
+  flex-direction: column;
+  gap: .2rem;
+}
+.continuation-info strong {
+  font-size: .92rem;
+  color: #14532d;
+}
+.continuation-info p {
+  margin: 0;
+  font-size: .82rem;
+  color: #166534;
+  line-height: 1.45;
+}
+
 
 
