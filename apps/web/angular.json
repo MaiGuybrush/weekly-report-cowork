@@ -6,8 +6,14 @@
     "weekly-report-web": {
       "projectType": "application", "root": "", "sourceRoot": "src", "prefix": "app",
       "architect": {
-        "build": { "builder": "@angular/build:application", "options": { "browser": "src/main.ts", "tsConfig": "tsconfig.app.json", "styles": ["src/styles.css"] } },
-        "serve": { "builder": "@angular/build:dev-server", "options": { "buildTarget": "weekly-report-web:build" } }
+        "build": {
+          "builder": "@angular/build:application",
+          "options": { "browser": "src/main.ts", "tsConfig": "tsconfig.app.json", "styles": ["src/styles.css"] },
+          "configurations": {
+            "development": { "sourceMap": true }
+          }
+        },
+        "serve": { "builder": "@angular/build:dev-server", "options": { "buildTarget": "weekly-report-web:build:development" } }
       }
     }
   }
