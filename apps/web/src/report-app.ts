@@ -750,6 +750,47 @@ export class Home implements OnInit {
                     </li>
                   }
                 </ul>
+                @if (cancelledScheduleEntries().length) {
+                  <div class="cancelled-section">
+                    <details>
+                      <summary class="cancelled-summary">
+                        <span class="cancelled-badge">已取消項目（{{ cancelledScheduleEntries().length }}）</span>
+                        <span class="cancelled-hint">點擊展開追溯被取消之承諾與原因；取消不干擾有效時程</span>
+                      </summary>
+                      <ul class="cancelled-list">
+                        @for (entry of cancelledScheduleEntries(); track entry.id) {
+                          <li class="cancelled-item">
+                            <div class="cancelled-item-header">
+                              <strong class="cancelled-name">
+                                <del>{{ entry.kind === "phase" ? "階段" : entry.kind === "task" ? "關鍵任務" : "重要里程碑" }}：{{ entry.name }}</del>
+                              </strong>
+                              <span class="schedule-state" data-state="cancelled">已取消</span>
+                              @if (entry.kind === 'task' && entry.owner) {
+                                <span class="schedule-owner">原負責 {{ entry.owner }}</span>
+                              }
+                            </div>
+                            <div class="cancelled-item-meta">
+                              @if (entry.kind === 'milestone') {
+                                <span>原始目標：{{ entry.baselineDate || "—" }}</span>
+                                @if (entry.forecastDate) { <span> · 最新目標：{{ entry.forecastDate }}</span> }
+                              } @else {
+                                <span>原始計畫：{{ entry.baselineStart || "—" }}–{{ entry.baselineEnd || "—" }}</span>
+                                @if (entry.actualStart) { <span class="actual-start-tag"> · 保留實際開始日：{{ entry.actualStart }}</span> }
+                              }
+                            </div>
+                            <div class="cancelled-item-actions">
+                              @if (canMaintain(item)) {
+                                <button type="button" class="btn-reactivate" (click)="promptReactivate(entry)">重新啟用</button>
+                                <button type="button" class="btn-edit-cancelled" (click)="editSchedule(entry)">查看詳情</button>
+                              }
+                              <button type="button" (click)="loadScheduleHistory(entry)">修訂紀錄</button>
+                            </div>
+                          </li>
+                        }
+                      </ul>
+                    </details>
+                  </div>
+                }
                 @if (baselineHistory.length) {
                   <ul class="schedule-history">
                     @for (change of baselineHistory; track change) {
@@ -796,7 +837,7 @@ export class Home implements OnInit {
                         }
                       }
                     } @else {
-                      @if (editingSchedule) {<label>狀態<select [(ngModel)]="scheduleDraft.state"><option value="open">開放</option><option value="in-progress">進行中</option><option value="completed">完成</option><option value="cancelled">取消</option></select></label>}
+                      @if (editingSchedule) {<label>狀態<select [(ngModel)]="scheduleDraft.state" (ngModelChange)="onScheduleStateChange()"><option value="open">開放</option><option value="in-progress">進行中</option><option value="completed">完成</option><option value="cancelled">取消</option></select></label>}
                     <label
                       >原始計畫開始
                       <input
@@ -836,8 +877,50 @@ export class Home implements OnInit {
                     @if (editingSchedule) {
                       <label>操作<select [(ngModel)]="scheduleDraft.action" (ngModelChange)="onScheduleActionChange()"><option value="update">一般修訂</option><option value="correct-original">更正原始資料</option><option value="reopen">重新開啟</option><option value="cancel">取消項目</option><option value="reactivate">重新啟用</option></select></label>
                       <p class="schedule-note">{{ scheduleDraft.kind === 'milestone' ? '一般改期只調整最新目標；原始目標誤植時選擇「更正原始資料」。重開時自動清除實際達成日。' : '一般改期只調整目前計畫；原始日期誤植時選擇「更正原始資料」。重開時請清除實際完成日。' }}</p>
+
+                      @if (scheduleDraft.action === 'cancel') {
+                        @if (cancellationBlockerMessage(editingSchedule)) {
+                          <div class="cancellation-blocker-alert">
+                            <span class="blocker-icon">🛑</span>
+                            <div>
+                              <strong>無法直接取消項目</strong>
+                              <p>{{ cancellationBlockerMessage(editingSchedule) }}</p>
+                            </div>
+                          </div>
+                        } @else {
+                          <div class="cancellation-ready-notice">
+                            <span class="notice-icon">ℹ️</span>
+                            <div>
+                              <strong>取消確認說明</strong>
+                              <p>取消項目將自動解除剩餘傳入的前置相依關係，並在歷史中留下原因。已提交項目不會被硬刪除，日後可重新啟用。</p>
+                            </div>
+                          </div>
+                        }
+                      }
+
+                      @if (scheduleDraft.action === 'reactivate') {
+                        <div class="reactivate-notice">
+                          <span class="reactivate-icon">🔄</span>
+                          <div>
+                            <strong>重新啟用預覽</strong>
+                            <p>
+                              @if (editingSchedule.kind === 'milestone') {
+                                里程碑將恢復為【待達成】狀態，並清除過去實際達成日。
+                              } @else {
+                                @if (editingSchedule.actualStart) {
+                                  此項目保留實際開始日（{{ editingSchedule.actualStart }}），將恢復為【進行中】狀態。
+                                } @else {
+                                  此項目將恢復為【開放】狀態。
+                                }
+                              }
+                              <br><small class="reactivate-hint">※ 相依關係與子任務歸屬不會自動恢復，若需要請於重新啟用後手動建立。</small>
+                            </p>
+                          </div>
+                        </div>
+                      }
+
                       @if (editingSchedule.kind === 'phase' && editingSchedule.state !== 'completed' && scheduleDraft.state === 'completed' && editingSchedule.unfinishedTasks?.length) { <label class="schedule-exception"><input type="checkbox" [(ngModel)]="scheduleDraft.acknowledgeIncompleteTasks" />我已檢視未完成任務，並在修改原因中說明提前確認階段的理由。</label> }
-                      <label>修改原因 <input [(ngModel)]="scheduleDraft.reason" required /></label>
+                      <label>修改原因 <input [(ngModel)]="scheduleDraft.reason" required placeholder="請填寫修訂或取消/重新啟用的原因" /></label>
 
                       <div class="dependency-panel">
                         <h5>前置項目管理</h5>
@@ -854,7 +937,7 @@ export class Home implements OnInit {
                         } @else {
                           <p class="dep-empty">目前未設定前置項目。</p>
                         }
-                        @if (candidatePredecessors(editingSchedule).length) {
+                        @if (editingSchedule.state !== 'cancelled' && candidatePredecessors(editingSchedule).length) {
                           <div class="dep-add-box">
                             <label>選擇前置項目
                               <select [(ngModel)]="selectedPredecessorId">
@@ -874,7 +957,7 @@ export class Home implements OnInit {
                         }
                       </div>
                     }
-                    <button (click)="saveSchedule()" [disabled]="!token || !scheduleDraft.name.trim() || (scheduleDraft.kind === 'task' && !scheduleDraft.owner.trim()) || (scheduleDraft.kind === 'milestone' && !editingSchedule && !scheduleDraft.targetDate) || (scheduleDraft.kind === 'milestone' && editingSchedule && scheduleDraft.state === 'achieved' && !scheduleDraft.actualDate) || (editingSchedule && !scheduleDraft.reason.trim()) || (editingSchedule?.kind === 'phase' && editingSchedule?.state !== 'completed' && scheduleDraft.state === 'completed' && editingSchedule?.unfinishedTasks?.length && !scheduleDraft.acknowledgeIncompleteTasks)">
+                    <button (click)="saveSchedule()" [disabled]="!token || !scheduleDraft.name.trim() || (scheduleDraft.kind === 'task' && !scheduleDraft.owner.trim()) || (scheduleDraft.kind === 'milestone' && !editingSchedule && !scheduleDraft.targetDate) || (scheduleDraft.kind === 'milestone' && editingSchedule && scheduleDraft.state === 'achieved' && !scheduleDraft.actualDate) || (editingSchedule && !scheduleDraft.reason.trim()) || (editingSchedule?.kind === 'phase' && editingSchedule?.state !== 'completed' && scheduleDraft.state === 'completed' && editingSchedule?.unfinishedTasks?.length && !scheduleDraft.acknowledgeIncompleteTasks) || (editingSchedule && scheduleDraft.action === 'cancel' && !!cancellationBlockerMessage(editingSchedule))">
                       {{ editingSchedule ? "儲存時程" : "新增時程" }}
                     </button>
                     @if (editingSchedule) {
@@ -1275,24 +1358,76 @@ export class ReportEditor implements OnInit, OnDestroy {
     this.changes.detectChanges();
   }
   onMilestoneStateChange() {
+    if (this.scheduleDraft.state === "cancelled") {
+      this.scheduleDraft.action = "cancel";
+      this.onScheduleActionChange();
+      return;
+    } else if (this.scheduleDraft.action === "cancel") {
+      this.scheduleDraft.action = "update";
+    }
     if (this.scheduleDraft.state !== "achieved") {
       this.scheduleDraft.actualDate = "";
     }
     this.changes.detectChanges();
   }
+  onScheduleStateChange() {
+    if (this.scheduleDraft.state === "cancelled") {
+      this.scheduleDraft.action = "cancel";
+      this.onScheduleActionChange();
+      return;
+    } else if (this.scheduleDraft.action === "cancel") {
+      this.scheduleDraft.action = "update";
+    }
+    this.changes.detectChanges();
+  }
   onScheduleActionChange() {
-    if (this.scheduleDraft.kind === "milestone") {
-      if (this.scheduleDraft.action === "reopen") {
+    if (this.scheduleDraft.action === "cancel") {
+      this.scheduleDraft.state = "cancelled";
+      if (this.scheduleDraft.kind === "milestone") this.scheduleDraft.actualDate = "";
+      else this.scheduleDraft.actualEnd = "";
+    } else if (this.scheduleDraft.action === "reactivate") {
+      if (this.scheduleDraft.kind === "milestone") {
         this.scheduleDraft.state = "pending";
         this.scheduleDraft.actualDate = "";
-      } else if (this.scheduleDraft.action === "cancel") {
-        this.scheduleDraft.state = "cancelled";
-        this.scheduleDraft.actualDate = "";
-      } else if (this.scheduleDraft.action === "reactivate") {
+      } else {
+        this.scheduleDraft.state = this.editingSchedule?.actualStart ? "in-progress" : "open";
+        this.scheduleDraft.actualEnd = "";
+        this.scheduleDraft.phaseId = "";
+      }
+    } else if (this.scheduleDraft.action === "reopen") {
+      if (this.scheduleDraft.kind === "milestone") {
         this.scheduleDraft.state = "pending";
         this.scheduleDraft.actualDate = "";
+      } else {
+        this.scheduleDraft.state = "in-progress";
+        this.scheduleDraft.actualEnd = "";
       }
     }
+    this.changes.detectChanges();
+  }
+  cancellationBlockerMessage(entry: ScheduleEntry | null): string | null {
+    if (!entry) return null;
+    if (entry.successors?.length) {
+      const names = entry.successors.map((s) => `「${s.name}」`).join("、");
+      return `此項目尚有 ${entry.successors.length} 個後續相依項目（${names}）。依規定取消前必須先逐一解除或替換其相依關聯。`;
+    }
+    if (entry.kind === "phase") {
+      const activeTasks = this.scheduleEntries.filter(
+        (e) => e.kind === "task" && e.phaseId === entry.id && e.state !== "cancelled",
+      );
+      if (activeTasks.length) {
+        const names = activeTasks.map((t) => `「${t.name}」`).join("、");
+        return `此階段尚有 ${activeTasks.length} 個進行中或未取消的子任務（${names}）。取消階段前，必須逐一重新歸屬、移到專案直屬或取消子任務。`;
+      }
+    }
+    return null;
+  }
+  promptReactivate(entry: ScheduleEntry) {
+    this.editSchedule(entry);
+    this.scheduleDraft.action = "reactivate";
+    this.onScheduleActionChange();
+    this.scheduleDraft.reason = "";
+    this.message = `已切換為重新啟用「${entry.name}」。請在下方表單填寫原因後儲存。`;
     this.changes.detectChanges();
   }
   async loadSchedule() {
@@ -1354,8 +1489,9 @@ export class ReportEditor implements OnInit, OnDestroy {
   activeScheduleEntries() {
     return this.scheduleEntries.filter(
       (entry) =>
-        (entry.kind === "phase" && entry.state !== "completed") ||
-        (entry.kind === "milestone" && entry.state !== "cancelled"),
+        entry.state !== "cancelled" &&
+        ((entry.kind === "phase" && entry.state !== "completed") ||
+          entry.kind === "milestone"),
     );
   }
   schedulePhases() {
@@ -1365,13 +1501,17 @@ export class ReportEditor implements OnInit, OnDestroy {
     return id ? this.scheduleEntries.find(entry => entry.id === id)?.name ?? "未知階段" : "專案直屬";
   }
   scheduleDisplayEntries() {
-    const phases = this.scheduleEntries.filter(entry => entry.kind === "phase");
+    const active = this.scheduleEntries.filter(entry => entry.state !== "cancelled");
+    const phases = active.filter(entry => entry.kind === "phase");
     return [
-      ...phases.flatMap(phase => [phase, ...this.scheduleEntries.filter(entry => entry.kind === "task" && entry.phaseId === phase.id)]),
-      ...this.scheduleEntries.filter(entry => entry.kind === "task" && !entry.phaseId),
-      ...this.scheduleEntries.filter(entry => entry.kind === "milestone"),
-      ...this.scheduleEntries.filter(entry => entry.kind !== "phase" && entry.kind !== "task" && entry.kind !== "milestone"),
+      ...phases.flatMap(phase => [phase, ...active.filter(entry => entry.kind === "task" && entry.phaseId === phase.id)]),
+      ...active.filter(entry => entry.kind === "task" && !entry.phaseId),
+      ...active.filter(entry => entry.kind === "milestone"),
+      ...active.filter(entry => entry.kind !== "phase" && entry.kind !== "task" && entry.kind !== "milestone"),
     ];
+  }
+  cancelledScheduleEntries() {
+    return this.scheduleEntries.filter(entry => entry.state === "cancelled");
   }
   editSchedule(entry: ScheduleEntry) {
     this.editingSchedule = entry;
@@ -1455,6 +1595,7 @@ export class ReportEditor implements OnInit, OnDestroy {
     const existing = new Set(entry.predecessors?.map((p) => p.id) ?? []);
     return this.scheduleEntries.filter((e) => {
       if (e.id === entry.id || existing.has(e.id)) return false;
+      if (e.state === "cancelled") return false;
       if (entry.kind === "phase" && e.kind === "task" && e.phaseId === entry.id) return false;
       if (entry.kind === "task" && entry.phaseId && e.id === entry.phaseId) return false;
       return true;
@@ -1518,6 +1659,8 @@ export class ReportEditor implements OnInit, OnDestroy {
     if (!this.selected) return;
     const value = (date: string) => date || null;
     let body: any;
+    const isCancel = this.scheduleDraft.action === "cancel";
+    const isReactivate = this.scheduleDraft.action === "reactivate";
     if (this.scheduleDraft.kind === "milestone") {
       body = {
         kind: "milestone",
@@ -1525,22 +1668,28 @@ export class ReportEditor implements OnInit, OnDestroy {
         targetDate: value(this.scheduleDraft.targetDate),
         baselineDate: value(this.scheduleDraft.baselineDate || this.scheduleDraft.targetDate),
         forecastDate: value(this.scheduleDraft.forecastDate || this.scheduleDraft.targetDate),
-        actualDate: value(this.scheduleDraft.actualDate),
-        state: this.editingSchedule ? this.scheduleDraft.state : "pending",
+        actualDate: (isCancel || isReactivate) ? null : value(this.scheduleDraft.actualDate),
+        state: isCancel ? "cancelled" : isReactivate ? "pending" : (this.editingSchedule ? this.scheduleDraft.state : "pending"),
         reason: this.scheduleDraft.reason ? this.scheduleDraft.reason.trim() : null,
         action: this.scheduleDraft.action,
       };
     } else {
+      const targetState = isCancel
+        ? "cancelled"
+        : isReactivate
+          ? (this.editingSchedule?.actualStart ? "in-progress" : "open")
+          : this.scheduleDraft.state;
       body = {
         ...this.scheduleDraft,
         owner: this.scheduleDraft.kind === "task" ? this.scheduleDraft.owner.trim() : null,
-        phaseId: this.scheduleDraft.kind === "task" ? this.scheduleDraft.phaseId || null : null,
+        phaseId: (isCancel || isReactivate) ? null : (this.scheduleDraft.kind === "task" ? this.scheduleDraft.phaseId || null : null),
         baselineStart: value(this.scheduleDraft.baselineStart),
         baselineEnd: value(this.scheduleDraft.baselineEnd),
         forecastStart: this.editingSchedule ? value(this.scheduleDraft.forecastStart) : value(this.scheduleDraft.baselineStart),
         forecastEnd: this.editingSchedule ? value(this.scheduleDraft.forecastEnd) : value(this.scheduleDraft.baselineEnd),
         actualStart: value(this.scheduleDraft.actualStart),
-        actualEnd: value(this.scheduleDraft.actualEnd),
+        actualEnd: (isCancel || isReactivate) ? null : value(this.scheduleDraft.actualEnd),
+        state: targetState,
       };
     }
     try {
@@ -1897,7 +2046,7 @@ export class ReportEditor implements OnInit, OnDestroy {
                 }
                 @if (item.schedule?.length) {
                   <ul>
-                    @for (entry of item.schedule; track entry.id) {
+                    @for (entry of activePublicationEntries(item.schedule || []); track entry.id) {
                       <li [class.schedule-task]="entry.kind === 'task'" [class.schedule-milestone]="entry.kind === 'milestone'">
                         <strong
                           >{{
@@ -1946,6 +2095,31 @@ export class ReportEditor implements OnInit, OnDestroy {
                       </li>
                     }
                   </ul>
+                  @if (cancelledPublicationEntries(item.schedule || []).length) {
+                    <details class="publication-cancelled-section">
+                      <summary>
+                        <strong>已取消項目（{{ cancelledPublicationEntries(item.schedule || []).length }}）</strong>
+                        <small>— 追溯被取消之工作與承諾</small>
+                      </summary>
+                      <ul class="publication-cancelled-list">
+                        @for (entry of cancelledPublicationEntries(item.schedule || []); track entry.id) {
+                          <li>
+                            <del><strong>{{ entry.kind === "phase" ? "階段" : entry.kind === "task" ? "關鍵任務" : "重要里程碑" }}：{{ entry.name }}</strong></del>
+                            <span class="schedule-state" data-state="cancelled">已取消</span>
+                            @if (entry.kind === 'task' && entry.owner) { <span> · 原負責 {{ entry.owner }}</span> }
+                            @if (entry.kind === 'milestone') {
+                              <span> · 原始目標 {{ entry.baselineDate || "—" }}</span>
+                            } @else {
+                              <span> · 原始計畫 {{ entry.baselineStart || "—" }}–{{ entry.baselineEnd || "—" }}</span>
+                              @if (entry.actualStart) {
+                                <span> · 保留實際開始日 {{ entry.actualStart }}</span>
+                              }
+                            }
+                          </li>
+                        }
+                      </ul>
+                    </details>
+                  }
                 }
               </article>
             }
@@ -1971,7 +2145,13 @@ export class PublicationPage implements OnInit {
     return labels[section] ?? section;
   }
   publicationPhases(entries: ScheduleEntry[]) {
-    return entries.filter(entry => entry.kind === "phase" || (entry.kind === "milestone" && entry.state !== "cancelled"));
+    return entries.filter(entry => entry.state !== "cancelled" && (entry.kind === "phase" || entry.kind === "milestone"));
+  }
+  activePublicationEntries(entries: ScheduleEntry[]) {
+    return entries.filter(entry => entry.state !== "cancelled");
+  }
+  cancelledPublicationEntries(entries: ScheduleEntry[]) {
+    return entries.filter(entry => entry.state === "cancelled");
   }
   private publicationDates(entries: ScheduleEntry[]) {
     return entries

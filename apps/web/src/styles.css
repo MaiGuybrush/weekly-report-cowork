@@ -71,3 +71,42 @@ label { display: block; margin: 1rem 0; } input, textarea { display: block; box-
 .btn-add-link { margin-top: .4rem; background: #0284c7; color: white; padding: .45rem .8rem; font-size: .82rem; }
 .btn-add-link:hover { background: #0369a1; }
 
+/* Issue #5: Cancellation, Reactivation & Relationship Cleanup */
+.cancelled-section { margin-top: 1.5rem; padding: .8rem 1.1rem; background: #f8fafc; border: 1px dashed #cbd5e1; border-radius: 8px; }
+.cancelled-summary { display: flex; flex-wrap: wrap; align-items: center; gap: .6rem; cursor: pointer; user-select: none; font-size: .88rem; color: #475569; }
+.cancelled-summary:hover .cancelled-badge { background: #e2e8f0; color: #1e293b; }
+.cancelled-badge { display: inline-block; padding: .2rem .6rem; background: #f1f5f9; border: 1px solid #cbd5e1; border-radius: 4px; font-weight: 600; color: #475569; }
+.cancelled-hint { font-size: .8rem; color: #64748b; }
+.cancelled-list { list-style: none; padding: 0; margin: .8rem 0 0; }
+.cancelled-item { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: .7rem; padding: .65rem .8rem; margin-bottom: .5rem; background: white; border: 1px solid #e2e8f0; border-left: 3px solid #94a3b8; border-radius: 6px; }
+.cancelled-item-header { display: flex; align-items: center; gap: .5rem; }
+.cancelled-name { color: #64748b; }
+.cancelled-item-meta { font-size: .82rem; color: #64748b; }
+.actual-start-tag { color: #0f766e; font-weight: 500; }
+.cancelled-item-actions { display: flex; align-items: center; gap: .3rem; }
+.btn-reactivate { background: #0f766e; color: white; font-size: .8rem; padding: .35rem .7rem; border-radius: 4px; font-weight: 500; }
+.btn-reactivate:hover { background: #115e59; }
+.btn-edit-cancelled { background: #f1f5f9; color: #334155; border: 1px solid #cbd5e1; font-size: .8rem; padding: .35rem .65rem; border-radius: 4px; }
+.btn-edit-cancelled:hover { background: #e2e8f0; }
+
+.cancellation-blocker-alert { display: flex; align-items: flex-start; gap: .6rem; margin: .75rem 0; padding: .75rem 1rem; background: #fff1f2; border: 1px solid #fecdd3; border-left: 4px solid #e11d48; border-radius: 6px; color: #9f1239; font-size: .84rem; line-height: 1.5; }
+.cancellation-blocker-alert p { margin: .25rem 0 0; }
+.blocker-icon { font-size: 1.1rem; flex-shrink: 0; }
+
+.cancellation-ready-notice { display: flex; align-items: flex-start; gap: .6rem; margin: .75rem 0; padding: .75rem 1rem; background: #f0f9ff; border: 1px solid #bae6fd; border-left: 4px solid #0284c7; border-radius: 6px; color: #0369a1; font-size: .84rem; line-height: 1.5; }
+.cancellation-ready-notice p { margin: .25rem 0 0; }
+.notice-icon { font-size: 1.1rem; flex-shrink: 0; }
+
+.reactivate-notice { display: flex; align-items: flex-start; gap: .6rem; margin: .75rem 0; padding: .75rem 1rem; background: #f0fdf4; border: 1px solid #bbf7d0; border-left: 4px solid #059669; border-radius: 6px; color: #065f46; font-size: .84rem; line-height: 1.5; }
+.reactivate-notice p { margin: .25rem 0 0; }
+.reactivate-hint { color: #047857; font-size: .78rem; }
+.reactivate-icon { font-size: 1.1rem; flex-shrink: 0; }
+
+.publication-cancelled-section { margin-top: 1.25rem; padding: .75rem 1rem; background: #f8fafc; border: 1px dashed #cbd5e1; border-radius: 8px; }
+.publication-cancelled-section summary { cursor: pointer; color: #475569; font-size: .9rem; user-select: none; }
+.publication-cancelled-section summary small { color: #64748b; font-size: .8rem; }
+.publication-cancelled-list { list-style: none; padding: 0; margin: .6rem 0 0; font-size: .85rem; }
+.publication-cancelled-list li { padding: .4rem 0; border-bottom: 1px solid #f1f5f9; color: #64748b; }
+.publication-cancelled-list li:last-child { border-bottom: 0; }
+
+

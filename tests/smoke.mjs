@@ -480,6 +480,108 @@ try {
   const coreHistAfterRemove = await call(`${taskPath}/${coreTaskId}/history`, 'H1');
   assert.equal(coreHistAfterRemove.body.some(h => h.action === 'unlink-dependency' && h.reason.includes('Decoupled')), true);
 
+  // Issue #5: Cancellation, Reactivation, and Relationship Cleanup
+  // 1. Hard delete is rejected on committed items
+  assert.equal((await call(`${taskPath}/${coreTaskId}`, 'H1', 'DELETE')).status, 400);
+
+  // 2. Cancellation with active successors must be rejected
+  // We still have link2: coreTaskId -> milestone
+  let cancelWithSucc = await call(`${taskPath}/${coreTaskId}`, 'H1', 'PUT', { kind: 'task', name: 'Core Engine', baselineStart: '2026-10-06', baselineEnd: '2026-10-15', forecastStart: '2026-10-06', forecastEnd: '2026-10-15', actualStart: '2026-10-07', state: 'cancelled', action: 'cancel', owner: 'Core Team', reason: 'Cancel core engine', token: scheduleLease.body.token, baseVersion: 3, baseProjectVersion: milestoneProjectVersion });
+  assert.equal(cancelWithSucc.status, 400);
+  assert.match(cancelWithSucc.body.error, /successors/i);
+
+  // Remove successor link (coreTaskId -> milestone)
+  const removeLink2 = await call(`${depPath}/delete`, 'H1', 'POST', { predecessorId: coreTaskId, successorId: milestone.body.id, reason: 'Milestone no longer depends on core engine', token: scheduleLease.body.token, baseProjectVersion: milestoneProjectVersion });
+  assert.equal(removeLink2.status, 200);
+  milestoneProjectVersion = removeLink2.body.projectVersion;
+
+  // 3. Cancelling a phase with active child tasks must be rejected
+  const cancelPhaseDraft = { kind: 'phase', name: 'Build accepted', baselineStart: '2026-10-01', baselineEnd: '2026-10-08', forecastStart: '2026-10-01', forecastEnd: '2026-10-10', actualStart: '2026-10-03', actualEnd: '2026-10-11', state: 'cancelled', action: 'cancel', reason: 'Cancel phase directly' };
+  // phase has Cross-phase handoff as child task!
+  assert.equal((await call(`${taskPath}/${phase.body.id}`, 'H1', 'PUT', { ...cancelPhaseDraft, token: scheduleLease.body.token, baseVersion: 12, baseProjectVersion: milestoneProjectVersion })).status, 400);
+
+  // Test cancelling phase after its child task is cancelled:
+  const tempPhaseDraft = { kind: 'phase', name: 'Temp Phase for Cancellation', baselineStart: '2026-10-01', baselineEnd: '2026-10-10', forecastStart: '2026-10-01', forecastEnd: '2026-10-10', actualStart: null, actualEnd: null, state: 'open' };
+  const tempPhase = await call(taskPath, 'H1', 'POST', { ...tempPhaseDraft, token: scheduleLease.body.token, baseProjectVersion: milestoneProjectVersion });
+  assert.equal(tempPhase.status, 201);
+  milestoneProjectVersion = tempPhase.body.projectVersion;
+
+  const tempTaskDraft = { kind: 'task', name: 'Temp Child Task', owner: 'Dev Team', phaseId: tempPhase.body.id, baselineStart: '2026-10-01', baselineEnd: '2026-10-10', forecastStart: '2026-10-01', forecastEnd: '2026-10-10', actualStart: null, actualEnd: null, state: 'open' };
+  const tempTask = await call(taskPath, 'H1', 'POST', { ...tempTaskDraft, token: scheduleLease.body.token, baseProjectVersion: milestoneProjectVersion });
+  assert.equal(tempTask.status, 201);
+  milestoneProjectVersion = tempTask.body.projectVersion;
+
+  // Cancelling tempPhase while tempTask is active fails
+  const cancelTempPhaseAttempt = await call(`${taskPath}/${tempPhase.body.id}`, 'H1', 'PUT', { kind: 'phase', name: 'Temp Phase for Cancellation', baselineStart: '2026-10-01', baselineEnd: '2026-10-10', forecastStart: '2026-10-01', forecastEnd: '2026-10-10', state: 'cancelled', action: 'cancel', reason: 'Attempt cancel with active child', token: scheduleLease.body.token, baseVersion: 1, baseProjectVersion: milestoneProjectVersion });
+  assert.equal(cancelTempPhaseAttempt.status, 400);
+
+  // Cancel child task first
+  const cancelTempTask = await call(`${taskPath}/${tempTask.body.id}`, 'H1', 'PUT', { kind: 'task', name: 'Temp Child Task', owner: 'Dev Team', baselineStart: '2026-10-01', baselineEnd: '2026-10-10', forecastStart: '2026-10-01', forecastEnd: '2026-10-10', state: 'cancelled', action: 'cancel', reason: 'Cancel child task first', token: scheduleLease.body.token, baseVersion: 1, baseProjectVersion: milestoneProjectVersion });
+  assert.equal(cancelTempTask.status, 200);
+  milestoneProjectVersion = cancelTempTask.body.projectVersion;
+
+  // Now tempPhase can be cancelled successfully
+  const cancelTempPhaseSuccess = await call(`${taskPath}/${tempPhase.body.id}`, 'H1', 'PUT', { kind: 'phase', name: 'Temp Phase for Cancellation', baselineStart: '2026-10-01', baselineEnd: '2026-10-10', forecastStart: '2026-10-01', forecastEnd: '2026-10-10', state: 'cancelled', action: 'cancel', reason: 'Cancel phase after child task cancelled', token: scheduleLease.body.token, baseVersion: 1, baseProjectVersion: milestoneProjectVersion });
+  assert.equal(cancelTempPhaseSuccess.status, 200);
+  milestoneProjectVersion = cancelTempPhaseSuccess.body.projectVersion;
+
+  // Verify child task's phaseId is now null (implicit affiliation cleared)
+  const tempTaskAfterPhaseCancel = (await call(taskPath, 'H1')).body.find(e => e.id === tempTask.body.id);
+  assert.equal(tempTaskAfterPhaseCancel.phaseId, null);
+
+  // 4. Detaching incoming links automatically on cancel:
+  // Re-link prepTask -> coreTask, so coreTask has an incoming link
+  const linkIncoming = await call(depPath, 'H1', 'POST', { predecessorId: prepTaskId, successorId: coreTaskId, reason: 'Temporary link to test detachment', token: scheduleLease.body.token, baseProjectVersion: milestoneProjectVersion });
+  assert.equal(linkIncoming.status, 201);
+  milestoneProjectVersion = linkIncoming.body.projectVersion;
+
+  // Now cancel coreTaskId (it has incoming link from prepTask, but no successors)
+  const cancelCore = await call(`${taskPath}/${coreTaskId}`, 'H1', 'PUT', { kind: 'task', name: 'Core Engine', baselineStart: '2026-10-06', baselineEnd: '2026-10-15', forecastStart: '2026-10-06', forecastEnd: '2026-10-15', actualStart: '2026-10-07', state: 'cancelled', action: 'cancel', owner: 'Core Team', reason: 'Shelving core engine due to pivot', token: scheduleLease.body.token, baseVersion: 3, baseProjectVersion: milestoneProjectVersion });
+  assert.equal(cancelCore.status, 200);
+  milestoneProjectVersion = cancelCore.body.projectVersion;
+
+  // Verify incoming link was detached and revisions recorded
+  const cancelledCoreEntry = (await call(taskPath, 'H1')).body.find(e => e.id === coreTaskId);
+  assert.equal(cancelledCoreEntry.state, 'cancelled');
+  assert.deepEqual(cancelledCoreEntry.predecessors, []);
+  assert.deepEqual(cancelledCoreEntry.successors, []);
+  const coreUnlinkHist = await call(`${taskPath}/${coreTaskId}/history`, 'H1');
+  assert.equal(coreUnlinkHist.body.some(h => h.action === 'unlink-dependency'), true);
+  assert.equal(coreUnlinkHist.body.at(-1).action, 'cancel');
+
+  const prepHistAfterCancel = await call(`${taskPath}/${prepTaskId}/history`, 'H1');
+  assert.equal(prepHistAfterCancel.body.some(h => h.action === 'unlink-dependency' && h.reason.includes('已取消')), true);
+
+  // Cannot link to or from cancelled item
+  assert.equal((await call(depPath, 'H1', 'POST', { predecessorId: coreTaskId, successorId: milestone.body.id, reason: 'Invalid link from cancelled', token: scheduleLease.body.token, baseProjectVersion: milestoneProjectVersion })).status, 400);
+  assert.equal((await call(depPath, 'H1', 'POST', { predecessorId: prepTaskId, successorId: coreTaskId, reason: 'Invalid link to cancelled', token: scheduleLease.body.token, baseProjectVersion: milestoneProjectVersion })).status, 400);
+
+  // 5. Reactivation:
+  // Reactivate coreTaskId: it retained actualStart ('2026-10-07'), so it MUST return to 'in-progress'
+  assert.equal((await call(`${taskPath}/${coreTaskId}`, 'H1', 'PUT', { kind: 'task', name: 'Core Engine', baselineStart: '2026-10-06', baselineEnd: '2026-10-15', forecastStart: '2026-10-06', forecastEnd: '2026-10-15', actualStart: '2026-10-07', state: 'open', action: 'reactivate', owner: 'Core Team', reason: 'Reopening project', token: scheduleLease.body.token, baseVersion: 4, baseProjectVersion: milestoneProjectVersion })).status, 400);
+
+  const reactivateCore = await call(`${taskPath}/${coreTaskId}`, 'H1', 'PUT', { kind: 'task', name: 'Core Engine', baselineStart: '2026-10-06', baselineEnd: '2026-10-15', forecastStart: '2026-10-06', forecastEnd: '2026-10-15', actualStart: '2026-10-07', state: 'in-progress', action: 'reactivate', owner: 'Core Team', reason: 'Reopening core engine after pivot review', token: scheduleLease.body.token, baseVersion: 4, baseProjectVersion: milestoneProjectVersion });
+  assert.equal(reactivateCore.status, 200);
+  milestoneProjectVersion = reactivateCore.body.projectVersion;
+
+  const reactivatedCoreEntry = (await call(taskPath, 'H1')).body.find(e => e.id === coreTaskId);
+  assert.equal(reactivatedCoreEntry.state, 'in-progress');
+  assert.equal(reactivatedCoreEntry.phaseId, null); // subtask membership not automatically restored
+  assert.deepEqual(reactivatedCoreEntry.predecessors, []); // dependencies not automatically restored
+
+  // Reactivate milestone:
+  // First cancel milestone
+  const cancelMilestone = await call(`${taskPath}/${milestone.body.id}`, 'H1', 'PUT', { kind: 'milestone', name: 'Design Review', baselineDate: '2026-10-16', forecastDate: '2026-10-18', state: 'cancelled', action: 'cancel', reason: 'Postponed indefinitely', token: scheduleLease.body.token, baseVersion: 6, baseProjectVersion: milestoneProjectVersion });
+  assert.equal(cancelMilestone.status, 200);
+  milestoneProjectVersion = cancelMilestone.body.projectVersion;
+
+  // Reactivate milestone returns to pending
+  const reactivateMilestone = await call(`${taskPath}/${milestone.body.id}`, 'H1', 'PUT', { kind: 'milestone', name: 'Design Review', baselineDate: '2026-10-16', forecastDate: '2026-10-18', state: 'pending', action: 'reactivate', reason: 'Customer requested review resumed', token: scheduleLease.body.token, baseVersion: 7, baseProjectVersion: milestoneProjectVersion });
+  assert.equal(reactivateMilestone.status, 200);
+  milestoneProjectVersion = reactivateMilestone.body.projectVersion;
+  const reactivatedMilestoneEntry = (await call(taskPath, 'H1')).body.find(e => e.id === milestone.body.id);
+  assert.equal(reactivatedMilestoneEntry.state, 'pending');
+  assert.equal(reactivatedMilestoneEntry.actualDate, null);
 
   assert.equal((await call(`/api/items/${id}/project-participants`, 'H2', 'POST', { section: 's2' })).status, 403);
   assert.equal((await call(`/api/items/${id}/project-participants`, 'H1', 'POST', { section: 's2' })).status, 204);

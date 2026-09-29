@@ -275,6 +275,77 @@ try {
   await schedulePanel.getByRole('button', { name: '儲存時程' }).click();
   await schedulePanel.getByRole('heading', { name: '新增交付項目' }).waitFor({ timeout: 15000 });
   await schedulePanel.locator('li.schedule-milestone').getByText('已達成').waitFor({ timeout: 15000 });
+
+  // Issue #5: 取消、前置阻礙、重新啟用與關係清理
+  // 建立「前置測試任務」與「後續測試任務」
+  await schedulePanel.getByLabel('類型').selectOption('task');
+  await schedulePanel.getByLabel('名稱').fill('前置測試任務');
+  await schedulePanel.getByLabel('負責人或單位').fill('架構組');
+  await schedulePanel.getByLabel('原始計畫開始').fill('2026-10-01');
+  await schedulePanel.getByLabel('原始計畫結束').fill('2026-10-05');
+  await schedulePanel.getByRole('button', { name: '新增時程' }).click();
+  await schedulePanel.getByText('關鍵任務：前置測試任務').waitFor({ timeout: 15000 });
+
+  await schedulePanel.getByLabel('類型').selectOption('task');
+  await schedulePanel.getByLabel('名稱').fill('後續測試任務');
+  await schedulePanel.getByLabel('負責人或單位').fill('開發組');
+  await schedulePanel.getByLabel('原始計畫開始').fill('2026-10-06');
+  await schedulePanel.getByLabel('原始計畫結束').fill('2026-10-12');
+  await schedulePanel.getByRole('button', { name: '新增時程' }).click();
+  await schedulePanel.getByText('關鍵任務：後續測試任務').waitFor({ timeout: 15000 });
+
+  // 關聯前置測試任務 -> 後續測試任務
+  await schedulePanel.locator('li.schedule-task:has(strong:has-text("關鍵任務：後續測試任務"))').getByRole('button', { name: '編輯' }).click();
+  await schedulePanel.getByLabel('選擇前置項目').selectOption({ label: '[任務] 前置測試任務' });
+  await schedulePanel.getByPlaceholder('例如：需待架構確認後方可進行').fill('需待前置測試任務交付');
+  await schedulePanel.getByRole('button', { name: '建立前置關聯' }).click();
+  await page.getByText('已建立前置關聯。').waitFor({ timeout: 15000 });
+
+  // 嘗試取消前置測試任務：因有後續任務，阻擋取消並禁用按鈕
+  await schedulePanel.locator('li.schedule-task:has(strong:has-text("關鍵任務：前置測試任務"))').getByRole('button', { name: '編輯' }).click();
+  await schedulePanel.getByLabel('操作').selectOption('cancel');
+  await schedulePanel.locator('.cancellation-blocker-alert').waitFor({ timeout: 15000 });
+  assert.ok(await schedulePanel.getByText('無法直接取消項目').count() > 0);
+  assert.equal(await schedulePanel.getByRole('button', { name: '儲存時程' }).isDisabled(), true, 'cancellation with active successors must be disabled');
+
+  // 解除後續任務之前置關聯
+  await schedulePanel.locator('li.schedule-task:has(strong:has-text("關鍵任務：後續測試任務"))').getByRole('button', { name: '編輯' }).click();
+  page.once('dialog', dialog => dialog.accept('解除測試相依'));
+  await schedulePanel.getByRole('button', { name: '解除關聯' }).click();
+  await page.getByText('已解除前置關聯。').waitFor({ timeout: 15000 });
+
+  // 成功取消前置測試任務
+  await schedulePanel.locator('li.schedule-task:has(strong:has-text("關鍵任務：前置測試任務"))').getByRole('button', { name: '編輯' }).click();
+  await schedulePanel.getByLabel('操作').selectOption('cancel');
+  await schedulePanel.locator('.cancellation-ready-notice').waitFor({ timeout: 15000 });
+  await schedulePanel.getByLabel('修改原因', { exact: true }).fill('架構調整取消此任務');
+  await schedulePanel.getByRole('button', { name: '儲存時程' }).click();
+  await page.getByText('已儲存結構化時程。').waitFor({ timeout: 15000 });
+
+  // 驗證主時程清單已不包含取消項目
+  assert.equal(await schedulePanel.locator('ul > li.schedule-task:has(strong:has-text("關鍵任務：前置測試任務"))').count(), 0);
+
+  // 展開已取消項目區塊並檢查
+  await schedulePanel.locator('.cancelled-summary').click();
+  await schedulePanel.locator('.cancelled-item:has-text("前置測試任務")').waitFor({ timeout: 15000 });
+  assert.ok(await schedulePanel.locator('.cancelled-item:has-text("前置測試任務")').getByText('已取消').count() > 0);
+
+  // 重新啟用前置測試任務
+  await schedulePanel.locator('.cancelled-item:has-text("前置測試任務")').getByRole('button', { name: '重新啟用' }).click();
+  await schedulePanel.locator('.reactivate-notice').waitFor({ timeout: 15000 });
+  await schedulePanel.getByLabel('修改原因', { exact: true }).fill('重新評估後決定恢復');
+  await schedulePanel.getByRole('button', { name: '儲存時程' }).click();
+  await page.getByText('已儲存結構化時程。').waitFor({ timeout: 15000 });
+  await schedulePanel.locator('li.schedule-task:has(strong:has-text("關鍵任務：前置測試任務"))').waitFor({ timeout: 15000 });
+  assert.ok(await schedulePanel.locator('li.schedule-task:has(strong:has-text("關鍵任務：前置測試任務"))').getByText('開放').count() > 0);
+
+  // 再次取消前置測試任務以驗收正式發布頁面之已取消區塊
+  await schedulePanel.locator('li.schedule-task:has(strong:has-text("關鍵任務：前置測試任務"))').getByRole('button', { name: '編輯' }).click();
+  await schedulePanel.getByLabel('操作').selectOption('cancel');
+  await schedulePanel.getByLabel('修改原因', { exact: true }).fill('確認本期不交付');
+  await schedulePanel.getByRole('button', { name: '儲存時程' }).click();
+  await page.getByText('已儲存結構化時程。').waitFor({ timeout: 15000 });
+
   await page.getByRole('button', { name: '發布正式版' }).click();
   const publication = page.getByRole('link', { name: '查看剛發布的固定版本' });
   await publication.waitFor({ timeout: 15000 });
@@ -293,7 +364,9 @@ try {
   assert.ok(pubMilestoneText.includes('實際達成 2026-10-18'), 'publication milestone should display actual date');
   assert.ok(pubMilestoneText.includes('前置：驗收階段'), 'publication milestone should display predecessor chip');
   assert.equal(await page.getByRole('heading', { name: '交接維運系統', exact: true }).count(), 1);
-  await page.getByText('完成簽收').waitFor({ timeout: 15000 });
+  assert.equal(await page.getByText('完成簽收').waitFor({ timeout: 15000 }), undefined);
+  assert.ok(await page.locator('.publication-cancelled-section').count() > 0, 'cancelled section should exist in publication');
+  assert.ok(await page.locator('.publication-cancelled-list').getByText('前置測試任務').count() > 0, 'cancelled item should appear in publication cancelled list');
   await page.getByRole('link', { name: '來源' }).waitFor({ timeout: 15000 });
   await page.getByText('確認負責人', { exact: false }).waitFor({ timeout: 15000 });
   assert.match(page.url(), new RegExp(`#/publications/`));

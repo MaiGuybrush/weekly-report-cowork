@@ -502,6 +502,32 @@ app.MapPut("/api/items/{itemId}/schedule/{entryId}", (HttpContext ctx, Store sto
         if (current.State == "cancelled" && request.State != "cancelled" && request.Action != "reactivate") return Results.BadRequest(new { error = "reactivate action required" });
 
         var at = DateTimeOffset.UtcNow.ToString("O");
+        if (request.Action == "cancel")
+        {
+            var hasActiveSuccessors = Store.Sql(db, "SELECT 1 FROM project_schedule_dependencies WHERE predecessor_id=$id", ("$id", entryId)).ExecuteScalar() is not null;
+            if (hasActiveSuccessors)
+                return Results.BadRequest(new { error = "cannot cancel item with active successors; remove or replace successor dependency links first" });
+
+            var incomingPredIds = new List<string>();
+            using (var predRows = Store.Sql(db, "SELECT predecessor_id FROM project_schedule_dependencies WHERE successor_id=$id", ("$id", entryId)).ExecuteReader())
+            {
+                while (predRows.Read()) incomingPredIds.Add(predRows.GetString(0));
+            }
+            if (incomingPredIds.Count > 0)
+            {
+                Store.Sql(db, "DELETE FROM project_schedule_dependencies WHERE successor_id=$id", ("$id", entryId)).ExecuteNonQuery();
+                foreach (var pId in incomingPredIds)
+                {
+                    var predEntry = ScheduleEntry(db, pId);
+                    if (predEntry is not null)
+                    {
+                        SaveScheduleRevision(db, pId, Current(ctx).EmpNo, at, "unlink-dependency", $"後續項目「{current.Name}」已取消，解除相依關係", predEntry, predEntry);
+                        SaveScheduleRevision(db, entryId, Current(ctx).EmpNo, at, "unlink-dependency", $"項目取消，自動解除前置項目「{predEntry.Name}」相依關係", current, current);
+                    }
+                }
+            }
+        }
+
         Store.Sql(db, "UPDATE project_schedule_entries SET name=$name,baseline_date=$baselineDate,forecast_date=$forecastDate,actual_date=$actualDate,state=$state,version=version+1,updated_at=$at WHERE id=$id AND version=$version",
             ("$name", request.Name!.Trim()), ("$baselineDate", request.BaselineDate), ("$forecastDate", request.ForecastDate), ("$actualDate", request.ActualDate), ("$state", request.State), ("$at", at), ("$id", entryId), ("$version", current.Version)).ExecuteNonQuery();
         SaveScheduleRevision(db, entryId, Current(ctx).EmpNo, at, request.Action ?? "update", request.Reason!.Trim(), current, ScheduleEntry(db, entryId)!);
@@ -521,7 +547,8 @@ app.MapPut("/api/items/{itemId}/schedule/{entryId}", (HttpContext ctx, Store sto
     if (originalChangedPhaseTask != correctionPhaseTask) return Results.BadRequest(new { error = "original plan changes require correct-original action" });
     if (request.Action == "reopen" && (current.State != "completed" || request.State != "in-progress" || request.ActualEnd is not null || request.ActualStart != current.ActualStart)) return Results.BadRequest(new { error = "invalid reopen" });
     if (request.Action == "cancel" && (current.State == "cancelled" || request.State != "cancelled")) return Results.BadRequest(new { error = "invalid cancel" });
-    if (request.Action == "reactivate" && (current.State != "cancelled" || request.State is not ("open" or "in-progress"))) return Results.BadRequest(new { error = "invalid reactivate" });
+    var expectedReactivateState = current.ActualStart is not null ? "in-progress" : "open";
+    if (request.Action == "reactivate" && (current.State != "cancelled" || request.State != expectedReactivateState || request.ActualStart != current.ActualStart)) return Results.BadRequest(new { error = $"invalid reactivate state or actualStart; item with actualStart {(current.ActualStart is not null ? "must return to in-progress" : "must return to open")}" });
     if (request.Action is not ("reopen" or "cancel") && current.State == "completed" && request.State != "completed") return Results.BadRequest(new { error = "reopen action required" });
     if (request.State == "cancelled" && current.State != "cancelled" && request.Action != "cancel") return Results.BadRequest(new { error = "cancel action required" });
     if (current.State == "cancelled" && request.State != "cancelled" && request.Action != "reactivate") return Results.BadRequest(new { error = "reactivate action required" });
@@ -532,14 +559,51 @@ app.MapPut("/api/items/{itemId}/schedule/{entryId}", (HttpContext ctx, Store sto
             return Results.BadRequest(new { error = "unfinished tasks require explicit confirmation and reason", unfinishedTasks = unfinished });
     }
     var atPhaseTask = DateTimeOffset.UtcNow.ToString("O");
+    if (request.Action == "cancel")
+    {
+        var hasActiveSuccessors = Store.Sql(db, "SELECT 1 FROM project_schedule_dependencies WHERE predecessor_id=$id", ("$id", entryId)).ExecuteScalar() is not null;
+        if (hasActiveSuccessors)
+            return Results.BadRequest(new { error = "cannot cancel item with active successors; remove or replace successor dependency links first" });
+
+        if (current.Kind == "phase")
+        {
+            var hasActiveChildTasks = Store.Sql(db, "SELECT 1 FROM project_schedule_entries WHERE project_id=$project AND phase_id=$phase AND state != 'cancelled'", ("$project", itemId), ("$phase", entryId)).ExecuteScalar() is not null;
+            if (hasActiveChildTasks)
+                return Results.BadRequest(new { error = "cannot cancel phase with active child tasks; reassign, move to project, or cancel child tasks first" });
+
+            Store.Sql(db, "UPDATE project_schedule_entries SET phase_id=NULL WHERE phase_id=$id", ("$id", entryId)).ExecuteNonQuery();
+        }
+
+        var incomingPredIds = new List<string>();
+        using (var predRows = Store.Sql(db, "SELECT predecessor_id FROM project_schedule_dependencies WHERE successor_id=$id", ("$id", entryId)).ExecuteReader())
+        {
+            while (predRows.Read()) incomingPredIds.Add(predRows.GetString(0));
+        }
+        if (incomingPredIds.Count > 0)
+        {
+            Store.Sql(db, "DELETE FROM project_schedule_dependencies WHERE successor_id=$id", ("$id", entryId)).ExecuteNonQuery();
+            foreach (var pId in incomingPredIds)
+            {
+                var predEntry = ScheduleEntry(db, pId);
+                if (predEntry is not null)
+                {
+                    SaveScheduleRevision(db, pId, Current(ctx).EmpNo, atPhaseTask, "unlink-dependency", $"後續項目「{current.Name}」已取消，解除相依關係", predEntry, predEntry);
+                    SaveScheduleRevision(db, entryId, Current(ctx).EmpNo, atPhaseTask, "unlink-dependency", $"項目取消，自動解除前置項目「{predEntry.Name}」相依關係", current, current);
+                }
+            }
+        }
+    }
+
+    var effectivePhaseId = (request.State == "cancelled" || current.State == "cancelled" || request.Action is "cancel" or "reactivate") ? null : request.PhaseId;
     Store.Sql(db, "UPDATE project_schedule_entries SET name=$name,baseline_start=$baselineStart,baseline_end=$baselineEnd,forecast_start=$forecastStart,forecast_end=$forecastEnd,actual_start=$actualStart,actual_end=$actualEnd,state=$state,owner=$owner,phase_id=$phase,version=version+1,updated_at=$at WHERE id=$id AND version=$version",
-        ("$name", request.Name!.Trim()), ("$baselineStart", request.BaselineStart), ("$baselineEnd", request.BaselineEnd), ("$forecastStart", request.ForecastStart), ("$forecastEnd", request.ForecastEnd), ("$actualStart", request.ActualStart), ("$actualEnd", request.ActualEnd), ("$state", request.State), ("$owner", request.Kind == "task" ? request.Owner!.Trim() : null), ("$phase", request.PhaseId), ("$at", atPhaseTask), ("$id", entryId), ("$version", current.Version)).ExecuteNonQuery();
+        ("$name", request.Name!.Trim()), ("$baselineStart", request.BaselineStart), ("$baselineEnd", request.BaselineEnd), ("$forecastStart", request.ForecastStart), ("$forecastEnd", request.ForecastEnd), ("$actualStart", request.ActualStart), ("$actualEnd", request.ActualEnd), ("$state", request.State), ("$owner", request.Kind == "task" ? request.Owner!.Trim() : null), ("$phase", effectivePhaseId), ("$at", atPhaseTask), ("$id", entryId), ("$version", current.Version)).ExecuteNonQuery();
     SaveScheduleRevision(db, entryId, Current(ctx).EmpNo, atPhaseTask, request.Action ?? "update", request.Reason!.Trim(), current, ScheduleEntry(db, entryId)!);
     NotifySuccessorsOfPredecessorChange(db, itemId, entryId, Current(ctx).EmpNo, atPhaseTask, request.Reason!.Trim());
     AdvanceProjectVersion(db, item);
     tx.Commit();
     return Results.Ok(new { version = current.Version + 1, projectVersion = item.Version + 1 });
 });
+app.MapDelete("/api/items/{itemId}/schedule/{entryId}", () => Results.BadRequest(new { error = "committed schedule items cannot be deleted; use cancellation" }));
 app.MapPost("/api/items/{itemId}/schedule/dependencies", (HttpContext ctx, Store store, string itemId, ScheduleDependencyRequest request) =>
 {
     using var db = store.Open();
@@ -563,6 +627,9 @@ app.MapPost("/api/items/{itemId}/schedule/dependencies", (HttpContext ctx, Store
     var succ = ScheduleEntry(db, request.SuccessorId);
     if (pred is null || succ is null || pred.ProjectId != itemId || succ.ProjectId != itemId)
         return Results.BadRequest(new { error = "cross project or non-existent dependency" });
+
+    if (pred.State == "cancelled" || succ.State == "cancelled")
+        return Results.BadRequest(new { error = "cannot link cancelled schedule entry" });
 
     if ((pred.Kind == "phase" && succ.Kind == "task" && succ.PhaseId == pred.Id) ||
         (succ.Kind == "phase" && pred.Kind == "task" && pred.PhaseId == succ.Id))
@@ -1045,7 +1112,7 @@ static List<ScheduleEntry> ScheduleEntries(SqliteConnection db, string itemId)
 
     return rawEntries.Select(entry => entry with {
         UnfinishedTasks = entry.Kind == "phase"
-            ? rawEntries.Where(task => task.Kind == "task" && task.PhaseId == entry.Id && task.State != "completed").Select(task => task.Name).ToList()
+            ? rawEntries.Where(task => task.Kind == "task" && task.PhaseId == entry.Id && task.State != "completed" && task.State != "cancelled").Select(task => task.Name).ToList()
             : null,
         Predecessors = predMap.GetValueOrDefault(entry.Id) ?? [],
         Successors = succMap.GetValueOrDefault(entry.Id) ?? [],
