@@ -1,0 +1,15 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "build Weekly Report API",
+      "type": "process",
+      "command": "dotnet",
+      "args": [
+        "build",
+        "${workspaceFolder}/apps/api/WeeklyReport.Api.csproj"
+      ],
+      "problemMatcher": "$msCompile"
+    }
+  ]
+}

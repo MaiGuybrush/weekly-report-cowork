@@ -1,0 +1,17 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "Debug Weekly Report API",
+      "type": "coreclr",
+      "request": "launch",
+      "preLaunchTask": "build Weekly Report API",
+      "program": "${workspaceFolder}/apps/api/bin/Debug/net9.0/WeeklyReport.Api.dll",
+      "args": [],
+      "cwd": "${workspaceFolder}/apps/api",
+      "env": {
+        "ASPNETCORE_URLS": "http://localhost:5080"
+      }
+    }
+  ]
+}
