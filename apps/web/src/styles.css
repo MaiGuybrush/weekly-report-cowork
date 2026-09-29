@@ -32,6 +32,12 @@ label { display: block; margin: 1rem 0; } input, textarea { display: block; box-
 .schedule-history { background: #f0f5f2; border-left: 3px solid #4f8977; padding: .8rem 1rem .8rem 2rem; }
 .schedule-history li { padding: .4rem 0; }
 .schedule-history pre { white-space: pre-wrap; overflow-wrap: anywhere; font-size: .75rem; }
+.project-schedule > ul > li.schedule-task { margin-left: 1.4rem; padding-left: 1rem; border-left: 2px solid #b7ccc4; background: #f7faf7; }
+.schedule-owner { display: inline-block; margin-left: .55rem; color: #46695d; font-size: .84rem; }
+.schedule-warning { margin: .35rem 0; padding: .5rem .75rem; background: #fff7e8; border-left: 3px solid #bc8541; color: #694d22; font-size: .85rem; line-height: 1.5; }
+.schedule-form h4 { margin: 0 0 .75rem; font-family: 'Noto Serif TC', 'PMingLiU', serif; font-size: 1.15rem; color: #234d41; }
+.schedule-form .schedule-exception { display: block; width: auto; padding: .7rem .85rem; background: #fff7e8; border-left: 3px solid #bc8541; line-height: 1.5; }
+.schedule-exception input { display: inline-block; width: auto; margin: 0 .5rem 0 0; vertical-align: middle; }
 .publication { max-width: 1040px; } .publication-meta { font-size: 1.05rem; color: #36536c; } .publication section { margin: 1.75rem 0; } .publication article { padding: 1rem 1.25rem; border-left: 4px solid #2b769b; background: #fff; box-shadow: 0 1px 2px #15263b14; } .publication article p { white-space: pre-wrap; overflow-wrap: anywhere; line-height: 1.6; } .publication-sources { padding: .75rem 1rem; background: #eef6fa; border-left: 4px solid #5b879e; } .publication-sources h2 { margin-top: 0; } .publication-sources ul { margin-bottom: 0; padding-left: 1.25rem; }
 @media (max-width: 700px) { .editor, .compare, .source-link-row, .gantt-row { grid-template-columns: 1fr; } nav { max-height: 20rem; } }
 @media print { @page { margin: 14mm; } :root, body { background: white; } header { background: white; color: #15263b; padding: 0; } header a, header button { display: none; } main { max-width: none; margin: 0; } .publication section, .publication article { break-inside: avoid; } .publication h2 { break-after: avoid; } .publication article { border: 0; border-bottom: 1px solid #d6e0e8; border-radius: 0; box-shadow: none; padding: .75rem 0; } .publication-sources { border-left: 0; padding: .5rem 0; } }

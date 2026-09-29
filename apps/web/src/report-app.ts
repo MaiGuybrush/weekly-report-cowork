@@ -59,8 +59,11 @@ type ProjectWork = {
 };
 type ScheduleEntry = {
   id: string;
-  kind: "phase" | "milestone";
+  kind: "phase" | "task" | "milestone";
   name: string;
+  owner?: string | null;
+  phaseId?: string | null;
+  unfinishedTasks?: string[] | null;
   baselineStart: string | null;
   baselineEnd: string | null;
   forecastStart: string | null;
@@ -553,7 +556,7 @@ export class Home implements OnInit {
             }
             @if (item.section === "projects") {
               <section class="project-schedule">
-                <div class="schedule-heading"><div><span class="eyebrow">PROJECT TIMELINE</span><h3>專案階段</h3><p>對照原始承諾、目前計畫與實際進度。每次修訂均保留原因。</p></div><span class="schedule-count">{{ scheduleEntries.length }} 個時程項目</span></div>
+                <div class="schedule-heading"><div><span class="eyebrow">PROJECT DELIVERY</span><h3>交付時程</h3><p>階段呈現整體交付，關鍵任務標明負責人與確認進度。</p></div><span class="schedule-count">{{ scheduleEntries.length }} 個時程項目</span></div>
                 @if (scheduleEntries.length) {
                   <div class="gantt">
                     <p>
@@ -663,14 +666,15 @@ export class Home implements OnInit {
                   </div>
                 }
                 <ul>
-                  @for (entry of scheduleEntries; track entry) {
-                    <li>
+                  @for (entry of scheduleDisplayEntries(); track entry.id) {
+                    <li [class.schedule-task]="entry.kind === 'task'">
                       <strong
-                        >{{ entry.kind === "phase" ? "階段" : "里程碑" }}：{{
+                        >{{ entry.kind === "phase" ? "階段" : entry.kind === "task" ? "關鍵任務" : "里程碑" }}：{{
                           entry.name
                         }}</strong
                       >
                       <span class="schedule-state" [attr.data-state]="entry.state">{{ scheduleStateLabel(entry.state) }}</span>
+                      @if (entry.kind === 'task') { <span class="schedule-owner">負責 {{ entry.owner }} · {{ phaseName(entry.phaseId) }}</span> }
                       · 原始計畫 {{ entry.baselineStart || "—" }}–{{
                         entry.baselineEnd || "—"
                       }}
@@ -680,7 +684,9 @@ export class Home implements OnInit {
                       · 實際 {{ entry.actualStart || "—" }}–{{
                         entry.actualEnd || "—"
                       }}
+                      · 開始偏差 {{ scheduleStartVariance(entry) }}
                       · 完成偏差 {{ scheduleVariance(entry) }}
+                      @if (entry.kind === 'phase' && entry.unfinishedTasks?.length) { <div class="schedule-warning">尚有 {{ entry.unfinishedTasks?.length }} 項未完成任務：{{ entry.unfinishedTasks?.join('、') }}。階段須由維護人另行確認。</div> }
                       @if (canMaintain(item)) {
                         <button (click)="editSchedule(entry)">編輯</button>
                       }
@@ -702,16 +708,21 @@ export class Home implements OnInit {
                 }
                 @if (canMaintain(item)) {
                   <div class="schedule-form">
-                    <h4>{{ editingSchedule ? "編輯時程" : "新增時程" }}</h4>
+                    <h4>{{ editingSchedule ? "編輯交付項目" : "新增交付項目" }}</h4>
                     <label
                       >類型
-                      <select [(ngModel)]="scheduleDraft.kind">
+                      <select [(ngModel)]="scheduleDraft.kind" [disabled]="!!editingSchedule">
                         <option value="phase">階段</option>
+                        <option value="task">關鍵任務</option>
                       </select></label
                     >
                     <label
                       >名稱 <input [(ngModel)]="scheduleDraft.name"
                     /></label>
+                    @if (scheduleDraft.kind === 'task') {
+                      <label>負責人或單位 <input [(ngModel)]="scheduleDraft.owner" required /></label>
+                      <label>所屬階段 <select [(ngModel)]="scheduleDraft.phaseId"><option value="">直接隸屬專案</option>@for (phase of schedulePhases(); track phase.id) {<option [value]="phase.id">{{ phase.name }}</option>}</select></label>
+                    }
                     @if (editingSchedule) {<label>狀態<select [(ngModel)]="scheduleDraft.state"><option value="open">開放</option><option value="in-progress">進行中</option><option value="completed">完成</option><option value="cancelled">取消</option></select></label>}
                     <label
                       >原始計畫開始
@@ -749,11 +760,12 @@ export class Home implements OnInit {
                     /></label>
                     }
                     @if (editingSchedule) {
-                      <label>操作<select [(ngModel)]="scheduleDraft.action"><option value="update">一般修訂</option><option value="correct-original">更正原始資料</option><option value="reopen">重新開啟</option><option value="cancel">取消階段</option><option value="reactivate">重新啟用</option></select></label>
+                      <label>操作<select [(ngModel)]="scheduleDraft.action"><option value="update">一般修訂</option><option value="correct-original">更正原始資料</option><option value="reopen">重新開啟</option><option value="cancel">取消項目</option><option value="reactivate">重新啟用</option></select></label>
                       <p class="schedule-note">一般改期只調整目前計畫；原始日期誤植時選擇「更正原始資料」。重開時請清除實際完成日。</p>
+                      @if (editingSchedule.kind === 'phase' && editingSchedule.state !== 'completed' && scheduleDraft.state === 'completed' && editingSchedule.unfinishedTasks?.length) { <label class="schedule-exception"><input type="checkbox" [(ngModel)]="scheduleDraft.acknowledgeIncompleteTasks" />我已檢視未完成任務，並在修改原因中說明提前確認階段的理由。</label> }
                       <label>修改原因 <input [(ngModel)]="scheduleDraft.reason" required /></label>
                     }
-                    <button (click)="saveSchedule()" [disabled]="!token || (editingSchedule && !scheduleDraft.reason.trim())">
+                    <button (click)="saveSchedule()" [disabled]="!token || !scheduleDraft.name.trim() || (scheduleDraft.kind === 'task' && !scheduleDraft.owner.trim()) || (editingSchedule && !scheduleDraft.reason.trim()) || (editingSchedule?.kind === 'phase' && editingSchedule?.state !== 'completed' && scheduleDraft.state === 'completed' && editingSchedule?.unfinishedTasks?.length && !scheduleDraft.acknowledgeIncompleteTasks)">
                       {{ editingSchedule ? "儲存時程" : "新增時程" }}
                     </button>
                     @if (editingSchedule) {
@@ -1120,8 +1132,11 @@ export class ReportEditor implements OnInit, OnDestroy {
   }
   emptyScheduleDraft() {
     return {
-      kind: "phase" as "phase" | "milestone",
+      kind: "phase" as ScheduleEntry["kind"],
       name: "",
+      owner: "",
+      phaseId: "",
+      acknowledgeIncompleteTasks: false,
       baselineStart: "",
       baselineEnd: "",
       forecastStart: "",
@@ -1184,19 +1199,32 @@ export class ReportEditor implements OnInit, OnDestroy {
   }
   completedScheduleEntries() {
     return this.scheduleEntries.filter(
-      (entry) => entry.state === "completed",
+      (entry) => entry.kind === "phase" && entry.state === "completed",
     );
   }
   activeScheduleEntries() {
     return this.scheduleEntries.filter(
-      (entry) => !this.completedScheduleEntries().includes(entry),
+      (entry) => entry.kind === "phase" && entry.state !== "completed",
     );
+  }
+  schedulePhases() {
+    return this.scheduleEntries.filter(entry => entry.kind === "phase" && entry.state !== "cancelled" && (entry.state !== "completed" || entry.id === this.scheduleDraft.phaseId || this.editingSchedule?.kind === "task" && this.scheduleDraft.state === "completed"));
+  }
+  phaseName(id: string | null | undefined) {
+    return id ? this.scheduleEntries.find(entry => entry.id === id)?.name ?? "未知階段" : "專案直屬";
+  }
+  scheduleDisplayEntries() {
+    const phases = this.scheduleEntries.filter(entry => entry.kind === "phase");
+    return [...phases.flatMap(phase => [phase, ...this.scheduleEntries.filter(entry => entry.kind === "task" && entry.phaseId === phase.id)]), ...this.scheduleEntries.filter(entry => entry.kind === "task" && !entry.phaseId), ...this.scheduleEntries.filter(entry => entry.kind !== "phase" && entry.kind !== "task")];
   }
   editSchedule(entry: ScheduleEntry) {
     this.editingSchedule = entry;
     this.scheduleDraft = {
       kind: entry.kind,
       name: entry.name,
+      owner: entry.owner ?? "",
+      phaseId: entry.phaseId ?? "",
+      acknowledgeIncompleteTasks: false,
       baselineStart: entry.baselineStart ?? "",
       baselineEnd: entry.baselineEnd ?? "",
       forecastStart: entry.forecastStart ?? "",
@@ -1217,6 +1245,12 @@ export class ReportEditor implements OnInit, OnDestroy {
     const end = entry.actualEnd || entry.forecastEnd;
     if (!entry.baselineEnd || !end) return "—";
     const days = Math.round((Date.parse(end) - Date.parse(entry.baselineEnd)) / 86400000);
+    return `${days > 0 ? "+" : ""}${days} 天`;
+  }
+  scheduleStartVariance(entry: ScheduleEntry) {
+    const start = entry.actualStart || entry.forecastStart;
+    if (!entry.baselineStart || !start) return "—";
+    const days = Math.round((Date.parse(start) - Date.parse(entry.baselineStart)) / 86400000);
     return `${days > 0 ? "+" : ""}${days} 天`;
   }
   async loadScheduleHistory(entry: ScheduleEntry) {
@@ -1242,6 +1276,8 @@ export class ReportEditor implements OnInit, OnDestroy {
     const value = (date: string) => date || null;
     const body = {
       ...this.scheduleDraft,
+      owner: this.scheduleDraft.kind === "task" ? this.scheduleDraft.owner.trim() : null,
+      phaseId: this.scheduleDraft.kind === "task" ? this.scheduleDraft.phaseId || null : null,
       baselineStart: value(this.scheduleDraft.baselineStart),
       baselineEnd: value(this.scheduleDraft.baselineEnd),
       forecastStart: this.editingSchedule ? value(this.scheduleDraft.forecastStart) : value(this.scheduleDraft.baselineStart),
@@ -1526,7 +1562,7 @@ export class ReportEditor implements OnInit, OnDestroy {
                 @if (item.schedule?.length) {
                   <div class="gantt">
                     <p><strong>專案甘特圖</strong>（基準／預估／實際）</p>
-                    @for (entry of item.schedule; track entry) {
+                    @for (entry of publicationPhases(item.schedule || []); track entry.id) {
                       <div class="gantt-row">
                         <span>{{ entry.name }}</span>
                         <div class="gantt-track">
@@ -1588,13 +1624,14 @@ export class ReportEditor implements OnInit, OnDestroy {
                 }
                 @if (item.schedule?.length) {
                   <ul>
-                    @for (entry of item.schedule; track entry) {
+                    @for (entry of item.schedule; track entry.id) {
                       <li>
                         <strong
                           >{{
-                            entry.kind === "phase" ? "階段" : "重要里程碑"
+                            entry.kind === "phase" ? "階段" : entry.kind === "task" ? "關鍵任務" : "重要里程碑"
                           }}：{{ entry.name }}</strong
                         >
+                        @if (entry.kind === 'task') { · 負責 {{ entry.owner }} }
                         · 基準 {{ entry.baselineStart || "—" }}–{{
                           entry.baselineEnd || "—"
                         }}
@@ -1630,6 +1667,9 @@ export class PublicationPage implements OnInit {
   private publicationId = this.route.snapshot.paramMap.get("id")!;
   label(section: string) {
     return labels[section] ?? section;
+  }
+  publicationPhases(entries: ScheduleEntry[]) {
+    return entries.filter(entry => entry.kind === "phase");
   }
   private publicationDates(entries: ScheduleEntry[]) {
     return entries

@@ -101,9 +101,11 @@ app.MapPost("/api/reports", (HttpContext ctx, Store store, CreateReport request)
                 var carriedId = Guid.NewGuid().ToString();
                 Store.Sql(db, "INSERT INTO items(id,report_id,continuity_id,section,owner_section,title,content,details,status,version,created_by) VALUES($id,$report,$continuity,$section,$owner,$title,$content,$details,$status,1,$actor)",
                     ("$id", carriedId), ("$report", newReportId), ("$continuity", item.ContinuityId), ("$section", item.Section), ("$owner", item.OwnerSection), ("$title", item.Title), ("$content", item.Content), ("$details", CarryDetails(item)), ("$status", item.Status), ("$actor", Current(ctx).EmpNo)).ExecuteNonQuery();
-                foreach (var entry in item.Schedule ?? [])
-                    Store.Sql(db, "INSERT INTO project_schedule_entries(id,project_id,kind,name,baseline_start,baseline_end,forecast_start,forecast_end,actual_start,actual_end,version,created_by,updated_at) VALUES($id,$project,$kind,$name,$baselineStart,$baselineEnd,$forecastStart,$forecastEnd,$actualStart,$actualEnd,$version,$actor,$at)",
-                        ("$id", Guid.NewGuid().ToString()), ("$project", carriedId), ("$kind", entry.Kind), ("$name", entry.Name), ("$baselineStart", entry.BaselineStart), ("$baselineEnd", entry.BaselineEnd), ("$forecastStart", entry.ForecastStart), ("$forecastEnd", entry.ForecastEnd), ("$actualStart", entry.ActualStart), ("$actualEnd", entry.ActualEnd), ("$version", entry.Version), ("$actor", Current(ctx).EmpNo), ("$at", DateTimeOffset.UtcNow.ToString("O"))).ExecuteNonQuery();
+                var schedule = item.Schedule ?? [];
+                var carriedIds = schedule.ToDictionary(entry => entry.Id, _ => Guid.NewGuid().ToString());
+                foreach (var entry in schedule.Where(entry => entry.Kind == "phase").Concat(schedule.Where(entry => entry.Kind != "phase")))
+                    Store.Sql(db, "INSERT INTO project_schedule_entries(id,project_id,kind,name,baseline_start,baseline_end,forecast_start,forecast_end,actual_start,actual_end,state,owner,phase_id,version,created_by,updated_at) VALUES($id,$project,$kind,$name,$baselineStart,$baselineEnd,$forecastStart,$forecastEnd,$actualStart,$actualEnd,$state,$owner,$phase,$version,$actor,$at)",
+                        ("$id", carriedIds[entry.Id]), ("$project", carriedId), ("$kind", entry.Kind), ("$name", entry.Name), ("$baselineStart", entry.BaselineStart), ("$baselineEnd", entry.BaselineEnd), ("$forecastStart", entry.ForecastStart), ("$forecastEnd", entry.ForecastEnd), ("$actualStart", entry.ActualStart), ("$actualEnd", entry.ActualEnd), ("$state", entry.State), ("$owner", entry.Owner), ("$phase", entry.PhaseId is null ? null : carriedIds.GetValueOrDefault(entry.PhaseId)), ("$version", entry.Version), ("$actor", Current(ctx).EmpNo), ("$at", DateTimeOffset.UtcNow.ToString("O"))).ExecuteNonQuery();
             }
     }
     tx.Commit();
@@ -406,13 +408,13 @@ app.MapPost("/api/items/{itemId}/schedule", (HttpContext ctx, Store store, strin
     if (item is null) return Results.NotFound();
     if (item.Section != "projects" || !CanMaintainProject(Current(ctx), item)) return Results.StatusCode(403);
     if (item.Version == 0) return Results.BadRequest(new { error = "commit the project item before creating schedule entries" });
-    if (request.Kind != "phase" || !ValidPhase(request) || request.State != "open" || request.ForecastStart != request.BaselineStart || request.ForecastEnd != request.BaselineEnd) return Results.BadRequest(new { error = "invalid phase" });
+    if (request.Kind is not ("phase" or "task") || !ValidScheduleRange(request) || !ValidTaskFields(db, itemId, request, null) || request.State != "open" || request.ForecastStart != request.BaselineStart || request.ForecastEnd != request.BaselineEnd) return Results.BadRequest(new { error = "invalid phase or task" });
     var conflict = ScheduleWriteConflict(db, item, Current(ctx), request);
     if (conflict is not null) return conflict;
     var id = Guid.NewGuid().ToString();
     var at = DateTimeOffset.UtcNow.ToString("O");
-    Store.Sql(db, "INSERT INTO project_schedule_entries(id,project_id,kind,name,baseline_start,baseline_end,forecast_start,forecast_end,actual_start,actual_end,state,created_by,updated_at) VALUES($id,$project,'phase',$name,$baselineStart,$baselineEnd,$forecastStart,$forecastEnd,$actualStart,$actualEnd,$state,$actor,$at)",
-        ("$id", id), ("$project", itemId), ("$name", request.Name!.Trim()), ("$baselineStart", request.BaselineStart), ("$baselineEnd", request.BaselineEnd), ("$forecastStart", request.ForecastStart), ("$forecastEnd", request.ForecastEnd), ("$actualStart", request.ActualStart), ("$actualEnd", request.ActualEnd), ("$state", request.State), ("$actor", Current(ctx).EmpNo), ("$at", at)).ExecuteNonQuery();
+    Store.Sql(db, "INSERT INTO project_schedule_entries(id,project_id,kind,name,baseline_start,baseline_end,forecast_start,forecast_end,actual_start,actual_end,state,owner,phase_id,created_by,updated_at) VALUES($id,$project,$kind,$name,$baselineStart,$baselineEnd,$forecastStart,$forecastEnd,$actualStart,$actualEnd,$state,$owner,$phase,$actor,$at)",
+        ("$id", id), ("$project", itemId), ("$kind", request.Kind), ("$name", request.Name!.Trim()), ("$baselineStart", request.BaselineStart), ("$baselineEnd", request.BaselineEnd), ("$forecastStart", request.ForecastStart), ("$forecastEnd", request.ForecastEnd), ("$actualStart", request.ActualStart), ("$actualEnd", request.ActualEnd), ("$state", request.State), ("$owner", request.Kind == "task" ? request.Owner!.Trim() : null), ("$phase", request.PhaseId), ("$actor", Current(ctx).EmpNo), ("$at", at)).ExecuteNonQuery();
     var created = ScheduleEntry(db, id)!;
     SaveScheduleRevision(db, id, Current(ctx).EmpNo, at, "create", null, null, created);
     AdvanceProjectVersion(db, item);
@@ -428,7 +430,7 @@ app.MapPut("/api/items/{itemId}/schedule/{entryId}", (HttpContext ctx, Store sto
     if (item.Section != "projects" || !CanMaintainProject(Current(ctx), item)) return Results.StatusCode(403);
     var current = ScheduleEntry(db, entryId);
     if (current is null || current.ProjectId != itemId) return Results.NotFound();
-    if (current.Kind != "phase" || request.Kind != "phase" || !ValidPhase(request)) return Results.BadRequest(new { error = "invalid phase" });
+    if (current.Kind != request.Kind || !ValidScheduleRange(request) || !ValidTaskFields(db, itemId, request, current)) return Results.BadRequest(new { error = "invalid phase or task" });
     var conflict = ScheduleWriteConflict(db, item, Current(ctx), request);
     if (conflict is not null) return conflict;
     if (request.BaseVersion != current.Version) return ScheduleConflict(db, itemId, item.Version, "stale schedule version");
@@ -443,9 +445,15 @@ app.MapPut("/api/items/{itemId}/schedule/{entryId}", (HttpContext ctx, Store sto
     if (request.Action is not ("reopen" or "cancel") && current.State == "completed" && request.State != "completed") return Results.BadRequest(new { error = "reopen action required" });
     if (request.State == "cancelled" && current.State != "cancelled" && request.Action != "cancel") return Results.BadRequest(new { error = "cancel action required" });
     if (current.State == "cancelled" && request.State != "cancelled" && request.Action != "reactivate") return Results.BadRequest(new { error = "reactivate action required" });
+    if (current.Kind == "phase" && request.State == "completed" && current.State != "completed")
+    {
+        var unfinished = ScheduleEntries(db, itemId).First(entry => entry.Id == entryId).UnfinishedTasks ?? [];
+        if (unfinished.Count > 0 && request.AcknowledgeIncompleteTasks != true)
+            return Results.BadRequest(new { error = "unfinished tasks require explicit confirmation and reason", unfinishedTasks = unfinished });
+    }
     var at = DateTimeOffset.UtcNow.ToString("O");
-    Store.Sql(db, "UPDATE project_schedule_entries SET name=$name,baseline_start=$baselineStart,baseline_end=$baselineEnd,forecast_start=$forecastStart,forecast_end=$forecastEnd,actual_start=$actualStart,actual_end=$actualEnd,state=$state,version=version+1,updated_at=$at WHERE id=$id AND version=$version",
-        ("$name", request.Name!.Trim()), ("$baselineStart", request.BaselineStart), ("$baselineEnd", request.BaselineEnd), ("$forecastStart", request.ForecastStart), ("$forecastEnd", request.ForecastEnd), ("$actualStart", request.ActualStart), ("$actualEnd", request.ActualEnd), ("$state", request.State), ("$at", at), ("$id", entryId), ("$version", current.Version)).ExecuteNonQuery();
+    Store.Sql(db, "UPDATE project_schedule_entries SET name=$name,baseline_start=$baselineStart,baseline_end=$baselineEnd,forecast_start=$forecastStart,forecast_end=$forecastEnd,actual_start=$actualStart,actual_end=$actualEnd,state=$state,owner=$owner,phase_id=$phase,version=version+1,updated_at=$at WHERE id=$id AND version=$version",
+        ("$name", request.Name!.Trim()), ("$baselineStart", request.BaselineStart), ("$baselineEnd", request.BaselineEnd), ("$forecastStart", request.ForecastStart), ("$forecastEnd", request.ForecastEnd), ("$actualStart", request.ActualStart), ("$actualEnd", request.ActualEnd), ("$state", request.State), ("$owner", request.Kind == "task" ? request.Owner!.Trim() : null), ("$phase", request.PhaseId), ("$at", at), ("$id", entryId), ("$version", current.Version)).ExecuteNonQuery();
     SaveScheduleRevision(db, entryId, Current(ctx).EmpNo, at, request.Action ?? "update", request.Reason!.Trim(), current, ScheduleEntry(db, entryId)!);
     AdvanceProjectVersion(db, item);
     tx.Commit();
@@ -619,7 +627,7 @@ static bool IsProjectParticipant(SqliteConnection db, string itemId, string? sec
 static bool ValidSection(SqliteConnection db, string? section) => !string.IsNullOrWhiteSpace(section) && Store.Sql(db, "SELECT 1 FROM users WHERE role='Head' AND section=$section", ("$section", section.Trim())).ExecuteScalar() is not null;
 static bool Valid(string? title, string? content) => !string.IsNullOrWhiteSpace(title) && title.Length <= 200 && content is not null && content.Length <= 20000;
 static bool ValidProjectWork(string? work, string? scheduleProposal) => !string.IsNullOrWhiteSpace(work) && work.Length <= 20000 && (scheduleProposal is null || scheduleProposal.Length <= 2000);
-static bool ValidPhase(ScheduleRequest request) =>
+static bool ValidScheduleRange(ScheduleRequest request) =>
     !string.IsNullOrWhiteSpace(request.Name) && request.Name.Length <= 200 &&
     request.BaselineStart is not null && ValidDateRange(request.BaselineStart, request.BaselineEnd) &&
     request.ForecastStart is not null && ValidDateRange(request.ForecastStart, request.ForecastEnd) &&
@@ -634,6 +642,15 @@ static bool ValidPhase(ScheduleRequest request) =>
         "cancelled" => request.ActualEnd is null,
         _ => false
     });
+static bool ValidTaskFields(SqliteConnection db, string projectId, ScheduleRequest request, ScheduleEntry? current)
+{
+    if (request.Kind == "phase") return request.Owner is null && request.PhaseId is null;
+    if (request.Kind != "task" || string.IsNullOrWhiteSpace(request.Owner) || request.Owner.Length > 200) return false;
+    if (request.PhaseId is null) return true;
+    var phaseState = Store.Sql(db, "SELECT state FROM project_schedule_entries WHERE id=$phase AND project_id=$project AND kind='phase'", ("$phase", request.PhaseId), ("$project", projectId)).ExecuteScalar() as string;
+    return phaseState is not (null or "cancelled") &&
+        (phaseState != "completed" || request.State == "completed" || current?.PhaseId == request.PhaseId && current.State != "completed");
+}
 static IResult ScheduleConflict(SqliteConnection db, string itemId, int version, string error) =>
     Results.Conflict(new { error, latest = new { projectVersion = version, schedule = ScheduleEntries(db, itemId) } });
 static IResult? ScheduleWriteConflict(SqliteConnection db, Item item, User user, ScheduleRequest request)
@@ -744,15 +761,15 @@ static void UpsertFieldOrigin(SqliteConnection db, string itemId, string? lastSo
         ("$item", itemId), ("$last", lastSourceValue), ("$latest", latestSourceValue), ("$report", reportValue), ("$override", humanOverride ? 1 : 0), ("$at", DateTimeOffset.UtcNow.ToString("O"))).ExecuteNonQuery();
 static List<ScheduleEntry> ScheduleEntries(SqliteConnection db, string itemId)
 {
-    using var rows = Store.Sql(db, "SELECT id,project_id,kind,name,baseline_start,baseline_end,forecast_start,forecast_end,actual_start,actual_end,version,state FROM project_schedule_entries WHERE project_id=$project ORDER BY rowid", ("$project", itemId)).ExecuteReader();
+    using var rows = Store.Sql(db, "SELECT id,project_id,kind,name,baseline_start,baseline_end,forecast_start,forecast_end,actual_start,actual_end,version,state,owner,phase_id FROM project_schedule_entries WHERE project_id=$project ORDER BY rowid", ("$project", itemId)).ExecuteReader();
     var entries = new List<ScheduleEntry>();
-    while (rows.Read()) entries.Add(new ScheduleEntry(rows.GetString(0), rows.GetString(1), rows.GetString(2), rows.GetString(3), NullableString(rows, 4), NullableString(rows, 5), NullableString(rows, 6), NullableString(rows, 7), NullableString(rows, 8), NullableString(rows, 9), rows.GetInt32(10), rows.GetString(11)));
-    return entries;
+    while (rows.Read()) entries.Add(new ScheduleEntry(rows.GetString(0), rows.GetString(1), rows.GetString(2), rows.GetString(3), NullableString(rows, 4), NullableString(rows, 5), NullableString(rows, 6), NullableString(rows, 7), NullableString(rows, 8), NullableString(rows, 9), rows.GetInt32(10), rows.GetString(11), NullableString(rows, 12), NullableString(rows, 13)));
+    return entries.Select(entry => entry.Kind == "phase" ? entry with { UnfinishedTasks = entries.Where(task => task.Kind == "task" && task.PhaseId == entry.Id && task.State != "completed").Select(task => task.Name).ToList() } : entry).ToList();
 }
 static ScheduleEntry? ScheduleEntry(SqliteConnection db, string entryId)
 {
-    using var rows = Store.Sql(db, "SELECT id,project_id,kind,name,baseline_start,baseline_end,forecast_start,forecast_end,actual_start,actual_end,version,state FROM project_schedule_entries WHERE id=$id", ("$id", entryId)).ExecuteReader();
-    return rows.Read() ? new ScheduleEntry(rows.GetString(0), rows.GetString(1), rows.GetString(2), rows.GetString(3), NullableString(rows, 4), NullableString(rows, 5), NullableString(rows, 6), NullableString(rows, 7), NullableString(rows, 8), NullableString(rows, 9), rows.GetInt32(10), rows.GetString(11)) : null;
+    using var rows = Store.Sql(db, "SELECT id,project_id,kind,name,baseline_start,baseline_end,forecast_start,forecast_end,actual_start,actual_end,version,state,owner,phase_id FROM project_schedule_entries WHERE id=$id", ("$id", entryId)).ExecuteReader();
+    return rows.Read() ? new ScheduleEntry(rows.GetString(0), rows.GetString(1), rows.GetString(2), rows.GetString(3), NullableString(rows, 4), NullableString(rows, 5), NullableString(rows, 6), NullableString(rows, 7), NullableString(rows, 8), NullableString(rows, 9), rows.GetInt32(10), rows.GetString(11), NullableString(rows, 12), NullableString(rows, 13)) : null;
 }
 static ReportSnapshot Snapshot(SqliteConnection db, string reportId, IConfiguration config)
 {
@@ -814,10 +831,10 @@ record CreateItem(string Section, string Title, string? OwnerSection);
 record ProjectParticipantRequest(string? Section);
 record ProjectWorkRequest(string? Section, string? Work, string? ScheduleProposal, int BaseVersion);
 record SyncMemberResult(string UserId, string Status, int WorkCount, string? LastSuccessAt, string? Error);
-record ScheduleRequest(string? Kind, string? Name, string? BaselineStart, string? BaselineEnd, string? ForecastStart, string? ForecastEnd, string? ActualStart, string? ActualEnd, string? BaselineChangeReason, int? BaseVersion, string? State, string? Reason, string? Action, string? Token, int? BaseProjectVersion);
+record ScheduleRequest(string? Kind, string? Name, string? BaselineStart, string? BaselineEnd, string? ForecastStart, string? ForecastEnd, string? ActualStart, string? ActualEnd, string? BaselineChangeReason, int? BaseVersion, string? State, string? Reason, string? Action, string? Token, int? BaseProjectVersion, string? Owner, string? PhaseId, bool? AcknowledgeIncompleteTasks);
 record AccessUserRequest(string EmpNo, string Name, string Role, string? Section, bool? ReaderAccess);
 record PublicationRequest(string? RequestId);
-record ScheduleEntry(string Id, string ProjectId, string Kind, string Name, string? BaselineStart, string? BaselineEnd, string? ForecastStart, string? ForecastEnd, string? ActualStart, string? ActualEnd, int Version, string State = "open");
+record ScheduleEntry(string Id, string ProjectId, string Kind, string Name, string? BaselineStart, string? BaselineEnd, string? ForecastStart, string? ForecastEnd, string? ActualStart, string? ActualEnd, int Version, string State = "open", string? Owner = null, string? PhaseId = null, List<string>? UnfinishedTasks = null);
 record PublishedItem(string Id, string ContinuityId, string Section, string OwnerSection, string Title, string Content, string Status, int Version, string Details = "{}", List<ScheduleEntry>? Schedule = null);
 record SourceStatus(string Section, string Status, string? PeriodFrom, string? PeriodTo, string? FinishedAt);
 record FieldOrigin(string? LastSourceValue, string LatestSourceValue, string ReportValue, bool HumanOverride);
