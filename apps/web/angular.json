@@ -13,7 +13,7 @@
             "development": { "sourceMap": true }
           }
         },
-        "serve": { "builder": "@angular/build:dev-server", "options": { "buildTarget": "weekly-report-web:build:development" } }
+        "serve": { "builder": "@angular/build:dev-server", "options": { "buildTarget": "weekly-report-web:build:development", "proxyConfig": "proxy.conf.json" } }
       }
     }
   }
