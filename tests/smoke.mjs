@@ -583,6 +583,155 @@ try {
   assert.equal(reactivatedMilestoneEntry.state, 'pending');
   assert.equal(reactivatedMilestoneEntry.actualDate, null);
 
+  // Issue #6: External Dependency Links (Cross-Department Dependency Records)
+  const extDepPath = `/api/items/${scheduleId}/external-dependencies`;
+
+  // 1. Authorization: Non-maintainer cannot create external dependency
+  assert.equal((await call(extDepPath, 'H2', 'POST', {
+    description: '機房伺服器配電施工', supplier: '廠務處', dueDate: '2026-10-15', token: scheduleLease.body.token, baseProjectVersion: milestoneProjectVersion
+  })).status, 403);
+
+  // 2. Maintainer creates external dependencies
+  const extDep1 = await call(extDepPath, 'H1', 'POST', {
+    description: '機房伺服器配電施工', supplier: '廠務處', dueDate: '2026-10-15', status: 'pending', reason: '跨部門供電依賴', token: scheduleLease.body.token, baseProjectVersion: milestoneProjectVersion
+  });
+  assert.equal(extDep1.status, 201);
+  milestoneProjectVersion = extDep1.body.projectVersion;
+
+  // Create an overdue external dependency (due date earlier than current date)
+  const extDep2 = await call(extDepPath, 'H1', 'POST', {
+    description: '網路防火牆權限開通', supplier: '資通安全處', dueDate: '2026-09-01', status: 'pending', reason: '資安開通依賴', token: scheduleLease.body.token, baseProjectVersion: milestoneProjectVersion
+  });
+  assert.equal(extDep2.status, 201);
+  milestoneProjectVersion = extDep2.body.projectVersion;
+
+  // 3. Create foreign project's external dependency to test cross-project rejection
+  const foreignExtDep = await call(`/api/items/${foreignProject.body.id}/external-dependencies`, 'H2', 'POST', {
+    description: '外部韌體套件', supplier: '第三方供應商', dueDate: '2026-10-20', status: 'pending', token: foreignScheduleLease.body.token, baseProjectVersion: foreignPhase.body.projectVersion
+  });
+  assert.equal(foreignExtDep.status, 201);
+
+  // Cross-project rejection: Link foreign external dependency to local schedule entry
+  assert.equal((await call(`${extDepPath}/${foreignExtDep.body.id}/links`, 'H1', 'POST', {
+    scheduleEntryId: phase.body.id, reason: 'Cross project link attempt', token: scheduleLease.body.token, baseProjectVersion: milestoneProjectVersion
+  })).status, 400);
+
+  // Cross-project rejection: Link local external dependency to foreign schedule entry
+  assert.equal((await call(`${extDepPath}/${extDep1.body.id}/links`, 'H1', 'POST', {
+    scheduleEntryId: foreignPhase.body.id, reason: 'Cross project link attempt 2', token: scheduleLease.body.token, baseProjectVersion: milestoneProjectVersion
+  })).status, 400);
+
+  // 4. Linking requires a reason
+  assert.equal((await call(`${extDepPath}/${extDep1.body.id}/links`, 'H1', 'POST', {
+    scheduleEntryId: phase.body.id, reason: '   ', token: scheduleLease.body.token, baseProjectVersion: milestoneProjectVersion
+  })).status, 400);
+
+  // 5. Link external dependency to multiple items in the same project (phase & milestone)
+  const linkExtToPhase = await call(`${extDepPath}/${extDep1.body.id}/links`, 'H1', 'POST', {
+    scheduleEntryId: phase.body.id, reason: '廠務配電延遲將影響整體建置驗收階段', token: scheduleLease.body.token, baseProjectVersion: milestoneProjectVersion
+  });
+  assert.equal(linkExtToPhase.status, 201);
+  milestoneProjectVersion = linkExtToPhase.body.projectVersion;
+
+  const linkExtToMilestone = await call(`${extDepPath}/${extDep1.body.id}/links`, 'H1', 'POST', {
+    scheduleEntryId: milestone.body.id, reason: '供電未完成無法執行最終檢驗節點', token: scheduleLease.body.token, baseProjectVersion: milestoneProjectVersion
+  });
+  assert.equal(linkExtToMilestone.status, 201);
+  milestoneProjectVersion = linkExtToMilestone.body.projectVersion;
+
+  // Also link overdue dependency to phase
+  const linkOverdueToPhase = await call(`${extDepPath}/${extDep2.body.id}/links`, 'H1', 'POST', {
+    scheduleEntryId: phase.body.id, reason: '防火牆未通阻礙建置', token: scheduleLease.body.token, baseProjectVersion: milestoneProjectVersion
+  });
+  assert.equal(linkOverdueToPhase.status, 201);
+  milestoneProjectVersion = linkOverdueToPhase.body.projectVersion;
+
+  // Duplicate linking rejected
+  assert.equal((await call(`${extDepPath}/${extDep1.body.id}/links`, 'H1', 'POST', {
+    scheduleEntryId: phase.body.id, reason: 'Duplicate link attempt', token: scheduleLease.body.token, baseProjectVersion: milestoneProjectVersion
+  })).status, 400);
+
+  // 6. External delivery notices are independent and separated from internal warnings
+  const scheduleAfterExtLinks = (await call(taskPath, 'H1')).body;
+  const phaseWithExt = scheduleAfterExtLinks.find(e => e.id === phase.body.id);
+  const milestoneWithExt = scheduleAfterExtLinks.find(e => e.id === milestone.body.id);
+
+  // Internal warnings do NOT contain external notices
+  assert.ok(phaseWithExt.warnings.every(w => w.type !== 'external-delivery'));
+
+  // External notices are populated independently
+  assert.equal(phaseWithExt.externalNotices.length, 2);
+  const extNotice1 = phaseWithExt.externalNotices.find(n => n.dependencyId === extDep1.body.id);
+  const extNotice2 = phaseWithExt.externalNotices.find(n => n.dependencyId === extDep2.body.id);
+  assert.equal(extNotice1.supplier, '廠務處');
+  assert.equal(extNotice1.isOverdue, false);
+  assert.match(extNotice1.message, /尚未交付/);
+
+  assert.equal(extNotice2.supplier, '資通安全處');
+  assert.equal(extNotice2.isOverdue, true);
+  assert.match(extNotice2.message, /已逾期/);
+
+  assert.equal(milestoneWithExt.externalNotices.length, 1);
+  assert.equal(milestoneWithExt.externalNotices[0].dependencyId, extDep1.body.id);
+
+  // 7. External records do NOT affect internal completion or sequence:
+  // Link extDep1 to coreTaskId (which is in-progress) and verify completing coreTask is NOT blocked
+  const linkExtToCore = await call(`${extDepPath}/${extDep1.body.id}/links`, 'H1', 'POST', {
+    scheduleEntryId: coreTaskId, reason: '核心任務依賴機房配電', token: scheduleLease.body.token, baseProjectVersion: milestoneProjectVersion
+  });
+  assert.equal(linkExtToCore.status, 201);
+  milestoneProjectVersion = linkExtToCore.body.projectVersion;
+
+  const currentCoreEntry = (await call(taskPath, 'H1')).body.find(e => e.id === coreTaskId);
+  assert.equal(currentCoreEntry.externalNotices.length, 1);
+
+  // Completing the task is NOT blocked by unfinished external dependencies
+  const completeCoreWithExt = await call(`${taskPath}/${coreTaskId}`, 'H1', 'PUT', {
+    kind: 'task', name: 'Core Engine', baselineStart: '2026-10-06', baselineEnd: '2026-10-15', forecastStart: '2026-10-06', forecastEnd: '2026-10-15', actualStart: '2026-10-07', actualEnd: '2026-10-14', state: 'completed', action: 'update', owner: 'Core Team', reason: 'Core engine finished and accepted', token: scheduleLease.body.token, baseVersion: currentCoreEntry.version, baseProjectVersion: milestoneProjectVersion
+  });
+  assert.equal(completeCoreWithExt.status, 200);
+  milestoneProjectVersion = completeCoreWithExt.body.projectVersion;
+
+  // 8. Updating external dependency status to 'delivered' clears the unfinished notice
+  const updateExt1 = await call(`${extDepPath}/${extDep1.body.id}`, 'H1', 'PUT', {
+    description: '機房伺服器配電施工', supplier: '廠務處', dueDate: '2026-10-15', status: 'delivered', reason: '廠務確認送電成功', token: scheduleLease.body.token, baseProjectVersion: milestoneProjectVersion
+  });
+  assert.equal(updateExt1.status, 200);
+  milestoneProjectVersion = updateExt1.body.projectVersion;
+
+  const scheduleAfterDelivery = (await call(taskPath, 'H1')).body;
+  const phaseAfterDelivery = scheduleAfterDelivery.find(e => e.id === phase.body.id);
+  // extDep1 is now delivered, so only extDep2 notice remains
+  assert.equal(phaseAfterDelivery.externalNotices.length, 1);
+  assert.equal(phaseAfterDelivery.externalNotices[0].dependencyId, extDep2.body.id);
+
+  // 9. Unlinking requires a reason and preserves history
+  // Missing reason fails
+  assert.equal((await call(`${extDepPath}/${extDep2.body.id}/links/delete`, 'H1', 'POST', {
+    scheduleEntryId: phase.body.id, reason: '', token: scheduleLease.body.token, baseProjectVersion: milestoneProjectVersion
+  })).status, 400);
+
+  const unlinkExt2 = await call(`${extDepPath}/${extDep2.body.id}/links/delete`, 'H1', 'POST', {
+    scheduleEntryId: phase.body.id, reason: '變更網路架構，不再依賴該防火牆開通', token: scheduleLease.body.token, baseProjectVersion: milestoneProjectVersion
+  });
+  assert.equal(unlinkExt2.status, 200);
+  milestoneProjectVersion = unlinkExt2.body.projectVersion;
+
+  const scheduleAfterUnlink = (await call(taskPath, 'H1')).body;
+  const phaseAfterUnlink = scheduleAfterUnlink.find(e => e.id === phase.body.id);
+  assert.equal(phaseAfterUnlink.externalNotices.length, 0);
+
+  // Check history on affected item
+  const phaseHist = await call(`${taskPath}/${phase.body.id}/history`, 'H1');
+  assert.ok(phaseHist.body.some(h => h.action === 'link-external-dependency' && h.reason.includes('廠務配電延遲')));
+  assert.ok(phaseHist.body.some(h => h.action === 'unlink-external-dependency' && h.reason.includes('變更網路架構')));
+
+  // Check external dependency list and history
+  const allExtDeps = await call(extDepPath, 'H1');
+  const dep1View = allExtDeps.body.find(d => d.id === extDep1.body.id);
+  assert.equal(dep1View.status, 'delivered');
+  assert.ok(dep1View.history.some(h => h.action === 'link' && h.scheduleEntryName === 'Build accepted'));
+
   assert.equal((await call(`/api/items/${id}/project-participants`, 'H2', 'POST', { section: 's2' })).status, 403);
   assert.equal((await call(`/api/items/${id}/project-participants`, 'H1', 'POST', { section: 's2' })).status, 204);
   assert.equal((await call(`/api/items/${id}/project-work`, 'H3')).status, 403);

@@ -526,6 +526,23 @@ app.MapPut("/api/items/{itemId}/schedule/{entryId}", (HttpContext ctx, Store sto
                     }
                 }
             }
+
+            using (var extRows = Store.Sql(db, "SELECT l.external_dependency_id, d.description FROM project_external_dependency_links l JOIN project_external_dependencies d ON d.id=l.external_dependency_id WHERE l.schedule_entry_id=$id", ("$id", entryId)).ExecuteReader())
+            {
+                var extToClean = new List<(string DepId, string Desc)>();
+                while (extRows.Read()) extToClean.Add((extRows.GetString(0), extRows.GetString(1)));
+                extRows.Close();
+                if (extToClean.Count > 0)
+                {
+                    Store.Sql(db, "DELETE FROM project_external_dependency_links WHERE schedule_entry_id=$id", ("$id", entryId)).ExecuteNonQuery();
+                    foreach (var (dId, dDesc) in extToClean)
+                    {
+                        SaveScheduleRevision(db, entryId, Current(ctx).EmpNo, at, "unlink-external-dependency", $"項目取消，自動解除跨部門相依事項「{dDesc}」關聯", current, current);
+                        Store.Sql(db, "INSERT INTO project_external_dependency_history(external_dependency_id,actor,at,action,reason,schedule_entry_id,schedule_entry_name) VALUES($dep,$actor,$at,'unlink','項目取消自動解除關聯',$entry,$name)",
+                            ("$dep", dId), ("$actor", Current(ctx).EmpNo), ("$at", at), ("$entry", entryId), ("$name", current.Name)).ExecuteNonQuery();
+                    }
+                }
+            }
         }
 
         Store.Sql(db, "UPDATE project_schedule_entries SET name=$name,baseline_date=$baselineDate,forecast_date=$forecastDate,actual_date=$actualDate,state=$state,version=version+1,updated_at=$at WHERE id=$id AND version=$version",
@@ -589,6 +606,23 @@ app.MapPut("/api/items/{itemId}/schedule/{entryId}", (HttpContext ctx, Store sto
                 {
                     SaveScheduleRevision(db, pId, Current(ctx).EmpNo, atPhaseTask, "unlink-dependency", $"後續項目「{current.Name}」已取消，解除相依關係", predEntry, predEntry);
                     SaveScheduleRevision(db, entryId, Current(ctx).EmpNo, atPhaseTask, "unlink-dependency", $"項目取消，自動解除前置項目「{predEntry.Name}」相依關係", current, current);
+                }
+            }
+        }
+
+        using (var extRows = Store.Sql(db, "SELECT l.external_dependency_id, d.description FROM project_external_dependency_links l JOIN project_external_dependencies d ON d.id=l.external_dependency_id WHERE l.schedule_entry_id=$id", ("$id", entryId)).ExecuteReader())
+        {
+            var extToClean = new List<(string DepId, string Desc)>();
+            while (extRows.Read()) extToClean.Add((extRows.GetString(0), extRows.GetString(1)));
+            extRows.Close();
+            if (extToClean.Count > 0)
+            {
+                Store.Sql(db, "DELETE FROM project_external_dependency_links WHERE schedule_entry_id=$id", ("$id", entryId)).ExecuteNonQuery();
+                foreach (var (dId, dDesc) in extToClean)
+                {
+                    SaveScheduleRevision(db, entryId, Current(ctx).EmpNo, atPhaseTask, "unlink-external-dependency", $"項目取消，自動解除跨部門相依事項「{dDesc}」關聯", current, current);
+                    Store.Sql(db, "INSERT INTO project_external_dependency_history(external_dependency_id,actor,at,action,reason,schedule_entry_id,schedule_entry_name) VALUES($dep,$actor,$atPhaseTask,'unlink','項目取消自動解除關聯',$entry,$name)",
+                        ("$dep", dId), ("$actor", Current(ctx).EmpNo), ("$atPhaseTask", atPhaseTask), ("$entry", entryId), ("$name", current.Name)).ExecuteNonQuery();
                 }
             }
         }
@@ -667,6 +701,211 @@ app.MapPost("/api/items/{itemId}/schedule/dependencies/delete", (HttpContext ctx
 app.MapDelete("/api/items/{itemId}/schedule/dependencies/{predecessorId}/{successorId}", (HttpContext ctx, Store store, string itemId, string predecessorId, string successorId, [Microsoft.AspNetCore.Mvc.FromQuery] string? reason, [Microsoft.AspNetCore.Mvc.FromQuery] string? token, [Microsoft.AspNetCore.Mvc.FromQuery] int? baseProjectVersion) =>
 {
     return RemoveDependency(ctx, store, itemId, predecessorId, successorId, reason, token, baseProjectVersion);
+});
+app.MapGet("/api/items/{itemId}/external-dependencies", (HttpContext ctx, Store store, string itemId) =>
+{
+    using var db = store.Open();
+    var item = GetItem(db, itemId);
+    if (item is null) return Results.NotFound();
+    var user = Current(ctx);
+    if (item.Section != "projects" || !CanMaintainProject(user, item) && !IsProjectParticipant(db, itemId, user.Section) && (item.Version == 0 || user.Role != "Reader")) return Results.StatusCode(403);
+
+    var list = new List<ExternalDependencyView>();
+    using (var rows = Store.Sql(db, "SELECT id,project_id,description,supplier,due_date,status,created_by,created_at,updated_at FROM project_external_dependencies WHERE project_id=$project ORDER BY rowid", ("$project", itemId)).ExecuteReader())
+    {
+        while (rows.Read())
+        {
+            list.Add(new ExternalDependencyView(
+                rows.GetString(0), rows.GetString(1), rows.GetString(2), rows.GetString(3), rows.GetString(4), rows.GetString(5), rows.GetString(6), rows.GetString(7), rows.GetString(8), [], []));
+        }
+    }
+
+    var dict = list.ToDictionary(x => x.Id);
+
+    using (var linkRows = Store.Sql(db, """
+        SELECT l.external_dependency_id, e.id, e.name, e.kind
+        FROM project_external_dependency_links l
+        JOIN project_schedule_entries e ON e.id=l.schedule_entry_id
+        WHERE l.project_id=$project
+        ORDER BY e.rowid
+        """, ("$project", itemId)).ExecuteReader())
+    {
+        while (linkRows.Read())
+        {
+            var depId = linkRows.GetString(0);
+            if (dict.TryGetValue(depId, out var dep))
+            {
+                dep.LinkedScheduleEntries.Add(new ExternalDependencyLinkRef(linkRows.GetString(1), linkRows.GetString(2), linkRows.GetString(3)));
+            }
+        }
+    }
+
+    using (var histRows = Store.Sql(db, """
+        SELECT external_dependency_id, actor, at, action, reason, schedule_entry_id, schedule_entry_name
+        FROM project_external_dependency_history
+        WHERE external_dependency_id IN (SELECT id FROM project_external_dependencies WHERE project_id=$project)
+        ORDER BY id
+        """, ("$project", itemId)).ExecuteReader())
+    {
+        while (histRows.Read())
+        {
+            var depId = histRows.GetString(0);
+            if (dict.TryGetValue(depId, out var dep))
+            {
+                dep.History.Add(new ExternalDependencyHistoryEntry(
+                    histRows.GetString(1), histRows.GetString(2), histRows.GetString(3),
+                    NullableString(histRows, 4), NullableString(histRows, 5), NullableString(histRows, 6)));
+            }
+        }
+    }
+
+    return Results.Ok(list);
+});
+app.MapPost("/api/items/{itemId}/external-dependencies", (HttpContext ctx, Store store, string itemId, ExternalDependencyRequest request) =>
+{
+    using var db = store.Open();
+    using var tx = db.BeginTransaction();
+    var item = GetItem(db, itemId);
+    if (item is null) return Results.NotFound();
+    if (item.Section != "projects" || !CanMaintainProject(Current(ctx), item)) return Results.StatusCode(403);
+    if (item.Version == 0) return Results.BadRequest(new { error = "commit the project item before managing external dependencies" });
+
+    var conflict = ScheduleWriteConflict(db, item, Current(ctx), new ScheduleRequest(null, null, null, null, null, null, null, null, null, null, null, null, null, request.Token, request.BaseProjectVersion, null, null, null));
+    if (conflict is not null) return conflict;
+
+    if (string.IsNullOrWhiteSpace(request.Description) || request.Description.Length > 500)
+        return Results.BadRequest(new { error = "invalid description" });
+    if (string.IsNullOrWhiteSpace(request.Supplier) || request.Supplier.Length > 200)
+        return Results.BadRequest(new { error = "invalid supplier" });
+    if (string.IsNullOrWhiteSpace(request.DueDate) || !DateOnly.TryParseExact(request.DueDate, "yyyy-MM-dd", out _))
+        return Results.BadRequest(new { error = "invalid due date" });
+
+    var status = request.Status ?? "pending";
+    if (status is not ("pending" or "delivered"))
+        return Results.BadRequest(new { error = "invalid status" });
+
+    var id = Guid.NewGuid().ToString();
+    var at = DateTimeOffset.UtcNow.ToString("O");
+    var actor = Current(ctx).EmpNo;
+
+    Store.Sql(db, "INSERT INTO project_external_dependencies(id,project_id,description,supplier,due_date,status,created_by,created_at,updated_at) VALUES($id,$project,$desc,$supp,$due,$status,$actor,$at,$at)",
+        ("$id", id), ("$project", itemId), ("$desc", request.Description.Trim()), ("$supp", request.Supplier.Trim()), ("$due", request.DueDate.Trim()), ("$status", status), ("$actor", actor), ("$at", at)).ExecuteNonQuery();
+
+    Store.Sql(db, "INSERT INTO project_external_dependency_history(external_dependency_id,actor,at,action,reason) VALUES($dep,$actor,$at,'create',$reason)",
+        ("$dep", id), ("$actor", actor), ("$at", at), ("$reason", request.Reason?.Trim() ?? "建立跨部門相依事項")).ExecuteNonQuery();
+
+    AdvanceProjectVersion(db, item);
+    tx.Commit();
+    return Results.Created($"/api/items/{itemId}/external-dependencies/{id}", new { id, projectVersion = item.Version + 1 });
+});
+app.MapPut("/api/items/{itemId}/external-dependencies/{depId}", (HttpContext ctx, Store store, string itemId, string depId, ExternalDependencyRequest request) =>
+{
+    using var db = store.Open();
+    using var tx = db.BeginTransaction();
+    var item = GetItem(db, itemId);
+    if (item is null) return Results.NotFound();
+    if (item.Section != "projects" || !CanMaintainProject(Current(ctx), item)) return Results.StatusCode(403);
+
+    var conflict = ScheduleWriteConflict(db, item, Current(ctx), new ScheduleRequest(null, null, null, null, null, null, null, null, null, null, null, null, null, request.Token, request.BaseProjectVersion, null, null, null));
+    if (conflict is not null) return conflict;
+
+    using var depRow = Store.Sql(db, "SELECT description,supplier,due_date,status FROM project_external_dependencies WHERE id=$id AND project_id=$project", ("$id", depId), ("$project", itemId)).ExecuteReader();
+    if (!depRow.Read()) return Results.NotFound();
+    var oldDesc = depRow.GetString(0);
+    var oldSupp = depRow.GetString(1);
+    var oldDue = depRow.GetString(2);
+    var oldStatus = depRow.GetString(3);
+    depRow.Close();
+
+    if (string.IsNullOrWhiteSpace(request.Description) || request.Description.Length > 500)
+        return Results.BadRequest(new { error = "invalid description" });
+    if (string.IsNullOrWhiteSpace(request.Supplier) || request.Supplier.Length > 200)
+        return Results.BadRequest(new { error = "invalid supplier" });
+    if (string.IsNullOrWhiteSpace(request.DueDate) || !DateOnly.TryParseExact(request.DueDate, "yyyy-MM-dd", out _))
+        return Results.BadRequest(new { error = "invalid due date" });
+
+    var status = request.Status ?? oldStatus;
+    if (status is not ("pending" or "delivered"))
+        return Results.BadRequest(new { error = "invalid status" });
+
+    var at = DateTimeOffset.UtcNow.ToString("O");
+    var actor = Current(ctx).EmpNo;
+
+    Store.Sql(db, "UPDATE project_external_dependencies SET description=$desc,supplier=$supp,due_date=$due,status=$status,updated_at=$at WHERE id=$id",
+        ("$desc", request.Description.Trim()), ("$supp", request.Supplier.Trim()), ("$due", request.DueDate.Trim()), ("$status", status), ("$at", at), ("$id", depId)).ExecuteNonQuery();
+
+    var action = (oldStatus != status && status == "delivered") ? "delivered" : "update";
+    Store.Sql(db, "INSERT INTO project_external_dependency_history(external_dependency_id,actor,at,action,reason) VALUES($dep,$actor,$at,$action,$reason)",
+        ("$dep", depId), ("$actor", actor), ("$at", at), ("$action", action), ("$reason", request.Reason?.Trim() ?? "更新跨部門相依事項")).ExecuteNonQuery();
+
+    AdvanceProjectVersion(db, item);
+    tx.Commit();
+    return Results.Ok(new { projectVersion = item.Version + 1 });
+});
+app.MapPost("/api/items/{itemId}/external-dependencies/{depId}/links", (HttpContext ctx, Store store, string itemId, string depId, ExternalDependencyLinkRequest request) =>
+{
+    using var db = store.Open();
+    using var tx = db.BeginTransaction();
+    var item = GetItem(db, itemId);
+    if (item is null) return Results.NotFound();
+    if (item.Section != "projects" || !CanMaintainProject(Current(ctx), item)) return Results.StatusCode(403);
+    if (item.Version == 0) return Results.BadRequest(new { error = "commit the project item before linking external dependencies" });
+
+    var conflict = ScheduleWriteConflict(db, item, Current(ctx), new ScheduleRequest(null, null, null, null, null, null, null, null, null, null, null, null, null, request.Token, request.BaseProjectVersion, null, null, null));
+    if (conflict is not null) return conflict;
+
+    if (string.IsNullOrWhiteSpace(request.ScheduleEntryId))
+        return Results.BadRequest(new { error = "schedule entry required" });
+    if (string.IsNullOrWhiteSpace(request.Reason))
+        return Results.BadRequest(new { error = "reason required" });
+
+    // Validate external dependency exists and belongs to this project
+    using var depRow = Store.Sql(db, "SELECT project_id, description, supplier FROM project_external_dependencies WHERE id=$id", ("$id", depId)).ExecuteReader();
+    if (!depRow.Read()) return Results.NotFound();
+    var depProjectId = depRow.GetString(0);
+    var depDesc = depRow.GetString(1);
+    var depSupp = depRow.GetString(2);
+    depRow.Close();
+
+    if (depProjectId != itemId)
+        return Results.BadRequest(new { error = "cross project linking not allowed" });
+
+    // Validate schedule entry exists and belongs to this project
+    var entry = ScheduleEntry(db, request.ScheduleEntryId);
+    if (entry is null || entry.ProjectId != itemId)
+        return Results.BadRequest(new { error = "cross project or non-existent schedule entry" });
+
+    // Check if already linked
+    var exists = Store.Sql(db, "SELECT 1 FROM project_external_dependency_links WHERE external_dependency_id=$d AND schedule_entry_id=$e",
+        ("$d", depId), ("$e", request.ScheduleEntryId)).ExecuteScalar() is not null;
+    if (exists) return Results.BadRequest(new { error = "link already exists" });
+
+    var linkId = Guid.NewGuid().ToString();
+    var at = DateTimeOffset.UtcNow.ToString("O");
+    var actor = Current(ctx).EmpNo;
+    var reason = request.Reason.Trim();
+
+    Store.Sql(db, "INSERT INTO project_external_dependency_links(id,project_id,external_dependency_id,schedule_entry_id,created_by,created_at,reason) VALUES($id,$project,$d,$e,$actor,$at,$reason)",
+        ("$id", linkId), ("$project", itemId), ("$d", depId), ("$e", request.ScheduleEntryId), ("$actor", actor), ("$at", at), ("$reason", reason)).ExecuteNonQuery();
+
+    // Record revision on affected schedule entry
+    SaveScheduleRevision(db, request.ScheduleEntryId, actor, at, "link-external-dependency", $"關聯跨部門相依事項「{depDesc}」（{depSupp}）：{reason}", entry, entry);
+
+    // Record history on external dependency
+    Store.Sql(db, "INSERT INTO project_external_dependency_history(external_dependency_id,actor,at,action,reason,schedule_entry_id,schedule_entry_name) VALUES($dep,$actor,$at,'link',$reason,$entry,$name)",
+        ("$dep", depId), ("$actor", actor), ("$at", at), ("$reason", reason), ("$entry", request.ScheduleEntryId), ("$name", entry.Name)).ExecuteNonQuery();
+
+    AdvanceProjectVersion(db, item);
+    tx.Commit();
+    return Results.Created($"/api/items/{itemId}/external-dependencies/{depId}/links/{request.ScheduleEntryId}", new { id = linkId, projectVersion = item.Version + 1 });
+});
+app.MapPost("/api/items/{itemId}/external-dependencies/{depId}/links/delete", (HttpContext ctx, Store store, string itemId, string depId, ExternalDependencyLinkRequest request) =>
+{
+    return RemoveExternalLink(ctx, store, itemId, depId, request.ScheduleEntryId, request.Reason, request.Token, request.BaseProjectVersion);
+});
+app.MapDelete("/api/items/{itemId}/external-dependencies/{depId}/links/{scheduleEntryId}", (HttpContext ctx, Store store, string itemId, string depId, string scheduleEntryId, [Microsoft.AspNetCore.Mvc.FromQuery] string? reason, [Microsoft.AspNetCore.Mvc.FromQuery] string? token, [Microsoft.AspNetCore.Mvc.FromQuery] int? baseProjectVersion) =>
+{
+    return RemoveExternalLink(ctx, store, itemId, depId, scheduleEntryId, reason, token, baseProjectVersion);
 });
 app.MapGet("/api/items/{itemId}/schedule/{entryId}/baseline-history", (HttpContext ctx, Store store, string itemId, string entryId) =>
 {
@@ -1056,6 +1295,54 @@ static IResult RemoveDependency(HttpContext ctx, Store store, string itemId, str
     tx.Commit();
     return Results.Ok(new { projectVersion = item.Version + 1 });
 }
+static IResult RemoveExternalLink(HttpContext ctx, Store store, string itemId, string depId, string? scheduleEntryId, string? reason, string? token, int? baseProjectVersion)
+{
+    using var db = store.Open();
+    using var tx = db.BeginTransaction();
+    var item = GetItem(db, itemId);
+    if (item is null) return Results.NotFound();
+    if (item.Section != "projects" || !CanMaintainProject(Current(ctx), item)) return Results.StatusCode(403);
+
+    var conflict = ScheduleWriteConflict(db, item, Current(ctx), new ScheduleRequest(null, null, null, null, null, null, null, null, null, null, null, null, null, token, baseProjectVersion, null, null, null));
+    if (conflict is not null) return conflict;
+
+    if (string.IsNullOrWhiteSpace(scheduleEntryId))
+        return Results.BadRequest(new { error = "schedule entry required" });
+    if (string.IsNullOrWhiteSpace(reason))
+        return Results.BadRequest(new { error = "reason required" });
+
+    using var depRow = Store.Sql(db, "SELECT project_id, description, supplier FROM project_external_dependencies WHERE id=$id", ("$id", depId)).ExecuteReader();
+    if (!depRow.Read()) return Results.NotFound();
+    var depProjectId = depRow.GetString(0);
+    var depDesc = depRow.GetString(1);
+    var depSupp = depRow.GetString(2);
+    depRow.Close();
+
+    if (depProjectId != itemId) return Results.BadRequest(new { error = "cross project linking not allowed" });
+
+    var entry = ScheduleEntry(db, scheduleEntryId);
+    if (entry is null || entry.ProjectId != itemId) return Results.NotFound();
+
+    var exists = Store.Sql(db, "SELECT 1 FROM project_external_dependency_links WHERE external_dependency_id=$d AND schedule_entry_id=$e",
+        ("$d", depId), ("$e", scheduleEntryId)).ExecuteScalar() is not null;
+    if (!exists) return Results.NotFound();
+
+    Store.Sql(db, "DELETE FROM project_external_dependency_links WHERE external_dependency_id=$d AND schedule_entry_id=$e",
+        ("$d", depId), ("$e", scheduleEntryId)).ExecuteNonQuery();
+
+    var at = DateTimeOffset.UtcNow.ToString("O");
+    var actor = Current(ctx).EmpNo;
+    var trimmedReason = reason.Trim();
+
+    SaveScheduleRevision(db, scheduleEntryId, actor, at, "unlink-external-dependency", $"解除跨部門相依事項「{depDesc}」關聯：{trimmedReason}", entry, entry);
+
+    Store.Sql(db, "INSERT INTO project_external_dependency_history(external_dependency_id,actor,at,action,reason,schedule_entry_id,schedule_entry_name) VALUES($dep,$actor,$at,'unlink',$reason,$entry,$name)",
+        ("$dep", depId), ("$actor", actor), ("$at", at), ("$reason", trimmedReason), ("$entry", scheduleEntryId), ("$name", entry.Name)).ExecuteNonQuery();
+
+    AdvanceProjectVersion(db, item);
+    tx.Commit();
+    return Results.Ok(new { projectVersion = item.Version + 1 });
+}
 static List<ScheduleEntry> ScheduleEntries(SqliteConnection db, string itemId)
 {
     using var rows = Store.Sql(db, "SELECT id,project_id,kind,name,baseline_start,baseline_end,forecast_start,forecast_end,actual_start,actual_end,version,state,owner,phase_id,baseline_date,forecast_date,actual_date FROM project_schedule_entries WHERE project_id=$project ORDER BY rowid", ("$project", itemId)).ExecuteReader();
@@ -1110,13 +1397,48 @@ static List<ScheduleEntry> ScheduleEntries(SqliteConnection db, string itemId)
         }
     }
 
+    var extNoticeMap = new Dictionary<string, List<ExternalDeliveryNotice>>();
+    var today = DateTime.UtcNow.ToString("yyyy-MM-dd");
+    using (var extRows = Store.Sql(db, """
+        SELECT l.schedule_entry_id, d.id, d.description, d.supplier, d.due_date, d.status
+        FROM project_external_dependency_links l
+        JOIN project_external_dependencies d ON d.id=l.external_dependency_id
+        WHERE l.project_id=$project
+        ORDER BY d.rowid
+        """, ("$project", itemId)).ExecuteReader())
+    {
+        while (extRows.Read())
+        {
+            var schedId = extRows.GetString(0);
+            var depId = extRows.GetString(1);
+            var desc = extRows.GetString(2);
+            var supplier = extRows.GetString(3);
+            var dueDate = extRows.GetString(4);
+            var status = extRows.GetString(5);
+
+            if (!extNoticeMap.TryGetValue(schedId, out var notices)) extNoticeMap[schedId] = notices = [];
+
+            var isDelivered = status == "delivered";
+            var isOverdue = !isDelivered && string.Compare(dueDate, today, StringComparison.Ordinal) < 0;
+
+            if (!isDelivered)
+            {
+                var msg = isOverdue
+                    ? $"外部交付提醒（已逾期）：由「{supplier}」承諾之「{desc}」已逾期（到期日：{dueDate}）"
+                    : $"外部交付提醒：由「{supplier}」承諾之「{desc}」尚未交付（預計到期日：{dueDate}）";
+                notices.Add(new ExternalDeliveryNotice(depId, desc, supplier, dueDate, status, isOverdue, msg));
+            }
+        }
+    }
+
     return rawEntries.Select(entry => entry with {
         UnfinishedTasks = entry.Kind == "phase"
             ? rawEntries.Where(task => task.Kind == "task" && task.PhaseId == entry.Id && task.State != "completed" && task.State != "cancelled").Select(task => task.Name).ToList()
             : null,
         Predecessors = predMap.GetValueOrDefault(entry.Id) ?? [],
         Successors = succMap.GetValueOrDefault(entry.Id) ?? [],
-        Warnings = warningMap.GetValueOrDefault(entry.Id) ?? []
+        Warnings = warningMap.GetValueOrDefault(entry.Id) ?? [],
+        ExternalNotices = extNoticeMap.GetValueOrDefault(entry.Id) ?? []
     }).ToList();
 }
 static ScheduleEntry? ScheduleEntry(SqliteConnection db, string entryId)
@@ -1190,7 +1512,13 @@ record DependencyWarning(string Type, string Message, string PredecessorId, stri
 record ScheduleDependencyRequest(string? PredecessorId, string? SuccessorId, string? Reason, string? Token, int? BaseProjectVersion);
 record AccessUserRequest(string EmpNo, string Name, string Role, string? Section, bool? ReaderAccess);
 record PublicationRequest(string? RequestId);
-record ScheduleEntry(string Id, string ProjectId, string Kind, string Name, string? BaselineStart, string? BaselineEnd, string? ForecastStart, string? ForecastEnd, string? ActualStart, string? ActualEnd, int Version, string State = "open", string? Owner = null, string? PhaseId = null, List<string>? UnfinishedTasks = null, string? BaselineDate = null, string? ForecastDate = null, string? ActualDate = null, List<DependencyRef>? Predecessors = null, List<DependencyRef>? Successors = null, List<DependencyWarning>? Warnings = null);
+record ExternalDeliveryNotice(string DependencyId, string Description, string Supplier, string DueDate, string Status, bool IsOverdue, string Message);
+record ExternalDependencyLinkRef(string ScheduleEntryId, string ScheduleEntryName, string ScheduleEntryKind);
+record ExternalDependencyHistoryEntry(string Actor, string At, string Action, string? Reason, string? ScheduleEntryId, string? ScheduleEntryName);
+record ExternalDependencyView(string Id, string ProjectId, string Description, string Supplier, string DueDate, string Status, string CreatedBy, string CreatedAt, string UpdatedAt, List<ExternalDependencyLinkRef> LinkedScheduleEntries, List<ExternalDependencyHistoryEntry> History);
+record ExternalDependencyRequest(string? Description, string? Supplier, string? DueDate, string? Status, string? Reason, string? Token, int? BaseProjectVersion);
+record ExternalDependencyLinkRequest(string? ScheduleEntryId, string? Reason, string? Token, int? BaseProjectVersion);
+record ScheduleEntry(string Id, string ProjectId, string Kind, string Name, string? BaselineStart, string? BaselineEnd, string? ForecastStart, string? ForecastEnd, string? ActualStart, string? ActualEnd, int Version, string State = "open", string? Owner = null, string? PhaseId = null, List<string>? UnfinishedTasks = null, string? BaselineDate = null, string? ForecastDate = null, string? ActualDate = null, List<DependencyRef>? Predecessors = null, List<DependencyRef>? Successors = null, List<DependencyWarning>? Warnings = null, List<ExternalDeliveryNotice>? ExternalNotices = null);
 record PublishedItem(string Id, string ContinuityId, string Section, string OwnerSection, string Title, string Content, string Status, int Version, string Details = "{}", List<ScheduleEntry>? Schedule = null);
 record SourceStatus(string Section, string Status, string? PeriodFrom, string? PeriodTo, string? FinishedAt);
 record FieldOrigin(string? LastSourceValue, string LatestSourceValue, string ReportValue, bool HumanOverride);
@@ -1204,3 +1532,4 @@ static class ReportSections
 {
     public static readonly string[] All = ["summary", "projects", "operations", "personnel", "technology", "appendix"];
 }
+

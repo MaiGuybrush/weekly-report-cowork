@@ -59,6 +59,41 @@ type ProjectWork = {
 };
 type DependencyRef = { id: string; name: string; kind: string };
 type DependencyWarning = { type: string; message: string; predecessorId: string; predecessorName: string };
+type ExternalDeliveryNotice = {
+  dependencyId: string;
+  description: string;
+  supplier: string;
+  dueDate: string;
+  status: string;
+  isOverdue: boolean;
+  message: string;
+};
+type ExternalDependencyLinkRef = {
+  scheduleEntryId: string;
+  scheduleEntryName: string;
+  scheduleEntryKind: string;
+};
+type ExternalDependencyHistoryEntry = {
+  actor: string;
+  at: string;
+  action: string;
+  reason: string | null;
+  scheduleEntryId: string | null;
+  scheduleEntryName: string | null;
+};
+type ExternalDependency = {
+  id: string;
+  projectId: string;
+  description: string;
+  supplier: string;
+  dueDate: string;
+  status: "pending" | "delivered";
+  createdBy: string;
+  createdAt: string;
+  updatedAt: string;
+  linkedScheduleEntries: ExternalDependencyLinkRef[];
+  history: ExternalDependencyHistoryEntry[];
+};
 type ScheduleEntry = {
   id: string;
   kind: "phase" | "task" | "milestone";
@@ -80,6 +115,7 @@ type ScheduleEntry = {
   predecessors?: DependencyRef[];
   successors?: DependencyRef[];
   warnings?: DependencyWarning[];
+  externalNotices?: ExternalDeliveryNotice[];
 };
 type EcimMember = {
   userId: string;
@@ -689,7 +725,7 @@ export class Home implements OnInit {
                 }
                 <ul>
                   @for (entry of scheduleDisplayEntries(); track entry.id) {
-                    <li [class.schedule-task]="entry.kind === 'task'" [class.schedule-milestone]="entry.kind === 'milestone'">
+                    <li [class.schedule-task]="entry.kind === 'task'" [class.schedule-milestone]="entry.kind === 'milestone'" [class.schedule-phase]="entry.kind === 'phase'">
                       <strong
                         >{{ entry.kind === "phase" ? "階段" : entry.kind === "task" ? "關鍵任務" : "重要里程碑" }}：{{
                           entry.name
@@ -739,6 +775,19 @@ export class Home implements OnInit {
                             </div>
                           }
                           <small class="warning-hint">※ 警示允許例外工作繼續推進，不自動阻擋或更動日期。</small>
+                        </div>
+                      }
+                      @if (entry.externalNotices?.length) {
+                        <div class="schedule-external-notices">
+                          @for (n of entry.externalNotices; track n.dependencyId) {
+                            <div class="external-notice-pill" [class.is-overdue]="n.isOverdue">
+                              <span class="external-icon">{{ n.isOverdue ? '⚠️' : '📦' }}</span>
+                              <div class="external-notice-content">
+                                <span class="external-notice-title">{{ n.isOverdue ? '外部交付逾期提醒' : '外部交付提醒' }}</span>
+                                <span class="external-notice-msg">{{ n.message }}</span>
+                              </div>
+                            </div>
+                          }
                         </div>
                       }
                       @if (canMaintain(item)) {
@@ -956,6 +1005,44 @@ export class Home implements OnInit {
                           </div>
                         }
                       </div>
+
+                      <div class="dependency-panel external-dependency-panel">
+                        <h5>跨部門相依事項（外部交付風險管理）</h5>
+                        @if (editingSchedule.externalNotices?.length) {
+                          <ul class="dep-list">
+                            @for (n of editingSchedule.externalNotices; track n.dependencyId) {
+                              <li class="dep-list-item external-dep-list-item" [class.is-overdue]="n.isOverdue">
+                                <div>
+                                  <span class="external-tag">外部</span>
+                                  <strong>{{ n.description }}</strong>
+                                  <small class="external-meta">（{{ n.supplier }} · 到期：{{ n.dueDate }} · {{ n.isOverdue ? '⚠️ 已逾期' : '處理中' }}）</small>
+                                </div>
+                                <button type="button" class="btn-remove-link" (click)="removeExternalLink(n.dependencyId)">解除關聯</button>
+                              </li>
+                            }
+                          </ul>
+                        } @else {
+                          <p class="dep-empty">目前未關聯外部跨部門相依事項。</p>
+                        }
+                        @if (editingSchedule.state !== 'cancelled' && unlinkedExternalDependencies(editingSchedule).length) {
+                          <div class="dep-add-box">
+                            <label>選擇跨部門相依事項
+                              <select [(ngModel)]="selectedExternalDepId">
+                                <option value="">請選擇跨部門相依事項...</option>
+                                @for (ext of unlinkedExternalDependencies(editingSchedule); track ext.id) {
+                                  <option [value]="ext.id">{{ ext.description }}（{{ ext.supplier }} · 到期：{{ ext.dueDate }} · {{ ext.status === 'delivered' ? '已交付' : '未交付' }}）</option>
+                                }
+                              </select>
+                            </label>
+                            <label>關聯原因
+                              <input [(ngModel)]="externalLinkReason" placeholder="請填寫受此外部交付影響之原因" />
+                            </label>
+                            <button type="button" class="btn-add-link btn-add-external-link" (click)="addExternalLink()" [disabled]="!selectedExternalDepId || !externalLinkReason.trim()">
+                              關聯外部相依事項
+                            </button>
+                          </div>
+                        }
+                      </div>
                     }
                     <button (click)="saveSchedule()" [disabled]="!token || !scheduleDraft.name.trim() || (scheduleDraft.kind === 'task' && !scheduleDraft.owner.trim()) || (scheduleDraft.kind === 'milestone' && !editingSchedule && !scheduleDraft.targetDate) || (scheduleDraft.kind === 'milestone' && editingSchedule && scheduleDraft.state === 'achieved' && !scheduleDraft.actualDate) || (editingSchedule && !scheduleDraft.reason.trim()) || (editingSchedule?.kind === 'phase' && editingSchedule?.state !== 'completed' && scheduleDraft.state === 'completed' && editingSchedule?.unfinishedTasks?.length && !scheduleDraft.acknowledgeIncompleteTasks) || (editingSchedule && scheduleDraft.action === 'cancel' && !!cancellationBlockerMessage(editingSchedule))">
                       {{ editingSchedule ? "儲存時程" : "新增時程" }}
@@ -966,6 +1053,96 @@ export class Home implements OnInit {
                       <button type="button" class="schedule-secondary" (click)="resetScheduleDraft()">捨棄未提交草稿</button>
                     }
                   </div>
+                }
+              </section>
+
+              <section class="external-dependencies-section">
+                <div class="ext-heading">
+                  <div>
+                    <h4>跨部門相依事項（外部交付管理）</h4>
+                    <p>管理由其他處或外部單位承諾之交付事項；可連結至本專案時程項目，不干擾內部前置順序。</p>
+                  </div>
+                  <div style="display: flex; align-items: center; gap: .6rem;">
+                    <span class="ext-count-badge">{{ externalDependencies.length }} 項外部相依</span>
+                    @if (canMaintain(item)) {
+                      <button type="button" class="btn-toggle-ext-form" (click)="toggleAddExternalDepForm()">
+                        {{ showAddExternalDepForm ? '取消新增' : '＋ 新增外部相依事項' }}
+                      </button>
+                    }
+                  </div>
+                </div>
+
+                @if (showAddExternalDepForm) {
+                  <div class="schedule-form" style="margin-bottom: 1rem;">
+                    <h4>新增跨部門相依事項</h4>
+                    <label>承諾交付事項描述
+                      <input [(ngModel)]="externalDepDraft.description" placeholder="例如：機房伺服器配電施工" required />
+                    </label>
+                    <label>供應人或單位
+                      <input [(ngModel)]="externalDepDraft.supplier" placeholder="例如：廠務處 / 資安處" required />
+                    </label>
+                    <label>承諾到期日
+                      <input type="date" [(ngModel)]="externalDepDraft.dueDate" required />
+                    </label>
+                    <label>初始狀態
+                      <select [(ngModel)]="externalDepDraft.status">
+                        <option value="pending">處理中 / 未交付</option>
+                        <option value="delivered">已交付</option>
+                      </select>
+                    </label>
+                    <label>建立原因 / 備註
+                      <input [(ngModel)]="externalDepDraft.reason" placeholder="例如：新系統上線基礎建設依賴" />
+                    </label>
+                    <div style="margin-top: .6rem;">
+                      <button type="button" (click)="saveExternalDependency()" [disabled]="!token || !externalDepDraft.description.trim() || !externalDepDraft.supplier.trim() || !externalDepDraft.dueDate">儲存外部相依事項</button>
+                      <button type="button" class="schedule-secondary" (click)="toggleAddExternalDepForm()">取消</button>
+                    </div>
+                  </div>
+                }
+
+                @if (externalDependencies.length) {
+                  <div class="external-deps-grid">
+                    @for (dep of externalDependencies; track dep.id) {
+                      <div class="external-dep-card" [class.is-delivered]="dep.status === 'delivered'">
+                        <div class="ext-card-header">
+                          <span class="ext-card-desc">{{ dep.description }}</span>
+                          <span class="ext-status-pill" [class.status-delivered]="dep.status === 'delivered'" [class.status-overdue]="dep.status !== 'delivered' && isDepOverdue(dep)" [class.status-pending]="dep.status === 'pending' && !isDepOverdue(dep)">
+                            {{ dep.status === 'delivered' ? '已交付 ✓' : isDepOverdue(dep) ? '已逾期 ⚠️' : '處理中' }}
+                          </span>
+                        </div>
+                        <div class="ext-card-meta">
+                          <span class="ext-meta-item">🏢 {{ dep.supplier }}</span>
+                          <span class="ext-meta-item" [class.ext-overdue-tag]="isDepOverdue(dep) && dep.status !== 'delivered'">
+                            📅 到期：{{ dep.dueDate }} {{ isDepOverdue(dep) && dep.status !== 'delivered' ? '（已逾期）' : '' }}
+                          </span>
+                        </div>
+                        <div class="ext-card-links">
+                          <span class="ext-links-label">受影響時程項目（{{ dep.linkedScheduleEntries.length }}）：</span>
+                          @if (dep.linkedScheduleEntries.length) {
+                            <div class="ext-linked-chips">
+                              @for (l of dep.linkedScheduleEntries; track l.scheduleEntryId) {
+                                <span class="ext-linked-chip">
+                                  [{{ l.scheduleEntryKind === 'phase' ? '階段' : l.scheduleEntryKind === 'task' ? '任務' : '里程碑' }}] {{ l.scheduleEntryName }}
+                                </span>
+                              }
+                            </div>
+                          } @else {
+                            <span class="ext-empty-links">尚未關聯到任何時程項目</span>
+                          }
+                        </div>
+                        @if (canMaintain(item)) {
+                          <div class="ext-card-actions">
+                            <button type="button" class="btn-ext-status" [class.btn-reopen-delivered]="dep.status === 'delivered'" [class.btn-mark-delivered]="dep.status !== 'delivered'" (click)="toggleExternalDepStatus(dep)">
+                              {{ dep.status === 'delivered' ? '重開為處理中' : '標記為已交付 ✓' }}
+                            </button>
+                            <small style="color: #64748b;">建立於 {{ dep.createdAt | date: "short" }}</small>
+                          </div>
+                        }
+                      </div>
+                    }
+                  </div>
+                } @else {
+                  <p style="color: #6b21a8; font-size: .88rem; font-style: italic; margin: .5rem 0;">目前無跨部門相依管理紀錄。</p>
                 }
               </section>
             }
@@ -1082,6 +1259,17 @@ export class ReportEditor implements OnInit, OnDestroy {
   scheduleDraft = this.emptyScheduleDraft();
   selectedPredecessorId = "";
   linkReason = "";
+  externalDependencies: ExternalDependency[] = [];
+  showAddExternalDepForm = false;
+  externalDepDraft = {
+    description: "",
+    supplier: "",
+    dueDate: "",
+    status: "pending" as "pending" | "delivered",
+    reason: "",
+  };
+  selectedExternalDepId = "";
+  externalLinkReason = "";
   baselineHistory: any[] = [];
   ecimMembers: EcimMember[] = [];
   ecimCandidates: EcimCandidate[] = [];
@@ -1262,6 +1450,7 @@ export class ReportEditor implements OnInit, OnDestroy {
     if (item.section === "projects") {
       await this.loadProjectWork();
       await this.loadSchedule();
+      await this.loadExternalDependencies();
     }
     this.changes.detectChanges();
   }
@@ -1517,6 +1706,8 @@ export class ReportEditor implements OnInit, OnDestroy {
     this.editingSchedule = entry;
     this.selectedPredecessorId = "";
     this.linkReason = "";
+    this.selectedExternalDepId = "";
+    this.externalLinkReason = "";
     this.scheduleDraft = {
       kind: entry.kind,
       name: entry.name,
@@ -1589,6 +1780,8 @@ export class ReportEditor implements OnInit, OnDestroy {
     this.scheduleDraft = this.emptyScheduleDraft();
     this.selectedPredecessorId = "";
     this.linkReason = "";
+    this.selectedExternalDepId = "";
+    this.externalLinkReason = "";
     this.changes.detectChanges();
   }
   candidatePredecessors(entry: ScheduleEntry) {
@@ -1652,6 +1845,151 @@ export class ReportEditor implements OnInit, OnDestroy {
         if (error.error?.latest?.schedule) this.scheduleEntries = error.error.latest.schedule;
       }
       this.message = error.error?.error || "無法解除前置關聯。";
+    }
+    this.changes.detectChanges();
+  }
+  async loadExternalDependencies() {
+    if (!this.selected) return;
+    try {
+      this.externalDependencies = await firstValueFrom(
+        this.http.get<ExternalDependency[]>(
+          `/api/items/${this.selected.id}/external-dependencies`,
+        ),
+      );
+    } catch {
+      this.externalDependencies = [];
+    }
+    this.changes.detectChanges();
+  }
+  toggleAddExternalDepForm() {
+    this.showAddExternalDepForm = !this.showAddExternalDepForm;
+    this.changes.detectChanges();
+  }
+  isDepOverdue(dep: ExternalDependency): boolean {
+    if (dep.status === "delivered") return false;
+    const today = new Date().toISOString().slice(0, 10);
+    return dep.dueDate < today;
+  }
+  async saveExternalDependency() {
+    if (!this.selected || !this.externalDepDraft.description.trim() || !this.externalDepDraft.supplier.trim() || !this.externalDepDraft.dueDate) return;
+    try {
+      const result = (await firstValueFrom(
+        this.http.post(`/api/items/${this.selected.id}/external-dependencies`, {
+          description: this.externalDepDraft.description.trim(),
+          supplier: this.externalDepDraft.supplier.trim(),
+          dueDate: this.externalDepDraft.dueDate,
+          status: this.externalDepDraft.status,
+          reason: this.externalDepDraft.reason.trim() || undefined,
+          token: this.token,
+          baseProjectVersion: this.baseVersion,
+        }),
+      )) as { projectVersion: number };
+      this.baseVersion = result.projectVersion;
+      await this.loadExternalDependencies();
+      await this.loadSchedule();
+      this.externalDepDraft = { description: "", supplier: "", dueDate: "", status: "pending", reason: "" };
+      this.showAddExternalDepForm = false;
+      this.message = "已新增跨部門相依事項。";
+    } catch (error: any) {
+      if (error.status === 409) {
+        this.conflict = error.error;
+        if (error.error?.latest?.schedule) this.scheduleEntries = error.error.latest.schedule;
+      }
+      this.message = error.error?.error || "新增跨部門相依事項失敗。";
+    }
+    this.changes.detectChanges();
+  }
+  async toggleExternalDepStatus(dep: ExternalDependency) {
+    if (!this.selected) return;
+    const nextStatus = dep.status === "pending" ? "delivered" : "pending";
+    const reason = prompt(`請輸入變更為「${nextStatus === 'delivered' ? '已交付' : '處理中'}」的原因：`, nextStatus === 'delivered' ? '外部單位確認交付完成' : '重新追蹤外部交付');
+    if (!reason || !reason.trim()) {
+      if (reason !== null) alert("變更狀態必須填寫原因。");
+      return;
+    }
+    try {
+      const result = (await firstValueFrom(
+        this.http.put(`/api/items/${this.selected.id}/external-dependencies/${dep.id}`, {
+          description: dep.description,
+          supplier: dep.supplier,
+          dueDate: dep.dueDate,
+          status: nextStatus,
+          reason: reason.trim(),
+          token: this.token,
+          baseProjectVersion: this.baseVersion,
+        }),
+      )) as { projectVersion: number };
+      this.baseVersion = result.projectVersion;
+      await this.loadExternalDependencies();
+      await this.loadSchedule();
+      this.message = `跨部門相依事項已變更為「${nextStatus === 'delivered' ? '已交付' : '處理中'}」。`;
+    } catch (error: any) {
+      if (error.status === 409) {
+        this.conflict = error.error;
+        if (error.error?.latest?.schedule) this.scheduleEntries = error.error.latest.schedule;
+      }
+      this.message = error.error?.error || "變更狀態失敗。";
+    }
+    this.changes.detectChanges();
+  }
+  unlinkedExternalDependencies(entry: ScheduleEntry): ExternalDependency[] {
+    const linkedIds = new Set((entry.externalNotices || []).map((n) => n.dependencyId));
+    return this.externalDependencies.filter((dep) => !linkedIds.has(dep.id));
+  }
+  async addExternalLink() {
+    if (!this.selected || !this.editingSchedule || !this.selectedExternalDepId || !this.externalLinkReason.trim()) return;
+    try {
+      const result = (await firstValueFrom(
+        this.http.post(`/api/items/${this.selected.id}/external-dependencies/${this.selectedExternalDepId}/links`, {
+          scheduleEntryId: this.editingSchedule.id,
+          reason: this.externalLinkReason.trim(),
+          token: this.token,
+          baseProjectVersion: this.baseVersion,
+        }),
+      )) as { projectVersion: number };
+      this.baseVersion = result.projectVersion;
+      await this.loadSchedule();
+      await this.loadExternalDependencies();
+      this.editingSchedule = this.scheduleEntries.find((e) => e.id === this.editingSchedule?.id) ?? null;
+      this.selectedExternalDepId = "";
+      this.externalLinkReason = "";
+      this.message = "已建立跨部門相依關聯。";
+    } catch (error: any) {
+      if (error.status === 409) {
+        this.conflict = error.error;
+        if (error.error?.latest?.schedule) this.scheduleEntries = error.error.latest.schedule;
+      }
+      this.message = error.error?.error || "無法建立跨部門相依關聯。";
+    }
+    this.changes.detectChanges();
+  }
+  async removeExternalLink(depId: string) {
+    if (!this.selected || !this.editingSchedule) return;
+    const reason = prompt("請輸入解除跨部門相依關聯的原因：")?.trim();
+    if (!reason) {
+      if (reason !== undefined && reason !== null) alert("解除相依關聯必須填寫原因。");
+      return;
+    }
+    try {
+      const result = (await firstValueFrom(
+        this.http.post(`/api/items/${this.selected.id}/external-dependencies/${depId}/links/delete`, {
+          scheduleEntryId: this.editingSchedule.id,
+          reason,
+          token: this.token,
+          baseProjectVersion: this.baseVersion,
+        }),
+      )) as { projectVersion: number };
+      this.baseVersion = result.projectVersion;
+      await this.loadSchedule();
+      await this.loadExternalDependencies();
+      this.editingSchedule = this.scheduleEntries.find((e) => e.id === this.editingSchedule?.id) ?? null;
+      this.message = "已解除跨部門相依關聯。";
+    } catch (error: any) {
+      if (error.status === 409) {
+        this.conflict = error.error;
+        if (error.error?.latest?.schedule) this.scheduleEntries = error.error.latest.schedule;
+      }
+      this.message = error.error?.error || "無法解除跨部門相依關聯。";
     }
     this.changes.detectChanges();
   }
@@ -2088,6 +2426,19 @@ export class ReportEditor implements OnInit, OnDestroy {
                               <div class="schedule-warning-pill" [attr.data-type]="w.type">
                                 <span class="warning-icon">{{ w.type === 'active-warning' ? '⚠️' : '⚡' }}</span>
                                 <span>{{ w.message }}</span>
+                              </div>
+                            }
+                          </div>
+                        }
+                        @if (entry.externalNotices?.length) {
+                          <div class="schedule-external-notices">
+                            @for (n of entry.externalNotices; track n.dependencyId) {
+                              <div class="external-notice-pill" [class.is-overdue]="n.isOverdue">
+                                <span class="external-icon">{{ n.isOverdue ? '⚠️' : '📦' }}</span>
+                                <div class="external-notice-content">
+                                  <span class="external-notice-title">{{ n.isOverdue ? '外部交付逾期提醒' : '外部交付提醒' }}</span>
+                                  <span class="external-notice-msg">{{ n.message }}</span>
+                                </div>
                               </div>
                             }
                           </div>

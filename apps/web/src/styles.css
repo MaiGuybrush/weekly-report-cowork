@@ -109,4 +109,59 @@ label { display: block; margin: 1rem 0; } input, textarea { display: block; box-
 .publication-cancelled-list li { padding: .4rem 0; border-bottom: 1px solid #f1f5f9; color: #64748b; }
 .publication-cancelled-list li:last-child { border-bottom: 0; }
 
+/* Issue #6: External Dependency Links & Notices (Cross-Department) */
+.schedule-external-notices { margin: .45rem 0; display: flex; flex-direction: column; gap: .35rem; }
+.external-notice-pill { display: flex; align-items: flex-start; gap: .55rem; padding: .55rem .85rem; border-radius: 8px; font-size: .84rem; line-height: 1.45; background: #f5f3ff; border: 1px solid #ddd6fe; border-left: 4px solid #7c3aed; color: #5b21b6; box-shadow: 0 1px 2px rgba(124, 58, 237, 0.05); }
+.external-notice-pill.is-overdue { background: #fff1f2; border-color: #fecdd3; border-left-color: #e11d48; color: #9f1239; }
+.external-icon { font-size: 1rem; flex-shrink: 0; margin-top: 1px; }
+.external-notice-content { display: flex; flex-direction: column; gap: .15rem; }
+.external-notice-title { font-weight: 700; font-size: .78rem; text-transform: uppercase; letter-spacing: .04em; }
+.external-notice-pill.is-overdue .external-notice-title { color: #be123c; }
+.external-notice-msg { font-size: .83rem; }
+
+.external-dependencies-section { margin-top: 1.75rem; padding: 1.4rem; background: #faf5ff; border: 1px solid #e9d5ff; border-radius: 12px; }
+.ext-heading { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: .8rem; border-bottom: 1px solid #f3e8ff; padding-bottom: .8rem; margin-bottom: 1rem; }
+.ext-heading h4 { margin: 0; font-family: 'Noto Serif TC', 'PMingLiU', serif; font-size: 1.2rem; color: #4c1d95; }
+.ext-heading p { margin: .2rem 0 0; color: #6b21a8; font-size: .82rem; }
+.ext-count-badge { background: #ede9fe; color: #5b21b6; padding: .3rem .65rem; border-radius: 99px; font-size: .78rem; font-weight: 600; }
+.btn-toggle-ext-form { background: #6d28d9; color: white; padding: .4rem .8rem; font-size: .82rem; border-radius: 6px; }
+.btn-toggle-ext-form:hover { background: #5b21b6; }
+
+.external-deps-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 1rem; margin-top: .8rem; }
+.external-dep-card { background: white; border: 1px solid #e9d5ff; border-radius: 8px; padding: 1rem; box-shadow: 0 1px 3px rgba(109, 40, 217, 0.05); display: flex; flex-direction: column; justify-content: space-between; gap: .7rem; }
+.external-dep-card.is-delivered { background: #fafafa; border-color: #cbd5e1; opacity: .88; }
+.ext-card-header { display: flex; justify-content: space-between; align-items: flex-start; gap: .5rem; }
+.ext-card-desc { font-weight: 600; font-size: .95rem; color: #1e1b4b; line-height: 1.4; }
+.ext-status-pill { display: inline-block; padding: .15rem .5rem; border-radius: 4px; font-size: .75rem; font-weight: 600; white-space: nowrap; }
+.ext-status-pill.status-pending { background: #ede9fe; color: #5b21b6; border: 1px solid #ddd6fe; }
+.ext-status-pill.status-delivered { background: #dcfce7; color: #15803d; border: 1px solid #bbf7d0; }
+.ext-status-pill.status-overdue { background: #ffe4e6; color: #b91c1c; border: 1px solid #fecdd3; }
+
+.ext-card-meta { display: flex; flex-wrap: wrap; gap: .6rem; font-size: .8rem; color: #475569; }
+.ext-meta-item { display: inline-flex; align-items: center; gap: .3rem; background: #f8fafc; padding: .2rem .5rem; border-radius: 4px; border: 1px solid #f1f5f9; }
+.ext-overdue-tag { color: #b91c1c; font-weight: 600; }
+
+.ext-card-links { border-top: 1px dashed #e2e8f0; padding-top: .6rem; }
+.ext-links-label { font-size: .76rem; color: #64748b; font-weight: 600; margin-bottom: .3rem; display: block; }
+.ext-linked-chips { display: flex; flex-wrap: wrap; gap: .3rem; }
+.ext-linked-chip { display: inline-flex; align-items: center; gap: .25rem; background: #f1f5f9; border: 1px solid #cbd5e1; border-radius: 99px; padding: .15rem .5rem; font-size: .76rem; color: #334155; }
+.ext-empty-links { font-size: .76rem; color: #94a3b8; font-style: italic; }
+
+.ext-card-actions { display: flex; justify-content: space-between; align-items: center; border-top: 1px solid #f1f5f9; padding-top: .6rem; margin-top: .2rem; }
+.btn-ext-status { padding: .25rem .55rem; font-size: .76rem; border-radius: 4px; }
+.btn-mark-delivered { background: #15803d; color: white; }
+.btn-mark-delivered:hover { background: #166534; }
+.btn-reopen-delivered { background: #f1f5f9; color: #475569; border: 1px solid #cbd5e1; }
+.btn-reopen-delivered:hover { background: #e2e8f0; }
+
+.external-dependency-panel { border-color: #ddd6fe; background: #faf5ff; }
+.external-dependency-panel h5 { color: #5b21b6; }
+.external-dep-list-item { border-color: #ddd6fe; }
+.external-dep-list-item.is-overdue { border-left: 3px solid #e11d48; background: #fff1f2; }
+.external-tag { display: inline-block; padding: .08rem .35rem; background: #ede9fe; color: #6d28d9; border-radius: 3px; font-size: .72rem; font-weight: 700; margin-right: .3rem; }
+.external-meta { color: #64748b; margin-left: .3rem; }
+.btn-add-external-link { background: #6d28d9; }
+.btn-add-external-link:hover { background: #5b21b6; }
+
+
 

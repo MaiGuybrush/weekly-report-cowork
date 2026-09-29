@@ -339,6 +339,46 @@ try {
   await schedulePanel.locator('li.schedule-task:has(strong:has-text("關鍵任務：前置測試任務"))').waitFor({ timeout: 15000 });
   assert.ok(await schedulePanel.locator('li.schedule-task:has(strong:has-text("關鍵任務：前置測試任務"))').getByText('開放').count() > 0);
 
+  // Issue #6 畫面驗證：跨部門相依事項管理與關聯提醒
+  // 1. 新增跨部門相依事項
+  const extSection = page.locator('.external-dependencies-section');
+  await extSection.waitFor({ timeout: 15000 });
+  await extSection.locator('.btn-toggle-ext-form').click();
+  const descInput = extSection.getByPlaceholder('例如：機房伺服器配電施工');
+  await descInput.waitFor({ timeout: 15000 });
+  await descInput.fill('機房伺服器配電施工');
+  await extSection.getByPlaceholder('例如：廠務處 / 資安處').fill('廠務處');
+  await extSection.locator('input[type="date"]').fill('2026-10-25');
+  await extSection.getByRole('button', { name: '儲存外部相依事項' }).click();
+  await page.getByText('已新增跨部門相依事項。').waitFor({ timeout: 15000 });
+  assert.ok(await extSection.locator('.external-dep-card:has-text("機房伺服器配電施工")').count() > 0);
+  assert.ok(await extSection.getByText('廠務處').count() > 0);
+
+  // 2. 編輯時程項目並關聯該外部相依事項
+  const phaseItem = schedulePanel.locator('li:has(strong:has-text("驗收階段"))');
+  await phaseItem.getByRole('button', { name: '編輯' }).click();
+  const extPanel = schedulePanel.locator('.external-dependency-panel');
+  await extPanel.waitFor({ timeout: 15000 });
+  await extPanel.locator('select').selectOption({ label: '機房伺服器配電施工（廠務處 · 到期：2026-10-25 · 未交付）' });
+  await extPanel.getByPlaceholder('請填寫受此外部交付影響之原因').fill('供電延遲將影響驗收機房進度');
+  await extPanel.getByRole('button', { name: '關聯外部相依事項' }).click();
+  await page.getByText('已建立跨部門相依關聯。').waitFor({ timeout: 15000 });
+  assert.ok(await extPanel.locator('.external-dep-list-item:has-text("機房伺服器配電施工")').count() > 0);
+
+  // 關閉編輯表單並檢視主清單中的外部交付提醒
+  await schedulePanel.getByRole('button', { name: '取消' }).click();
+  const extNotice = phaseItem.locator('.external-notice-pill');
+  await extNotice.waitFor({ timeout: 15000 });
+  assert.ok(await extNotice.getByText('外部交付提醒').count() > 0);
+  assert.ok(await extNotice.getByText('廠務處').count() > 0);
+  assert.ok(await extNotice.getByText('尚未交付').count() > 0);
+
+  // 3. 更新外部相依狀態為已交付
+  page.once('dialog', dialog => dialog.accept('廠務確認送電'));
+  await extSection.locator('.external-dep-card:has-text("機房伺服器配電施工")').getByRole('button', { name: '標記為已交付 ✓' }).click();
+  await page.getByText('跨部門相依事項已變更為「已交付」。').waitFor({ timeout: 15000 });
+  assert.equal(await phaseItem.locator('.external-notice-pill').count(), 0, 'delivered external dependency should clear notice');
+
   // 再次取消前置測試任務以驗收正式發布頁面之已取消區塊
   await schedulePanel.locator('li.schedule-task:has(strong:has-text("關鍵任務：前置測試任務"))').getByRole('button', { name: '編輯' }).click();
   await schedulePanel.getByLabel('操作').selectOption('cancel');
