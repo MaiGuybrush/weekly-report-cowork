@@ -400,20 +400,8 @@ app.MapPut("/api/items/{itemId}/project-work", (HttpContext ctx, Store store, st
         var targetEntry = ScheduleEntry(db, request.ScheduleEntryId);
         if (targetEntry is not null && targetEntry.ProjectId == itemId && CanSubmitProposal(db, item, targetEntry, user))
         {
-            var pId = Guid.NewGuid().ToString();
-            var origin = !string.IsNullOrWhiteSpace(request.SourceOrigin)
-                ? request.SourceOrigin.Trim()
-                : (CanMaintainProject(user, item) ? $"維護人代為記錄（負責人：{targetEntry.Owner ?? "未指定"}）" : $"{user.Name} ({user.EmpNo})");
-            Store.Sql(db, """
-                INSERT INTO project_proposals(id, project_id, schedule_entry_id, progress_percent, work_description, proposed_start, proposed_end, proposed_date, source_origin, status, created_by, created_at)
-                VALUES($id, $proj, $entry, $prog, $work, $pstart, $pend, null, $origin, 'pending', $creator, $at)
-                """,
-                ("$id", pId), ("$proj", itemId), ("$entry", targetEntry.Id),
-                ("$prog", request.ProgressPercent), ("$work", work),
-                ("$pstart", request.ProposedStart), ("$pend", request.ProposedEnd),
-                ("$origin", origin), ("$creator", user.EmpNo), ("$at", at)).ExecuteNonQuery();
-            Store.Sql(db, "INSERT INTO project_proposal_history(proposal_id, actor, at, action, reason, details) VALUES($pid, $actor, $at, 'submit', '經由協作路徑提交提案', $details)",
-                ("$pid", pId), ("$actor", user.EmpNo), ("$at", at), ("$details", work)).ExecuteNonQuery();
+            var origin = ResolveProposalSourceOrigin(user, item, targetEntry, request.SourceOrigin);
+            CreateProposalRecord(db, itemId, targetEntry, user, request.ProgressPercent, work!, request.ProposedStart, request.ProposedEnd, null, null, origin, at, "submit", "經由協作路徑提交提案");
         }
     }
     tx.Commit();
@@ -471,20 +459,7 @@ app.MapPost("/api/items/{itemId}/proposals", (HttpContext ctx, Store store, stri
     if (!CanSubmitProposal(db, item, entry, user))
         return Results.StatusCode(403);
 
-    var isMaintainer = CanMaintainProject(user, item);
-    string sourceOrigin;
-    if (isMaintainer)
-    {
-        sourceOrigin = !string.IsNullOrWhiteSpace(request.SourceOrigin)
-            ? request.SourceOrigin.Trim()
-            : $"維護人代為記錄（負責人：{entry.Owner ?? "未指定"}）";
-    }
-    else
-    {
-        sourceOrigin = !string.IsNullOrWhiteSpace(request.SourceOrigin)
-            ? request.SourceOrigin.Trim()
-            : $"{user.Name} ({user.EmpNo})";
-    }
+    var sourceOrigin = ResolveProposalSourceOrigin(user, item, entry, request.SourceOrigin);
 
     if (request.ProgressPercent is < 0 or > 100)
         return Results.BadRequest(new { error = "invalid progress percent" });
@@ -496,29 +471,15 @@ app.MapPost("/api/items/{itemId}/proposals", (HttpContext ctx, Store store, stri
     if (request.ProposedStart is not null && request.ProposedEnd is not null && string.CompareOrdinal(request.ProposedStart, request.ProposedEnd) > 0)
         return Results.BadRequest(new { error = "proposed start date must not be after end date" });
 
-    var proposalId = Guid.NewGuid().ToString();
+    using var tx = db.BeginTransaction();
     var at = DateTimeOffset.UtcNow.ToString("O");
-
-    Store.Sql(db, """
-        INSERT INTO project_proposals(id, project_id, schedule_entry_id, progress_percent, work_description, proposed_start, proposed_end, proposed_date, proposed_state, source_origin, status, created_by, created_at)
-        VALUES($id, $proj, $entry, $prog, $work, $pstart, $pend, $pdate, $pstate, $origin, 'pending', $creator, $at)
-        """,
-        ("$id", proposalId), ("$proj", itemId), ("$entry", request.ScheduleEntryId),
-        ("$prog", request.ProgressPercent), ("$work", request.WorkDescription.Trim()),
-        ("$pstart", request.ProposedStart), ("$pend", request.ProposedEnd),
-        ("$pdate", request.ProposedDate), ("$pstate", request.ProposedState),
-        ("$origin", sourceOrigin), ("$creator", user.EmpNo), ("$at", at)).ExecuteNonQuery();
-
-    Store.Sql(db, "INSERT INTO project_proposal_history(proposal_id, actor, at, action, reason, details) VALUES($pid, $actor, $at, 'submit', '提交進度與時程提案', $details)",
-        ("$pid", proposalId), ("$actor", user.EmpNo), ("$at", at), ("$details", request.WorkDescription.Trim())).ExecuteNonQuery();
-
-    Store.Sql(db, "INSERT INTO audit(item_id, actor, at, action, reason) VALUES($id, $actor, $at, 'project-proposal', $reason)",
-        ("$id", itemId), ("$actor", user.EmpNo), ("$at", at), ("$reason", $"提交任務「{entry.Name}」時程提案：{request.WorkDescription.Trim()}")).ExecuteNonQuery();
+    var (proposalId, finalOrigin) = CreateProposalRecord(db, itemId, entry, user, request.ProgressPercent, request.WorkDescription.Trim(), request.ProposedStart, request.ProposedEnd, request.ProposedDate, request.ProposedState, sourceOrigin, at, "submit", "提交進度與時程提案");
+    tx.Commit();
 
     return Results.Created($"/api/items/{itemId}/proposals/{proposalId}", new {
         id = proposalId,
         status = "pending",
-        sourceOrigin,
+        sourceOrigin = finalOrigin,
         scheduleEntryId = entry.Id
     });
 });
@@ -559,15 +520,12 @@ app.MapPost("/api/items/{itemId}/proposals/{proposalId}/accept", (HttpContext ct
     var entry = ScheduleEntry(db, entryId);
     if (entry is null) return Results.NotFound();
 
+    if (request.BaseEntryVersion.HasValue && request.BaseEntryVersion.Value != entry.Version)
+        return Results.Conflict(new { error = "stale schedule entry version", latest = entry });
+
     var at = DateTimeOffset.UtcNow.ToString("O");
     var user = Current(ctx);
     var reason = request.Reason.Trim();
-
-    Store.Sql(db, "UPDATE project_proposals SET status='accepted', decided_by=$decided_by, decided_at=$decided_at, decision_reason=$reason WHERE id=$id",
-        ("$decided_by", user.EmpNo), ("$decided_at", at), ("$reason", reason), ("$id", proposalId)).ExecuteNonQuery();
-
-    Store.Sql(db, "INSERT INTO project_proposal_history(proposal_id, actor, at, action, reason, details) VALUES($pid, $actor, $at, 'accept', $reason, $details)",
-        ("$pid", proposalId), ("$actor", user.EmpNo), ("$at", at), ("$reason", reason), ("$details", $"採納時程提案（來源：{sourceOrigin}）")).ExecuteNonQuery();
 
     var newForecastStart = propStart ?? entry.ForecastStart;
     var newForecastEnd = propEnd ?? entry.ForecastEnd;
@@ -579,6 +537,24 @@ app.MapPost("/api/items/{itemId}/proposals/{proposalId}/accept", (HttpContext ct
         if (!ValidDateRange(newForecastStart, newForecastEnd))
             return Results.BadRequest(new { error = "invalid date range in proposal" });
     }
+
+    if (newState != entry.State)
+    {
+        var proposedScheduleRequest = new ScheduleRequest(
+            entry.Kind, entry.Name, entry.BaselineStart, entry.BaselineEnd,
+            newForecastStart, newForecastEnd, entry.ActualStart, entry.ActualEnd,
+            null, entry.Version, newState, reason, null, request.Token, request.BaseProjectVersion,
+            entry.Owner, entry.PhaseId, false, entry.BaselineDate, entry.BaselineDate, newForecastDate, entry.ActualDate
+        );
+        if (!ValidScheduleRange(proposedScheduleRequest))
+            return Results.BadRequest(new { error = $"cannot transition task state to '{newState}' without meeting actual date constraints" });
+    }
+
+    Store.Sql(db, "UPDATE project_proposals SET status='accepted', decided_by=$decided_by, decided_at=$decided_at, decision_reason=$reason WHERE id=$id",
+        ("$decided_by", user.EmpNo), ("$decided_at", at), ("$reason", reason), ("$id", proposalId)).ExecuteNonQuery();
+
+    Store.Sql(db, "INSERT INTO project_proposal_history(proposal_id, actor, at, action, reason, details) VALUES($pid, $actor, $at, 'accept', $reason, $details)",
+        ("$pid", proposalId), ("$actor", user.EmpNo), ("$at", at), ("$reason", reason), ("$details", $"採納時程提案（來源：{sourceOrigin}）")).ExecuteNonQuery();
 
     Store.Sql(db, """
         UPDATE project_schedule_entries
@@ -609,6 +585,7 @@ app.MapPost("/api/items/{itemId}/proposals/{proposalId}/accept", (HttpContext ct
 app.MapPost("/api/items/{itemId}/proposals/{proposalId}/reject", (HttpContext ctx, Store store, string itemId, string proposalId, ProposalDecisionRequest request) =>
 {
     using var db = store.Open();
+    using var tx = db.BeginTransaction();
     var item = GetItem(db, itemId);
     if (item is null) return Results.NotFound();
     if (item.Section != "projects" || !CanMaintainProject(Current(ctx), item)) return Results.StatusCode(403);
@@ -637,6 +614,7 @@ app.MapPost("/api/items/{itemId}/proposals/{proposalId}/reject", (HttpContext ct
     Store.Sql(db, "INSERT INTO audit(item_id, actor, at, action, reason) VALUES($id, $actor, $at, 'reject-proposal', $reason)",
         ("$id", itemId), ("$actor", user.EmpNo), ("$at", at), ("$reason", $"退回提案：{reason}")).ExecuteNonQuery();
 
+    tx.Commit();
     return Results.Ok(new { id = proposalId, status = "rejected" });
 });
 app.MapGet("/api/items/{itemId}/schedule", (HttpContext ctx, Store store, string itemId) =>
@@ -1321,40 +1299,41 @@ static string GetUserName(SqliteConnection db, string? empNo)
     if (string.IsNullOrWhiteSpace(empNo)) return "";
     return Store.Sql(db, "SELECT name FROM users WHERE emp_no=$emp", ("$emp", empNo)).ExecuteScalar() as string ?? empNo;
 }
-static bool IsTaskOwner(ScheduleEntry entry, User user)
+static bool MatchOwner(string? ownerText, User user)
 {
-    if (string.IsNullOrWhiteSpace(entry.Owner)) return false;
-    var owner = entry.Owner.Trim();
-    return owner.Equals(user.EmpNo, StringComparison.OrdinalIgnoreCase) ||
-           owner.Equals(user.Name, StringComparison.OrdinalIgnoreCase) ||
-           owner.Contains(user.EmpNo, StringComparison.OrdinalIgnoreCase) ||
-           owner.Contains(user.Name, StringComparison.OrdinalIgnoreCase);
+    if (string.IsNullOrWhiteSpace(ownerText)) return false;
+    var trimmed = ownerText.Trim();
+    if (trimmed.Equals(user.EmpNo, StringComparison.OrdinalIgnoreCase) ||
+        trimmed.Equals(user.Name, StringComparison.OrdinalIgnoreCase))
+        return true;
+
+    var tokens = trimmed.Split(new[] { ' ', '\t', ',', '/', ';', '、', '(', ')', '（', '）', '[', ']' }, StringSplitOptions.RemoveEmptyEntries);
+    return tokens.Any(t => t.Equals(user.EmpNo, StringComparison.OrdinalIgnoreCase) ||
+                           t.Equals(user.Name, StringComparison.OrdinalIgnoreCase));
 }
+
+static bool IsTaskOwner(ScheduleEntry entry, User user) => MatchOwner(entry.Owner, user);
+
 static bool IsTaskOwnerInProject(SqliteConnection db, string projectId, User user)
 {
     using var rows = Store.Sql(db, "SELECT owner FROM project_schedule_entries WHERE project_id=$p AND owner IS NOT NULL", ("$p", projectId)).ExecuteReader();
     while (rows.Read())
     {
-        var owner = rows.GetString(0);
-        if (owner.Equals(user.EmpNo, StringComparison.OrdinalIgnoreCase) ||
-            owner.Equals(user.Name, StringComparison.OrdinalIgnoreCase) ||
-            owner.Contains(user.EmpNo, StringComparison.OrdinalIgnoreCase) ||
-            owner.Contains(user.Name, StringComparison.OrdinalIgnoreCase))
-        {
+        if (MatchOwner(rows.GetString(0), user))
             return true;
-        }
     }
     return false;
 }
+
 static bool CanReadProject(SqliteConnection db, Item item, User user)
 {
     if (user.Role == "Guy") return true;
     if (CanMaintainProject(user, item)) return true;
     if (IsProjectParticipant(db, item.Id, user.Section)) return true;
     if (IsTaskOwnerInProject(db, item.Id, user)) return true;
-    if (item.Version > 0 && (user.Role == "Reader" || user.ReaderAccess)) return true;
     return false;
 }
+
 static bool CanSubmitProposal(SqliteConnection db, Item item, ScheduleEntry entry, User user)
 {
     if (user.Role == "Reader") return false;
@@ -1362,6 +1341,52 @@ static bool CanSubmitProposal(SqliteConnection db, Item item, ScheduleEntry entr
     if (user.Role == "Head" && IsProjectParticipant(db, item.Id, user.Section)) return true;
     if (IsTaskOwner(entry, user)) return true;
     return false;
+}
+
+static string ResolveProposalSourceOrigin(User user, Item item, ScheduleEntry entry, string? customOrigin)
+{
+    if (!string.IsNullOrWhiteSpace(customOrigin)) return customOrigin.Trim();
+    if (CanMaintainProject(user, item))
+    {
+        return $"維護人代為記錄（負責人：{entry.Owner ?? "未指定"}）";
+    }
+    return $"{user.Name} ({user.EmpNo})";
+}
+
+static (string Id, string SourceOrigin) CreateProposalRecord(
+    SqliteConnection db,
+    string itemId,
+    ScheduleEntry entry,
+    User user,
+    int? progressPercent,
+    string workDescription,
+    string? proposedStart,
+    string? proposedEnd,
+    string? proposedDate,
+    string? proposedState,
+    string sourceOrigin,
+    string at,
+    string historyAction,
+    string historyReason)
+{
+    var proposalId = Guid.NewGuid().ToString();
+    Store.Sql(db, """
+        INSERT INTO project_proposals(id, project_id, schedule_entry_id, progress_percent, work_description, proposed_start, proposed_end, proposed_date, proposed_state, source_origin, status, created_by, created_at)
+        VALUES($id, $proj, $entry, $prog, $work, $pstart, $pend, $pdate, $pstate, $origin, 'pending', $creator, $at)
+        """,
+        ("$id", proposalId), ("$proj", itemId), ("$entry", entry.Id),
+        ("$prog", progressPercent), ("$work", workDescription),
+        ("$pstart", proposedStart), ("$pend", proposedEnd),
+        ("$pdate", proposedDate), ("$pstate", proposedState),
+        ("$origin", sourceOrigin), ("$creator", user.EmpNo), ("$at", at)).ExecuteNonQuery();
+
+    Store.Sql(db, "INSERT INTO project_proposal_history(proposal_id, actor, at, action, reason, details) VALUES($pid, $actor, $at, $action, $reason, $details)",
+        ("$pid", proposalId), ("$actor", user.EmpNo), ("$at", at), ("$action", historyAction), ("$reason", historyReason), ("$details", workDescription)).ExecuteNonQuery();
+
+    Store.Sql(db, "INSERT INTO audit(item_id, actor, at, action, reason) VALUES($id, $actor, $at, 'project-proposal', $reason)",
+        ("$id", itemId), ("$actor", user.EmpNo), ("$at", at), ("$reason", $"提交任務「{entry.Name}」時程提案：{workDescription}")).ExecuteNonQuery();
+
+    return (proposalId, sourceOrigin);
 }
 static List<ProjectProposalView> GetProjectProposals(SqliteConnection db, string projectId)
 {
@@ -1846,7 +1871,7 @@ record CreateItem(string Section, string Title, string? OwnerSection);
 record ProjectParticipantRequest(string? Section);
 record ProjectWorkRequest(string? Section, string? Work, string? ScheduleProposal, int BaseVersion, string? ScheduleEntryId = null, int? ProgressPercent = null, string? ProposedStart = null, string? ProposedEnd = null, string? SourceOrigin = null);
 record ProjectProposalRequest(string? ScheduleEntryId, string? WorkDescription, int? ProgressPercent = null, string? ProposedStart = null, string? ProposedEnd = null, string? ProposedDate = null, string? ProposedState = null, string? SourceOrigin = null);
-record ProposalDecisionRequest(string? Reason, string? Token, int? BaseProjectVersion);
+record ProposalDecisionRequest(string? Reason, string? Token, int? BaseProjectVersion, int? BaseEntryVersion = null);
 record ProjectProposalView(string Id, string ProjectId, string ScheduleEntryId, string ScheduleEntryName, string ScheduleEntryKind, string? ScheduleEntryOwner, int? ProgressPercent, string WorkDescription, string? ProposedStart, string? ProposedEnd, string? ProposedDate, string? ProposedState, string? SourceOrigin, string Status, string CreatedBy, string CreatedByName, string CreatedAt, string? DecidedBy, string? DecidedByName, string? DecidedAt, string? DecisionReason, string? CurrentBaselineStart, string? CurrentBaselineEnd, string? CurrentForecastStart, string? CurrentForecastEnd, string? CurrentBaselineDate, string? CurrentForecastDate, string? CurrentState);
 record SyncMemberResult(string UserId, string Status, int WorkCount, string? LastSuccessAt, string? Error);
 record ScheduleRequest(string? Kind, string? Name, string? BaselineStart, string? BaselineEnd, string? ForecastStart, string? ForecastEnd, string? ActualStart, string? ActualEnd, string? BaselineChangeReason, int? BaseVersion, string? State, string? Reason, string? Action, string? Token, int? BaseProjectVersion, string? Owner, string? PhaseId, bool? AcknowledgeIncompleteTasks, string? TargetDate = null, string? BaselineDate = null, string? ForecastDate = null, string? ActualDate = null);

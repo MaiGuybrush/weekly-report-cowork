@@ -802,8 +802,9 @@ try {
   assert.equal(proposalsViewH2.status, 200);
   assert.ok(proposalsViewH2.body.some(p => p.id === h2Proposal.body.id));
 
-  // 無關使用者 H3 讀取提案列表 -> 403
+  // 無關使用者 H3 與讀者 R 讀取提案列表 -> 403
   assert.equal((await call(proposalPath, 'H3')).status, 403);
+  assert.equal((await call(proposalPath, 'R')).status, 403);
 
   // 7. 維護人採納提案（走租約、版本、原因和修訂流程）：
   // 非維護人嘗試採納 -> 403
@@ -819,6 +820,11 @@ try {
   // 版本過期或租約錯誤 -> 409
   assert.equal((await call(`${proposalPath}/${maintainerProxyProposal.body.id}/accept`, 'H1', 'POST', {
     reason: '採納測試', token: 'wrong-token', baseProjectVersion: milestoneProjectVersion
+  })).status, 409);
+
+  // 任務版本過期 (樂觀鎖) -> 409
+  assert.equal((await call(`${proposalPath}/${maintainerProxyProposal.body.id}/accept`, 'H1', 'POST', {
+    reason: '過期任務版本採納', token: scheduleLease.body.token, baseProjectVersion: milestoneProjectVersion, baseEntryVersion: 999
   })).status, 409);
 
   // 正確採納
@@ -847,6 +853,11 @@ try {
   assert.equal(proposalAfterAccept.status, 'accepted');
   assert.equal(proposalAfterAccept.decisionReason, '經確認廠商供貨情況，同意順延時程');
 
+  // 已採納之提案不可重複採納 -> 400
+  assert.equal((await call(`${proposalPath}/${maintainerProxyProposal.body.id}/accept`, 'H1', 'POST', {
+    reason: '重複採納測試', token: scheduleLease.body.token, baseProjectVersion: milestoneProjectVersion
+  })).status, 400);
+
   // 8. 維護人駁回/退回提案
   const rejectResult = await call(`${proposalPath}/${h2Proposal.body.id}/reject`, 'H1', 'POST', {
     reason: '下游關鍵模組不可延宕，維持現有時程'
@@ -856,11 +867,29 @@ try {
   assert.equal(proposalAfterReject.status, 'rejected');
   assert.equal(proposalAfterReject.decisionReason, '下游關鍵模組不可延宕，維持現有時程');
 
+  // 已退回之提案不可重複退回 -> 400
+  assert.equal((await call(`${proposalPath}/${h2Proposal.body.id}/reject`, 'H1', 'POST', {
+    reason: '重複退回測試'
+  })).status, 400);
+
   // 9. 提案歷史查詢
   const propHist = await call(`${proposalPath}/${maintainerProxyProposal.body.id}/history`, 'H1');
   assert.equal(propHist.status, 200);
   assert.ok(propHist.body.some(h => h.action === 'submit'));
   assert.ok(propHist.body.some(h => h.action === 'accept'));
+
+  // 10. 經現有協作路徑 (project-work) 提交進度與提案並關聯關鍵任務
+  const pwWithProposal = await call(`/api/items/${scheduleId}/project-work`, 'H2', 'PUT', {
+    work: '配合廠商端進度完成測試',
+    scheduleProposal: '建議驗收順延至 2026-10-28',
+    baseVersion: 0,
+    scheduleEntryId: unassignedOwnerTask.body.id,
+    progressPercent: 80,
+    proposedEnd: '2026-10-28'
+  });
+  assert.equal(pwWithProposal.status, 200);
+  const proposalsAfterPw = await call(proposalPath, 'H1');
+  assert.ok(proposalsAfterPw.body.some(p => p.scheduleEntryId === unassignedOwnerTask.body.id && p.workDescription.includes('配合廠商端進度') && p.proposedEnd === '2026-10-28'));
 
   assert.equal((await call(`/api/items/${id}/project-participants`, 'H2', 'POST', { section: 's2' })).status, 403);
   assert.equal((await call(`/api/items/${id}/project-participants`, 'H1', 'POST', { section: 's2' })).status, 204);

@@ -754,10 +754,28 @@ export class Home implements OnInit {
                           <label>我承擔的工作說明
                             <textarea rows="3" [(ngModel)]="myProjectWork" placeholder="填寫課別綜合工作..."></textarea>
                           </label>
+                          <label>關聯關鍵任務（選填，同步提交任務進度提案）
+                            <select [(ngModel)]="myProjectWorkScheduleEntryId">
+                              <option value="">無關聯特定關鍵任務</option>
+                              @for (task of candidateTasks(); track task.id) {
+                                <option [value]="task.id">{{ task.name }}（{{ task.owner ? '負責人: ' + task.owner : '無指定負責人' }}）</option>
+                              }
+                            </select>
+                          </label>
+                          @if (myProjectWorkScheduleEntryId) {
+                            <div class="form-row">
+                              <label class="form-field form-field-half">工作完成度 (0-100%)
+                                <input type="number" min="0" max="100" [(ngModel)]="myProjectWorkProgress" />
+                              </label>
+                              <label class="form-field form-field-half">建議完成日期
+                                <input type="date" [(ngModel)]="myProjectWorkProposedEnd" />
+                              </label>
+                            </div>
+                          }
                           <label>課別總體時程建議
                             <input [(ngModel)]="myScheduleProposal" placeholder="例：整體進度如期" />
                           </label>
-                          <button type="button" class="btn-secondary" (click)="saveProjectWork()">更新課別備註</button>
+                          <button type="button" class="btn-secondary" (click)="saveProjectWork()">更新課別備註與提案</button>
                         </div>
                       }
                     </div>
@@ -1549,6 +1567,9 @@ export class ReportEditor implements OnInit, OnDestroy {
   myProjectWork = "";
   myScheduleProposal = "";
   myProjectWorkVersion = 0;
+  myProjectWorkScheduleEntryId = "";
+  myProjectWorkProgress: number | null = null;
+  myProjectWorkProposedEnd = "";
   isParticipant = false;
   scheduleEntries: ScheduleEntry[] = [];
   editingSchedule: ScheduleEntry | null = null;
@@ -1755,6 +1776,9 @@ export class ReportEditor implements OnInit, OnDestroy {
     this.myProjectWork = "";
     this.myScheduleProposal = "";
     this.myProjectWorkVersion = 0;
+    this.myProjectWorkScheduleEntryId = "";
+    this.myProjectWorkProgress = null;
+    this.myProjectWorkProposedEnd = "";
     this.isParticipant = false;
     this.scheduleEntries = [];
     this.resetScheduleDraft();
@@ -1766,24 +1790,29 @@ export class ReportEditor implements OnInit, OnDestroy {
     }
     this.changes.detectChanges();
   }
+  isEntryOwner(e: ScheduleEntry): boolean {
+    if (!this.me || !e.owner) return false;
+    const emp = this.me.empNo.toLowerCase();
+    const name = this.me.name.toLowerCase();
+    const owner = e.owner.trim().toLowerCase();
+    if (owner === emp || owner === name) return true;
+    const tokens = owner.split(/[\s,/\t;、()[\]（）]+/);
+    return tokens.some((t) => t === emp || t === name);
+  }
   isTaskOwner(): boolean {
-    if (!this.me) return false;
-    return this.scheduleEntries.some((e) => {
-      if (!e.owner) return false;
-      const owner = e.owner.trim();
-      return (
-        owner === this.me!.empNo ||
-        owner === this.me!.name ||
-        owner.includes(this.me!.empNo) ||
-        owner.includes(this.me!.name)
-      );
-    });
+    return this.scheduleEntries.some((e) => this.isEntryOwner(e));
   }
   canSubmitProposal(item: Item): boolean {
+    if (this.me?.role === "Reader") return false;
     return this.canMaintain(item) || this.isParticipant || this.isTaskOwner();
   }
   candidateTasks(): ScheduleEntry[] {
-    return this.scheduleEntries.filter((e) => e.kind === "task" || e.kind === "milestone");
+    if (!this.selected) return [];
+    const tasks = this.scheduleEntries.filter((e) => e.kind === "task");
+    if (this.canMaintain(this.selected) || this.isParticipant) {
+      return tasks;
+    }
+    return tasks.filter((e) => this.isEntryOwner(e));
   }
   async loadProposals() {
     if (!this.selected) return;
@@ -1829,6 +1858,10 @@ export class ReportEditor implements OnInit, OnDestroy {
   }
   async submitProposal() {
     if (!this.selected) return;
+    if (this.isProxyProposal && !this.proposalDraft.sourceOrigin.trim()) {
+      this.message = "代填模式請填寫原始資訊來源標記。";
+      return;
+    }
     if (!this.proposalDraft.scheduleEntryId) {
       this.message = "請選擇對應關鍵任務。";
       return;
@@ -1876,11 +1909,13 @@ export class ReportEditor implements OnInit, OnDestroy {
       if (!this.token) {
         await this.acquire();
       }
+      const targetEntry = this.scheduleEntries.find((e) => e.id === this.acceptingProposal!.scheduleEntryId);
       const result = (await firstValueFrom(
         this.http.post(`/api/items/${this.selected.id}/proposals/${this.acceptingProposal.id}/accept`, {
           reason: this.proposalAcceptReason.trim(),
           token: this.token,
           baseProjectVersion: this.baseVersion || this.selected.version,
+          baseEntryVersion: targetEntry ? targetEntry.version : undefined,
         }),
       )) as { projectVersion: number };
       this.baseVersion = result.projectVersion;
@@ -1979,9 +2014,13 @@ export class ReportEditor implements OnInit, OnDestroy {
           work: this.myProjectWork,
           scheduleProposal: this.myScheduleProposal,
           baseVersion: this.myProjectWorkVersion,
+          scheduleEntryId: this.myProjectWorkScheduleEntryId || null,
+          progressPercent: this.myProjectWorkProgress !== null && this.myProjectWorkProgress !== undefined && this.myProjectWorkProgress !== ("" as any) ? Number(this.myProjectWorkProgress) : null,
+          proposedEnd: this.myProjectWorkProposedEnd || null,
         }),
       );
       await this.loadProjectWork();
+      await this.loadProposals();
       this.message = "已送出給週報維護人。";
     } catch {
       this.message = "送出參與工作失敗。";
