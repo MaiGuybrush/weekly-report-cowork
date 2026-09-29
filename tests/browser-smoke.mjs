@@ -64,11 +64,22 @@ try {
   browser = await chromium.launch({ headless: true, executablePath: process.env.CHROME_PATH || 'C:/Program Files/Google/Chrome/Application/chrome.exe', args: ['--no-sandbox'] });
   const page = await browser.newPage();
   page.on('pageerror', error => console.error('Browser page error:', error.message));
-  await page.route('http://tncimweb1.cminl.oa/uacapi/adAuth/**', async route => {
+  const refreshCalls = [];
+  const verifyCalls = [];
+  const mockUac = async route => {
     const url = route.request().url();
+    const isPost = route.request().method() === 'POST';
+    const requestBody = isPost ? route.request().postDataJSON() : null;
+    if (isPost && url.endsWith('/RefreshToken')) refreshCalls.push(requestBody.refreshToken);
+    if (isPost && url.endsWith('/VerifyCert')) {
+      assert.equal(route.request().frame().url().includes('CertificateKey'), false, 'certificate must leave the URL before verification');
+      verifyCalls.push(requestBody.CertificateKey);
+    }
+    const rejected = isPost && (url.endsWith('/RefreshToken') && !requestBody.refreshToken || url.endsWith('/VerifyCert') && requestBody.CertificateKey === 'bad-cert');
     const body = url.endsWith('/SsoUrl') ? { loginPage: 'http://mock-sso.test/login' } : { token, refreshToken: 'test-refresh' };
-    await route.fulfill({ status: 200, contentType: 'application/json', headers: { 'access-control-allow-origin': '*', 'access-control-allow-headers': '*', 'access-control-allow-methods': 'GET, POST, OPTIONS' }, body: JSON.stringify(body) });
-  });
+    await route.fulfill({ status: rejected ? 401 : 200, contentType: 'application/json', headers: { 'access-control-allow-origin': '*', 'access-control-allow-headers': '*', 'access-control-allow-methods': 'GET, POST, OPTIONS' }, body: JSON.stringify(body) });
+  };
+  await page.route('http://tncimweb1.cminl.oa/uacapi/adAuth/**', mockUac);
   await page.route('http://mock-sso.test/**', async route => {
     const callback = new URL(route.request().url()).searchParams.get('url');
     assert.ok(callback);
@@ -80,6 +91,40 @@ try {
   await page.getByRole('heading', { name: /處會週報/ }).waitFor({ timeout: 15000 });
   await page.waitForURL(url => url.hash === `#/reports/${id}` && !url.searchParams.has('CertificateKey'), { timeout: 15000 });
   await page.getByText('2026-10-01').waitFor({ timeout: 15000 });
+  assert.deepEqual(refreshCalls, [null], 'startup should attempt refresh before SSO');
+  assert.deepEqual(verifyCalls, ['test-cert']);
+  assert.equal(await page.evaluate(() => localStorage.getItem('CIM_TK')), token);
+  assert.equal(await page.evaluate(() => localStorage.getItem('CIM_RTK')), 'test-refresh');
+  await page.reload();
+  await page.getByText('2026-10-01').waitFor({ timeout: 15000 });
+  assert.deepEqual(refreshCalls, [null, 'test-refresh'], 'reload should refresh an existing session');
+  assert.equal(new URL(page.url()).hash, `#/reports/${id}`);
+
+  const hashPage = await browser.newPage();
+  await hashPage.route('http://tncimweb1.cminl.oa/uacapi/adAuth/**', mockUac);
+  await hashPage.goto(`${base}/#/reports/${id}?CertificateKey=hash-cert`);
+  await hashPage.getByText('2026-10-01').waitFor({ timeout: 15000 });
+  assert.ok(verifyCalls.includes('hash-cert'), 'hash certificate should be exchanged');
+  assert.equal(new URL(hashPage.url()).hash, `#/reports/${id}`);
+  assert.equal(await hashPage.evaluate(() => localStorage.getItem('CIM_TK')), token);
+  await hashPage.close();
+
+  const failedPage = await browser.newPage();
+  await failedPage.route('http://tncimweb1.cminl.oa/uacapi/adAuth/**', mockUac);
+  let failedReturnUrl;
+  await failedPage.route('http://mock-sso.test/**', async route => {
+    failedReturnUrl = new URL(route.request().url()).searchParams.get('url');
+    await route.fulfill({ status: 200, contentType: 'text/html', body: 'SSO login' });
+  });
+  await failedPage.goto(`${base}/?CertificateKey=bad-cert#/reports/${id}`);
+  await failedPage.waitForURL('http://mock-sso.test/**', { timeout: 15000 });
+  assert.ok(verifyCalls.includes('bad-cert'));
+  assert.equal(new URL(failedReturnUrl).searchParams.has('CertificateKey'), false);
+  assert.equal(new URL(failedReturnUrl).hash, '');
+  await failedPage.goto(`${failedReturnUrl}?CertificateKey=recovered-cert`);
+  await failedPage.getByText('2026-10-01').waitFor({ timeout: 15000 });
+  assert.equal(new URL(failedPage.url()).hash, `#/reports/${id}`, 'SSO should restore the route after a failed certificate');
+  await failedPage.close();
   page.once('dialog', dialog => dialog.accept('Browser item'));
   await page.getByRole('button', { name: '新增項目' }).nth(1).click();
   await page.getByRole('button', { name: 'Browser item' }).click();

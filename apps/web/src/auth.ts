@@ -17,25 +17,39 @@ export function apiUrl(baseUrl: string, path: string): string {
 @Injectable({ providedIn: 'root' })
 export class Auth {
   private http = inject(HttpClient);
-  token() { return sessionStorage.getItem(tokenKey); }
+  token() { return localStorage.getItem(tokenKey); }
 
   async initialize() {
     const url = new URL(location.href);
-    const certificateKey = url.searchParams.get('CertificateKey');
+    const hashQueryIndex = url.hash.indexOf('?');
+    const hashPath = hashQueryIndex < 0 ? url.hash.slice(1) : url.hash.slice(1, hashQueryIndex);
+    const hashParams = new URLSearchParams(hashQueryIndex < 0 ? '' : url.hash.slice(hashQueryIndex + 1));
+    const certificateKey = url.searchParams.get('CertificateKey') || hashParams.get('CertificateKey');
+    if (certificateKey) {
+      url.searchParams.delete('CertificateKey');
+      hashParams.delete('CertificateKey');
+      url.hash = hashPath + (hashParams.size ? `?${hashParams}` : '');
+      history.replaceState(history.state, '', url.toString());
+      this.clear();
+    }
+    const pendingPath = sessionStorage.getItem('reportReturnPath') || (url.hash.startsWith('#/') ? url.hash.slice(1) : '/');
+
     try {
       if (certificateKey) {
         const result = await firstValueFrom(this.http.post<{ token: string; refreshToken: string }>(`${uac}/VerifyCert`, { CertificateKey: certificateKey }));
         this.save(result);
-        url.searchParams.delete('CertificateKey');
-        history.replaceState({}, '', url.toString());
-        const pending = sessionStorage.getItem('reportReturnPath');
-        sessionStorage.removeItem('reportReturnPath');
-        if (pending) history.replaceState({}, '', `${url.pathname}${url.search}#${pending}`);
-      } else if (!this.token() && sessionStorage.getItem(refreshKey)) {
-        const result = await firstValueFrom(this.http.post<{ token: string; refreshToken: string }>(`${uac}/RefreshToken`, { refreshToken: sessionStorage.getItem(refreshKey) }));
+        this.restoreReturnPath(url);
+      } else {
+        const result = await firstValueFrom(this.http.post<{ token: string; refreshToken: string }>(`${uac}/RefreshToken`, { refreshToken: localStorage.getItem(refreshKey) }));
         this.save(result);
+        this.restoreReturnPath(url);
       }
-    } catch { this.clear(); }
+    } catch (error) {
+      console.error('UAC initialization failed', error);
+      this.clear();
+      try { await this.enter(pendingPath); }
+      catch (redirectError) { console.error('UAC SSO redirect failed', redirectError); }
+    }
   }
 
   async enter(path: string) {
@@ -47,10 +61,19 @@ export class Auth {
     location.assign(`${urls.loginPage}?url=${encodeURIComponent(returnUrl.toString())}`);
   }
 
-  clear() { sessionStorage.removeItem(tokenKey); sessionStorage.removeItem(refreshKey); }
+  clear() { localStorage.removeItem(tokenKey); localStorage.removeItem(refreshKey); }
   private save(user: { token: string; refreshToken: string }) {
-    sessionStorage.setItem(tokenKey, user.token);
-    sessionStorage.setItem(refreshKey, user.refreshToken);
+    if (!user?.token || !user.refreshToken) throw new Error('UAC returned incomplete login information');
+    localStorage.setItem(tokenKey, user.token);
+    localStorage.setItem(refreshKey, user.refreshToken);
+  }
+
+  private restoreReturnPath(url: URL) {
+    const pending = sessionStorage.getItem('reportReturnPath');
+    if (!pending) return;
+    sessionStorage.removeItem('reportReturnPath');
+    url.hash = pending;
+    history.replaceState(history.state, '', url.toString());
   }
 }
 
