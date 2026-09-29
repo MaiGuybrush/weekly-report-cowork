@@ -219,6 +219,32 @@ try {
   await schedulePanel.getByRole('heading', { name: '新增交付項目' }).waitFor({ timeout: 15000 });
   await schedulePanel.locator('li.schedule-milestone').getByText('偏差 +3 天').waitFor({ timeout: 15000 });
 
+  // 建立前置關係 (Issue #4)：將「驗收階段」設為「上線評估會議」的前置項目
+  await schedulePanel.locator('li.schedule-milestone').getByRole('button', { name: '編輯' }).click();
+  await schedulePanel.getByRole('heading', { name: '前置項目管理' }).waitFor({ timeout: 15000 });
+  await schedulePanel.getByLabel('選擇前置項目').selectOption({ label: '[階段] 驗收階段' });
+  await schedulePanel.getByPlaceholder('例如：需待架構確認後方可進行').fill('需待驗收階段簽署完成');
+  await schedulePanel.getByRole('button', { name: '建立前置關聯' }).click();
+  await page.getByText('已建立前置關聯。').waitFor({ timeout: 15000 });
+  await schedulePanel.locator('li.schedule-milestone').getByText('前置：驗收階段').waitFor({ timeout: 15000 });
+
+  // 驗證順序衝突警示：當前置完成日 (2026-10-10) 晚於最新目標 (設為 2026-10-08)
+  await schedulePanel.getByLabel('最新目標').fill('2026-10-08');
+  await schedulePanel.getByLabel('修改原因', { exact: true }).fill('嘗試提前時程測試衝突');
+  await schedulePanel.getByRole('button', { name: '儲存時程' }).click();
+  await schedulePanel.getByRole('heading', { name: '新增交付項目' }).waitFor({ timeout: 15000 });
+  await schedulePanel.locator('li.schedule-milestone').getByText('順序衝突').waitFor({ timeout: 15000 });
+  await schedulePanel.locator('.gantt-row').getByText('⚠️').waitFor({ timeout: 15000 });
+
+  // 恢復目標為 2026-10-18，解除順序衝突
+  await schedulePanel.locator('li.schedule-milestone').getByRole('button', { name: '編輯' }).click();
+  await schedulePanel.getByLabel('最新目標').fill('2026-10-18');
+  await schedulePanel.getByLabel('修改原因', { exact: true }).fill('改期至可行日期');
+  await schedulePanel.getByRole('button', { name: '儲存時程' }).click();
+  await schedulePanel.getByRole('heading', { name: '新增交付項目' }).waitFor({ timeout: 15000 });
+  assert.equal(await schedulePanel.locator('li.schedule-milestone').getByText('順序衝突').count(), 0);
+
+
   // 達成：標記已達成，未填實際達成日不可儲存，填妥後儲存
   await schedulePanel.locator('li.schedule-milestone').getByRole('button', { name: '編輯' }).click();
   await schedulePanel.getByLabel('狀態').selectOption('achieved');
@@ -265,6 +291,7 @@ try {
   const pubMilestoneText = await page.locator('li.schedule-milestone').first().textContent();
   assert.ok(!pubMilestoneText.includes('–'), 'publication milestone must not display date range');
   assert.ok(pubMilestoneText.includes('實際達成 2026-10-18'), 'publication milestone should display actual date');
+  assert.ok(pubMilestoneText.includes('前置：驗收階段'), 'publication milestone should display predecessor chip');
   assert.equal(await page.getByRole('heading', { name: '交接維運系統', exact: true }).count(), 1);
   await page.getByText('完成簽收').waitFor({ timeout: 15000 });
   await page.getByRole('link', { name: '來源' }).waitFor({ timeout: 15000 });

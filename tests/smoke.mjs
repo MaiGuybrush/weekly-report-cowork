@@ -344,6 +344,143 @@ try {
   assert.equal(milestoneHistory.body.at(-1).before.actualDate, '2026-10-20');
   assert.equal(milestoneHistory.body.at(-1).after.actualDate, null);
 
+  // Issue #4: Internal Predecessors and Warnings
+  const prepDraft = { kind: 'task', name: 'Prep Work', baselineStart: '2026-10-01', baselineEnd: '2026-10-05', forecastStart: '2026-10-01', forecastEnd: '2026-10-05', state: 'open', owner: 'Dev Team' };
+  const prepTaskRes = await call(taskPath, 'H1', 'POST', { ...prepDraft, token: scheduleLease.body.token, baseProjectVersion: milestoneProjectVersion });
+  assert.equal(prepTaskRes.status, 201);
+  milestoneProjectVersion = prepTaskRes.body.projectVersion;
+  const prepTaskId = prepTaskRes.body.id;
+
+  const coreDraft = { kind: 'task', name: 'Core Engine', baselineStart: '2026-10-06', baselineEnd: '2026-10-15', forecastStart: '2026-10-06', forecastEnd: '2026-10-15', state: 'open', owner: 'Core Team' };
+  const coreTaskRes = await call(taskPath, 'H1', 'POST', { ...coreDraft, token: scheduleLease.body.token, baseProjectVersion: milestoneProjectVersion });
+  assert.equal(coreTaskRes.status, 201);
+  milestoneProjectVersion = coreTaskRes.body.projectVersion;
+  const coreTaskId = coreTaskRes.body.id;
+
+  const depPath = `/api/items/${scheduleId}/schedule/dependencies`;
+  // Validation: self dependency
+  assert.equal((await call(depPath, 'H1', 'POST', { predecessorId: prepTaskId, successorId: prepTaskId, reason: 'Self link', token: scheduleLease.body.token, baseProjectVersion: milestoneProjectVersion })).status, 400);
+
+  // Validation: cross-project dependency
+  assert.equal((await call(depPath, 'H1', 'POST', { predecessorId: foreignPhase.body.id, successorId: coreTaskId, reason: 'Cross project link', token: scheduleLease.body.token, baseProjectVersion: milestoneProjectVersion })).status, 400);
+
+  // Validation: phase and direct subtask cannot be linked
+  assert.equal((await call(depPath, 'H1', 'POST', { predecessorId: phase.body.id, successorId: directTask.body.id, reason: 'Direct task link', token: scheduleLease.body.token, baseProjectVersion: milestoneProjectVersion })).status, 400);
+  assert.equal((await call(depPath, 'H1', 'POST', { predecessorId: directTask.body.id, successorId: phase.body.id, reason: 'Direct task reverse link', token: scheduleLease.body.token, baseProjectVersion: milestoneProjectVersion })).status, 400);
+
+  // Validation: reason required
+  assert.equal((await call(depPath, 'H1', 'POST', { predecessorId: prepTaskId, successorId: coreTaskId, reason: '  ', token: scheduleLease.body.token, baseProjectVersion: milestoneProjectVersion })).status, 400);
+
+  // Validation: authorization
+  assert.equal((await call(depPath, 'H2', 'POST', { predecessorId: prepTaskId, successorId: coreTaskId, reason: 'Unauthorized', token: scheduleLease.body.token, baseProjectVersion: milestoneProjectVersion })).status, 403);
+
+  // Valid link: prepTask -> coreTask
+  const link1 = await call(depPath, 'H1', 'POST', { predecessorId: prepTaskId, successorId: coreTaskId, reason: 'Core engine depends on prep work', token: scheduleLease.body.token, baseProjectVersion: milestoneProjectVersion });
+  assert.equal(link1.status, 201);
+  milestoneProjectVersion = link1.body.projectVersion;
+
+  // Check predecessors and successors in schedule entries
+  let currentEntries = (await call(taskPath, 'H1')).body;
+  let coreEntry = currentEntries.find(e => e.id === coreTaskId);
+  let prepEntry = currentEntries.find(e => e.id === prepTaskId);
+  assert.equal(coreEntry.predecessors.length, 1);
+  assert.equal(coreEntry.predecessors[0].id, prepTaskId);
+  assert.equal(prepEntry.successors.length, 1);
+  assert.equal(prepEntry.successors[0].id, coreTaskId);
+
+  // Traceable revisions on both sides
+  const prepHist = await call(`${taskPath}/${prepTaskId}/history`, 'H1');
+  const coreHist = await call(`${taskPath}/${coreTaskId}/history`, 'H1');
+  assert.equal(prepHist.body.some(h => h.action === 'link-dependency' && h.reason.includes('Core engine')), true);
+  assert.equal(coreHist.body.some(h => h.action === 'link-dependency' && h.reason.includes('Prep Work')), true);
+
+  // Valid link 2: coreTask -> milestone
+  const link2 = await call(depPath, 'H1', 'POST', { predecessorId: coreTaskId, successorId: milestone.body.id, reason: 'Design review follows core engine', token: scheduleLease.body.token, baseProjectVersion: milestoneProjectVersion });
+  assert.equal(link2.status, 201);
+  milestoneProjectVersion = link2.body.projectVersion;
+
+  // Cycle detection: direct cycle coreTask -> prepTask
+  assert.equal((await call(depPath, 'H1', 'POST', { predecessorId: coreTaskId, successorId: prepTaskId, reason: 'Direct cycle', token: scheduleLease.body.token, baseProjectVersion: milestoneProjectVersion })).status, 400);
+
+  // Cycle detection: transitive cycle milestone -> prepTask
+  assert.equal((await call(depPath, 'H1', 'POST', { predecessorId: milestone.body.id, successorId: prepTaskId, reason: 'Indirect cycle', token: scheduleLease.body.token, baseProjectVersion: milestoneProjectVersion })).status, 400);
+
+  // Timing & Warnings:
+  // prepTask: forecastEnd 10-05, coreTask: forecastStart 10-06 -> feasible, no conflict
+  currentEntries = (await call(taskPath, 'H1')).body;
+  coreEntry = currentEntries.find(e => e.id === coreTaskId);
+  assert.deepEqual(coreEntry.warnings, []);
+
+  // Same day completion and start is feasible:
+  const prepSameDay = await call(`${taskPath}/${prepTaskId}`, 'H1', 'PUT', { kind: 'task', name: 'Prep Work', baselineStart: '2026-10-01', baselineEnd: '2026-10-05', forecastStart: '2026-10-01', forecastEnd: '2026-10-06', state: 'open', owner: 'Dev Team', reason: 'Slip by one day to same day', token: scheduleLease.body.token, baseVersion: 1, baseProjectVersion: milestoneProjectVersion });
+  assert.equal(prepSameDay.status, 200);
+  milestoneProjectVersion = prepSameDay.body.projectVersion;
+  currentEntries = (await call(taskPath, 'H1')).body;
+  coreEntry = currentEntries.find(e => e.id === coreTaskId);
+  assert.deepEqual(coreEntry.warnings, []);
+
+  // Predecessor forecast finishes later than successor forecast start (10-08 > 10-06) -> Sequence conflict
+  const prepSlip = await call(`${taskPath}/${prepTaskId}`, 'H1', 'PUT', { kind: 'task', name: 'Prep Work', baselineStart: '2026-10-01', baselineEnd: '2026-10-05', forecastStart: '2026-10-01', forecastEnd: '2026-10-08', state: 'open', owner: 'Dev Team', reason: 'Prep delayed due to dependency', token: scheduleLease.body.token, baseVersion: 2, baseProjectVersion: milestoneProjectVersion });
+  assert.equal(prepSlip.status, 200);
+  milestoneProjectVersion = prepSlip.body.projectVersion;
+  currentEntries = (await call(taskPath, 'H1')).body;
+  coreEntry = currentEntries.find(e => e.id === coreTaskId);
+  assert.equal(coreEntry.warnings.length, 1);
+  assert.equal(coreEntry.warnings[0].type, 'conflict');
+
+  // Successor notified of predecessor plan change
+  const coreHistAfterSlip = await call(`${taskPath}/${coreTaskId}/history`, 'H1');
+  assert.equal(coreHistAfterSlip.body.some(h => h.action === 'predecessor-updated' && h.reason.includes('Prep delayed')), true);
+
+  // Premature start and active warning:
+  // Core task starts early on 2026-10-04 while prepTask is not finished.
+  // Warning does NOT block progress:
+  const coreStart = await call(`${taskPath}/${coreTaskId}`, 'H1', 'PUT', { kind: 'task', name: 'Core Engine', baselineStart: '2026-10-06', baselineEnd: '2026-10-15', forecastStart: '2026-10-06', forecastEnd: '2026-10-15', actualStart: '2026-10-04', state: 'in-progress', owner: 'Core Team', reason: 'Start early with mock data', token: scheduleLease.body.token, baseVersion: 1, baseProjectVersion: milestoneProjectVersion });
+  assert.equal(coreStart.status, 200);
+  milestoneProjectVersion = coreStart.body.projectVersion;
+  currentEntries = (await call(taskPath, 'H1')).body;
+  coreEntry = currentEntries.find(e => e.id === coreTaskId);
+  assert.equal(coreEntry.warnings.some(w => w.type === 'active-warning'), true);
+  assert.equal(coreEntry.warnings.some(w => w.type === 'conflict'), true);
+
+  // Predecessor finishes (actualEnd: 2026-10-07, completed):
+  // Clears active-warning, but preserves historical conflict (10-07 > 10-04)
+  const prepComplete = await call(`${taskPath}/${prepTaskId}`, 'H1', 'PUT', { kind: 'task', name: 'Prep Work', baselineStart: '2026-10-01', baselineEnd: '2026-10-05', forecastStart: '2026-10-01', forecastEnd: '2026-10-08', actualStart: '2026-10-01', actualEnd: '2026-10-07', state: 'completed', owner: 'Dev Team', reason: 'Prep work finished', token: scheduleLease.body.token, baseVersion: 3, baseProjectVersion: milestoneProjectVersion });
+  assert.equal(prepComplete.status, 200);
+  milestoneProjectVersion = prepComplete.body.projectVersion;
+  currentEntries = (await call(taskPath, 'H1')).body;
+  coreEntry = currentEntries.find(e => e.id === coreTaskId);
+  assert.equal(coreEntry.warnings.some(w => w.type === 'active-warning'), false);
+  assert.equal(coreEntry.warnings.some(w => w.type === 'conflict'), true);
+
+  // Documented date correction clears historical conflict:
+  // Correct core task actualStart to 2026-10-07
+  const coreCorrected = await call(`${taskPath}/${coreTaskId}`, 'H1', 'PUT', { kind: 'task', name: 'Core Engine', baselineStart: '2026-10-06', baselineEnd: '2026-10-15', forecastStart: '2026-10-06', forecastEnd: '2026-10-15', actualStart: '2026-10-07', state: 'in-progress', owner: 'Core Team', reason: 'Corrected actual start date to formal handoff', token: scheduleLease.body.token, baseVersion: 2, baseProjectVersion: milestoneProjectVersion });
+  assert.equal(coreCorrected.status, 200);
+  milestoneProjectVersion = coreCorrected.body.projectVersion;
+  currentEntries = (await call(taskPath, 'H1')).body;
+  coreEntry = currentEntries.find(e => e.id === coreTaskId);
+  assert.deepEqual(coreEntry.warnings, []);
+
+  // Remove link:
+  // Missing reason fails
+  assert.equal((await call(`${depPath}/delete`, 'H1', 'POST', { predecessorId: prepTaskId, successorId: coreTaskId, reason: '', token: scheduleLease.body.token, baseProjectVersion: milestoneProjectVersion })).status, 400);
+
+  // Successful link removal
+  const removeDep = await call(`${depPath}/delete`, 'H1', 'POST', { predecessorId: prepTaskId, successorId: coreTaskId, reason: 'Decoupled prep work dependency', token: scheduleLease.body.token, baseProjectVersion: milestoneProjectVersion });
+  assert.equal(removeDep.status, 200);
+  milestoneProjectVersion = removeDep.body.projectVersion;
+
+  currentEntries = (await call(taskPath, 'H1')).body;
+  coreEntry = currentEntries.find(e => e.id === coreTaskId);
+  assert.deepEqual(coreEntry.predecessors, []);
+  assert.deepEqual(coreEntry.warnings, []);
+
+  // History is preserved after removal
+  const coreHistAfterRemove = await call(`${taskPath}/${coreTaskId}/history`, 'H1');
+  assert.equal(coreHistAfterRemove.body.some(h => h.action === 'unlink-dependency' && h.reason.includes('Decoupled')), true);
+
+
   assert.equal((await call(`/api/items/${id}/project-participants`, 'H2', 'POST', { section: 's2' })).status, 403);
   assert.equal((await call(`/api/items/${id}/project-participants`, 'H1', 'POST', { section: 's2' })).status, 204);
   assert.equal((await call(`/api/items/${id}/project-work`, 'H3')).status, 403);

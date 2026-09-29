@@ -505,6 +505,7 @@ app.MapPut("/api/items/{itemId}/schedule/{entryId}", (HttpContext ctx, Store sto
         Store.Sql(db, "UPDATE project_schedule_entries SET name=$name,baseline_date=$baselineDate,forecast_date=$forecastDate,actual_date=$actualDate,state=$state,version=version+1,updated_at=$at WHERE id=$id AND version=$version",
             ("$name", request.Name!.Trim()), ("$baselineDate", request.BaselineDate), ("$forecastDate", request.ForecastDate), ("$actualDate", request.ActualDate), ("$state", request.State), ("$at", at), ("$id", entryId), ("$version", current.Version)).ExecuteNonQuery();
         SaveScheduleRevision(db, entryId, Current(ctx).EmpNo, at, request.Action ?? "update", request.Reason!.Trim(), current, ScheduleEntry(db, entryId)!);
+        NotifySuccessorsOfPredecessorChange(db, itemId, entryId, Current(ctx).EmpNo, at, request.Reason!.Trim());
         AdvanceProjectVersion(db, item);
         tx.Commit();
         return Results.Ok(new { version = current.Version + 1, projectVersion = item.Version + 1 });
@@ -534,9 +535,71 @@ app.MapPut("/api/items/{itemId}/schedule/{entryId}", (HttpContext ctx, Store sto
     Store.Sql(db, "UPDATE project_schedule_entries SET name=$name,baseline_start=$baselineStart,baseline_end=$baselineEnd,forecast_start=$forecastStart,forecast_end=$forecastEnd,actual_start=$actualStart,actual_end=$actualEnd,state=$state,owner=$owner,phase_id=$phase,version=version+1,updated_at=$at WHERE id=$id AND version=$version",
         ("$name", request.Name!.Trim()), ("$baselineStart", request.BaselineStart), ("$baselineEnd", request.BaselineEnd), ("$forecastStart", request.ForecastStart), ("$forecastEnd", request.ForecastEnd), ("$actualStart", request.ActualStart), ("$actualEnd", request.ActualEnd), ("$state", request.State), ("$owner", request.Kind == "task" ? request.Owner!.Trim() : null), ("$phase", request.PhaseId), ("$at", atPhaseTask), ("$id", entryId), ("$version", current.Version)).ExecuteNonQuery();
     SaveScheduleRevision(db, entryId, Current(ctx).EmpNo, atPhaseTask, request.Action ?? "update", request.Reason!.Trim(), current, ScheduleEntry(db, entryId)!);
+    NotifySuccessorsOfPredecessorChange(db, itemId, entryId, Current(ctx).EmpNo, atPhaseTask, request.Reason!.Trim());
     AdvanceProjectVersion(db, item);
     tx.Commit();
     return Results.Ok(new { version = current.Version + 1, projectVersion = item.Version + 1 });
+});
+app.MapPost("/api/items/{itemId}/schedule/dependencies", (HttpContext ctx, Store store, string itemId, ScheduleDependencyRequest request) =>
+{
+    using var db = store.Open();
+    using var tx = db.BeginTransaction();
+    var item = GetItem(db, itemId);
+    if (item is null) return Results.NotFound();
+    if (item.Section != "projects" || !CanMaintainProject(Current(ctx), item)) return Results.StatusCode(403);
+    if (item.Version == 0) return Results.BadRequest(new { error = "commit the project item before linking dependencies" });
+    var conflict = ScheduleWriteConflict(db, item, Current(ctx), new ScheduleRequest(null, null, null, null, null, null, null, null, null, null, null, null, null, request.Token, request.BaseProjectVersion, null, null, null));
+    if (conflict is not null) return conflict;
+
+    if (string.IsNullOrWhiteSpace(request.PredecessorId) || string.IsNullOrWhiteSpace(request.SuccessorId))
+        return Results.BadRequest(new { error = "predecessor and successor required" });
+    if (string.IsNullOrWhiteSpace(request.Reason))
+        return Results.BadRequest(new { error = "reason required" });
+
+    if (request.PredecessorId == request.SuccessorId)
+        return Results.BadRequest(new { error = "self dependency not allowed" });
+
+    var pred = ScheduleEntry(db, request.PredecessorId);
+    var succ = ScheduleEntry(db, request.SuccessorId);
+    if (pred is null || succ is null || pred.ProjectId != itemId || succ.ProjectId != itemId)
+        return Results.BadRequest(new { error = "cross project or non-existent dependency" });
+
+    if ((pred.Kind == "phase" && succ.Kind == "task" && succ.PhaseId == pred.Id) ||
+        (succ.Kind == "phase" && pred.Kind == "task" && pred.PhaseId == succ.Id))
+    {
+        return Results.BadRequest(new { error = "phase and direct subtask cannot be linked" });
+    }
+
+    if (HasDependencyCycle(db, itemId, request.PredecessorId, request.SuccessorId))
+    {
+        return Results.BadRequest(new { error = "dependency cycle detected" });
+    }
+
+    var exists = Store.Sql(db, "SELECT 1 FROM project_schedule_dependencies WHERE predecessor_id=$p AND successor_id=$s", ("$p", request.PredecessorId), ("$s", request.SuccessorId)).ExecuteScalar() is not null;
+    if (exists) return Results.BadRequest(new { error = "dependency already exists" });
+
+    var depId = Guid.NewGuid().ToString();
+    var at = DateTimeOffset.UtcNow.ToString("O");
+    var actor = Current(ctx).EmpNo;
+    var reason = request.Reason.Trim();
+
+    Store.Sql(db, "INSERT INTO project_schedule_dependencies(id,project_id,predecessor_id,successor_id,created_by,created_at,reason) VALUES($id,$project,$p,$s,$actor,$at,$reason)",
+        ("$id", depId), ("$project", itemId), ("$p", request.PredecessorId), ("$s", request.SuccessorId), ("$actor", actor), ("$at", at), ("$reason", reason)).ExecuteNonQuery();
+
+    SaveScheduleRevision(db, request.PredecessorId, actor, at, "link-dependency", $"關聯後續項目「{succ.Name}」：{reason}", pred, pred);
+    SaveScheduleRevision(db, request.SuccessorId, actor, at, "link-dependency", $"建立前置項目「{pred.Name}」：{reason}", succ, succ);
+
+    AdvanceProjectVersion(db, item);
+    tx.Commit();
+    return Results.Created($"/api/items/{itemId}/schedule/dependencies/{depId}", new { id = depId, projectVersion = item.Version + 1 });
+});
+app.MapPost("/api/items/{itemId}/schedule/dependencies/delete", (HttpContext ctx, Store store, string itemId, ScheduleDependencyRequest request) =>
+{
+    return RemoveDependency(ctx, store, itemId, request.PredecessorId, request.SuccessorId, request.Reason, request.Token, request.BaseProjectVersion);
+});
+app.MapDelete("/api/items/{itemId}/schedule/dependencies/{predecessorId}/{successorId}", (HttpContext ctx, Store store, string itemId, string predecessorId, string successorId, [Microsoft.AspNetCore.Mvc.FromQuery] string? reason, [Microsoft.AspNetCore.Mvc.FromQuery] string? token, [Microsoft.AspNetCore.Mvc.FromQuery] int? baseProjectVersion) =>
+{
+    return RemoveDependency(ctx, store, itemId, predecessorId, successorId, reason, token, baseProjectVersion);
 });
 app.MapGet("/api/items/{itemId}/schedule/{entryId}/baseline-history", (HttpContext ctx, Store store, string itemId, string entryId) =>
 {
@@ -843,12 +906,151 @@ static FieldOrigin? GetFieldOrigin(SqliteConnection db, string itemId)
 static void UpsertFieldOrigin(SqliteConnection db, string itemId, string? lastSourceValue, string latestSourceValue, string reportValue, bool humanOverride) =>
     Store.Sql(db, "INSERT INTO field_origins(item_id,field_name,last_source_value,latest_source_value,report_value,human_override,edited_at) VALUES($item,'content',$last,$latest,$report,$override,$at) ON CONFLICT(item_id,field_name) DO UPDATE SET last_source_value=excluded.last_source_value,latest_source_value=excluded.latest_source_value,report_value=excluded.report_value,human_override=excluded.human_override,edited_at=excluded.edited_at",
         ("$item", itemId), ("$last", lastSourceValue), ("$latest", latestSourceValue), ("$report", reportValue), ("$override", humanOverride ? 1 : 0), ("$at", DateTimeOffset.UtcNow.ToString("O"))).ExecuteNonQuery();
+static bool HasDependencyCycle(SqliteConnection db, string projectId, string predecessorId, string successorId)
+{
+    if (predecessorId == successorId) return true;
+    var adj = new Dictionary<string, List<string>>();
+    using var rows = Store.Sql(db, "SELECT predecessor_id, successor_id FROM project_schedule_dependencies WHERE project_id=$project", ("$project", projectId)).ExecuteReader();
+    while (rows.Read())
+    {
+        var p = rows.GetString(0);
+        var s = rows.GetString(1);
+        if (!adj.TryGetValue(p, out var list)) adj[p] = list = [];
+        list.Add(s);
+    }
+    var queue = new Queue<string>();
+    var visited = new HashSet<string>();
+    queue.Enqueue(successorId);
+    visited.Add(successorId);
+    while (queue.Count > 0)
+    {
+        var curr = queue.Dequeue();
+        if (curr == predecessorId) return true;
+        if (adj.TryGetValue(curr, out var nexts))
+        {
+            foreach (var n in nexts)
+            {
+                if (visited.Add(n)) queue.Enqueue(n);
+            }
+        }
+    }
+    return false;
+}
+static void NotifySuccessorsOfPredecessorChange(SqliteConnection db, string itemId, string entryId, string actor, string at, string reason)
+{
+    var current = ScheduleEntry(db, entryId);
+    if (current is null) return;
+    var succIds = new List<string>();
+    using (var succRows = Store.Sql(db, "SELECT successor_id FROM project_schedule_dependencies WHERE predecessor_id=$id", ("$id", entryId)).ExecuteReader())
+    {
+        while (succRows.Read()) succIds.Add(succRows.GetString(0));
+    }
+    foreach (var sId in succIds)
+    {
+        var succEntry = ScheduleEntry(db, sId);
+        if (succEntry != null)
+        {
+            SaveScheduleRevision(db, sId, actor, at, "predecessor-updated", $"前置項目「{current.Name}」計畫變動：{reason}", succEntry, succEntry);
+        }
+    }
+}
+static IResult RemoveDependency(HttpContext ctx, Store store, string itemId, string? predecessorId, string? successorId, string? reason, string? token, int? baseProjectVersion)
+{
+    using var db = store.Open();
+    using var tx = db.BeginTransaction();
+    var item = GetItem(db, itemId);
+    if (item is null) return Results.NotFound();
+    if (item.Section != "projects" || !CanMaintainProject(Current(ctx), item)) return Results.StatusCode(403);
+    var conflict = ScheduleWriteConflict(db, item, Current(ctx), new ScheduleRequest(null, null, null, null, null, null, null, null, null, null, null, null, null, token, baseProjectVersion, null, null, null));
+    if (conflict is not null) return conflict;
+
+    if (string.IsNullOrWhiteSpace(predecessorId) || string.IsNullOrWhiteSpace(successorId))
+        return Results.BadRequest(new { error = "predecessor and successor required" });
+    if (string.IsNullOrWhiteSpace(reason))
+        return Results.BadRequest(new { error = "reason required" });
+
+    var exists = Store.Sql(db, "SELECT 1 FROM project_schedule_dependencies WHERE project_id=$project AND predecessor_id=$p AND successor_id=$s", ("$project", itemId), ("$p", predecessorId), ("$s", successorId)).ExecuteScalar() is not null;
+    if (!exists) return Results.NotFound();
+
+    var pred = ScheduleEntry(db, predecessorId);
+    var succ = ScheduleEntry(db, successorId);
+    if (pred is null || succ is null) return Results.NotFound();
+
+    Store.Sql(db, "DELETE FROM project_schedule_dependencies WHERE project_id=$project AND predecessor_id=$p AND successor_id=$s", ("$project", itemId), ("$p", predecessorId), ("$s", successorId)).ExecuteNonQuery();
+
+    var at = DateTimeOffset.UtcNow.ToString("O");
+    var actor = Current(ctx).EmpNo;
+    var trimmedReason = reason.Trim();
+
+    SaveScheduleRevision(db, predecessorId, actor, at, "unlink-dependency", $"解除後續項目「{succ.Name}」關聯：{trimmedReason}", pred, pred);
+    SaveScheduleRevision(db, successorId, actor, at, "unlink-dependency", $"移除前置項目「{pred.Name}」：{trimmedReason}", succ, succ);
+
+    AdvanceProjectVersion(db, item);
+    tx.Commit();
+    return Results.Ok(new { projectVersion = item.Version + 1 });
+}
 static List<ScheduleEntry> ScheduleEntries(SqliteConnection db, string itemId)
 {
     using var rows = Store.Sql(db, "SELECT id,project_id,kind,name,baseline_start,baseline_end,forecast_start,forecast_end,actual_start,actual_end,version,state,owner,phase_id,baseline_date,forecast_date,actual_date FROM project_schedule_entries WHERE project_id=$project ORDER BY rowid", ("$project", itemId)).ExecuteReader();
-    var entries = new List<ScheduleEntry>();
-    while (rows.Read()) entries.Add(new ScheduleEntry(rows.GetString(0), rows.GetString(1), rows.GetString(2), rows.GetString(3), NullableString(rows, 4), NullableString(rows, 5), NullableString(rows, 6), NullableString(rows, 7), NullableString(rows, 8), NullableString(rows, 9), rows.GetInt32(10), rows.GetString(11), NullableString(rows, 12), NullableString(rows, 13), null, NullableString(rows, 14), NullableString(rows, 15), NullableString(rows, 16)));
-    return entries.Select(entry => entry.Kind == "phase" ? entry with { UnfinishedTasks = entries.Where(task => task.Kind == "task" && task.PhaseId == entry.Id && task.State != "completed").Select(task => task.Name).ToList() } : entry).ToList();
+    var rawEntries = new List<ScheduleEntry>();
+    while (rows.Read())
+        rawEntries.Add(new ScheduleEntry(rows.GetString(0), rows.GetString(1), rows.GetString(2), rows.GetString(3), NullableString(rows, 4), NullableString(rows, 5), NullableString(rows, 6), NullableString(rows, 7), NullableString(rows, 8), NullableString(rows, 9), rows.GetInt32(10), rows.GetString(11), NullableString(rows, 12), NullableString(rows, 13), null, NullableString(rows, 14), NullableString(rows, 15), NullableString(rows, 16)));
+    rows.Close();
+
+    var links = new List<(string PredecessorId, string SuccessorId)>();
+    using (var depRows = Store.Sql(db, "SELECT predecessor_id, successor_id FROM project_schedule_dependencies WHERE project_id=$project", ("$project", itemId)).ExecuteReader())
+    {
+        while (depRows.Read()) links.Add((depRows.GetString(0), depRows.GetString(1)));
+    }
+
+    var entryDict = rawEntries.ToDictionary(e => e.Id);
+    var predMap = new Dictionary<string, List<DependencyRef>>();
+    var succMap = new Dictionary<string, List<DependencyRef>>();
+    var warningMap = new Dictionary<string, List<DependencyWarning>>();
+
+    foreach (var (pId, sId) in links)
+    {
+        if (!entryDict.TryGetValue(pId, out var p) || !entryDict.TryGetValue(sId, out var s)) continue;
+
+        if (!predMap.TryGetValue(sId, out var pList)) predMap[sId] = pList = [];
+        pList.Add(new DependencyRef(p.Id, p.Name, p.Kind));
+
+        if (!succMap.TryGetValue(pId, out var sList)) succMap[pId] = sList = [];
+        sList.Add(new DependencyRef(s.Id, s.Name, s.Kind));
+
+        if (!warningMap.TryGetValue(sId, out var wList)) warningMap[sId] = wList = [];
+
+        string? pFinish = p.Kind == "milestone" ? (p.ActualDate ?? p.ForecastDate ?? p.BaselineDate) : (p.ActualEnd ?? p.ForecastEnd ?? p.BaselineEnd);
+        string? pActual = p.Kind == "milestone" ? p.ActualDate : p.ActualEnd;
+        bool pCompleted = p.Kind == "milestone" ? (p.ActualDate != null || p.State == "achieved") : (p.ActualEnd != null || p.State == "completed");
+
+        string? sStart = s.Kind == "milestone" ? (s.ActualDate ?? s.ForecastDate ?? s.BaselineDate) : (s.ActualStart ?? s.ForecastStart ?? s.BaselineStart);
+        string? sActual = s.Kind == "milestone" ? s.ActualDate : s.ActualStart;
+        bool sStarted = s.Kind == "milestone" ? (s.ActualDate != null || s.State == "achieved") : (s.ActualStart != null || s.State is "in-progress" or "completed");
+
+        if (sStarted && !pCompleted)
+        {
+            wList.Add(new DependencyWarning("active-warning", $"即時警示：前置項目「{p.Name}」尚未完成，後續項目已搶先開始", p.Id, p.Name));
+        }
+
+        if (pFinish != null && sStart != null && string.Compare(pFinish, sStart, StringComparison.Ordinal) > 0)
+        {
+            var isHistorical = sActual != null || (pActual != null && sStarted);
+            var msg = isHistorical
+                ? $"順序衝突（歷史搶先開始）：前置項目「{p.Name}」完成日 ({pFinish}) 晚於本項開始日 ({sStart})"
+                : $"順序衝突：前置項目「{p.Name}」預計完成日 ({pFinish}) 晚於本項預計開始日 ({sStart})";
+            wList.Add(new DependencyWarning("conflict", msg, p.Id, p.Name));
+        }
+    }
+
+    return rawEntries.Select(entry => entry with {
+        UnfinishedTasks = entry.Kind == "phase"
+            ? rawEntries.Where(task => task.Kind == "task" && task.PhaseId == entry.Id && task.State != "completed").Select(task => task.Name).ToList()
+            : null,
+        Predecessors = predMap.GetValueOrDefault(entry.Id) ?? [],
+        Successors = succMap.GetValueOrDefault(entry.Id) ?? [],
+        Warnings = warningMap.GetValueOrDefault(entry.Id) ?? []
+    }).ToList();
 }
 static ScheduleEntry? ScheduleEntry(SqliteConnection db, string entryId)
 {
@@ -916,9 +1118,12 @@ record ProjectParticipantRequest(string? Section);
 record ProjectWorkRequest(string? Section, string? Work, string? ScheduleProposal, int BaseVersion);
 record SyncMemberResult(string UserId, string Status, int WorkCount, string? LastSuccessAt, string? Error);
 record ScheduleRequest(string? Kind, string? Name, string? BaselineStart, string? BaselineEnd, string? ForecastStart, string? ForecastEnd, string? ActualStart, string? ActualEnd, string? BaselineChangeReason, int? BaseVersion, string? State, string? Reason, string? Action, string? Token, int? BaseProjectVersion, string? Owner, string? PhaseId, bool? AcknowledgeIncompleteTasks, string? TargetDate = null, string? BaselineDate = null, string? ForecastDate = null, string? ActualDate = null);
+record DependencyRef(string Id, string Name, string Kind);
+record DependencyWarning(string Type, string Message, string PredecessorId, string PredecessorName);
+record ScheduleDependencyRequest(string? PredecessorId, string? SuccessorId, string? Reason, string? Token, int? BaseProjectVersion);
 record AccessUserRequest(string EmpNo, string Name, string Role, string? Section, bool? ReaderAccess);
 record PublicationRequest(string? RequestId);
-record ScheduleEntry(string Id, string ProjectId, string Kind, string Name, string? BaselineStart, string? BaselineEnd, string? ForecastStart, string? ForecastEnd, string? ActualStart, string? ActualEnd, int Version, string State = "open", string? Owner = null, string? PhaseId = null, List<string>? UnfinishedTasks = null, string? BaselineDate = null, string? ForecastDate = null, string? ActualDate = null);
+record ScheduleEntry(string Id, string ProjectId, string Kind, string Name, string? BaselineStart, string? BaselineEnd, string? ForecastStart, string? ForecastEnd, string? ActualStart, string? ActualEnd, int Version, string State = "open", string? Owner = null, string? PhaseId = null, List<string>? UnfinishedTasks = null, string? BaselineDate = null, string? ForecastDate = null, string? ActualDate = null, List<DependencyRef>? Predecessors = null, List<DependencyRef>? Successors = null, List<DependencyWarning>? Warnings = null);
 record PublishedItem(string Id, string ContinuityId, string Section, string OwnerSection, string Title, string Content, string Status, int Version, string Details = "{}", List<ScheduleEntry>? Schedule = null);
 record SourceStatus(string Section, string Status, string? PeriodFrom, string? PeriodTo, string? FinishedAt);
 record FieldOrigin(string? LastSourceValue, string LatestSourceValue, string ReportValue, bool HumanOverride);

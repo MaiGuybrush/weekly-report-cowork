@@ -57,6 +57,8 @@ type ProjectWork = {
   updatedBy: string;
   updatedAt: string;
 };
+type DependencyRef = { id: string; name: string; kind: string };
+type DependencyWarning = { type: string; message: string; predecessorId: string; predecessorName: string };
 type ScheduleEntry = {
   id: string;
   kind: "phase" | "task" | "milestone";
@@ -75,6 +77,9 @@ type ScheduleEntry = {
   actualDate?: string | null;
   version: number;
   state: "open" | "in-progress" | "completed" | "cancelled" | "pending" | "achieved";
+  predecessors?: DependencyRef[];
+  successors?: DependencyRef[];
+  warnings?: DependencyWarning[];
 };
 type EcimMember = {
   userId: string;
@@ -567,7 +572,7 @@ export class Home implements OnInit {
                     </p>
                     @for (entry of activeScheduleEntries(); track entry) {
                       <div class="gantt-row" (click)="editSchedule(entry)">
-                        <span>{{ entry.name }}</span>
+                        <span>{{ entry.name }}@if (entry.warnings?.length) { <small class="gantt-warn-icon" [title]="entry.warnings![0].message">⚠️</small> }</span>
                         <div class="gantt-track">
                           @if (entry.kind === 'milestone') {
                             <i
@@ -715,6 +720,27 @@ export class Home implements OnInit {
                         · 完成偏差 {{ scheduleVariance(entry) }}
                         @if (entry.kind === 'phase' && entry.unfinishedTasks?.length) { <div class="schedule-warning">尚有 {{ entry.unfinishedTasks?.length }} 項未完成任務：{{ entry.unfinishedTasks?.join('、') }}。階段須由維護人另行確認。</div> }
                       }
+                      @if (entry.predecessors?.length || entry.successors?.length) {
+                        <div class="schedule-dependencies">
+                          @for (p of entry.predecessors; track p.id) {
+                            <span class="dependency-chip predecessor-chip">前置：{{ p.name }}</span>
+                          }
+                          @for (s of entry.successors; track s.id) {
+                            <span class="dependency-chip successor-chip">後續：{{ s.name }}</span>
+                          }
+                        </div>
+                      }
+                      @if (entry.warnings?.length) {
+                        <div class="schedule-warnings">
+                          @for (w of entry.warnings; track w.message) {
+                            <div class="schedule-warning-pill" [attr.data-type]="w.type">
+                              <span class="warning-icon">{{ w.type === 'active-warning' ? '⚠️' : '⚡' }}</span>
+                              <span>{{ w.message }}</span>
+                            </div>
+                          }
+                          <small class="warning-hint">※ 警示允許例外工作繼續推進，不自動阻擋或更動日期。</small>
+                        </div>
+                      }
                       @if (canMaintain(item)) {
                         <button (click)="editSchedule(entry)">編輯</button>
                       }
@@ -728,7 +754,7 @@ export class Home implements OnInit {
                   <ul class="schedule-history">
                     @for (change of baselineHistory; track change) {
                       <li>
-                        <strong>{{ change.action }}</strong> · {{ change.actor }} · {{ change.at | date: "short" }} · {{ change.reason || "建立" }}
+                        <strong>{{ change.action === 'link-dependency' ? '建立相依關聯' : change.action === 'unlink-dependency' ? '解除相依關聯' : change.action === 'predecessor-updated' ? '前置計畫變動' : change.action }}</strong> · {{ change.actor }} · {{ change.at | date: "short" }} · {{ change.reason || "建立" }}
                         <details><summary>檢視前後狀態</summary><pre>{{ change.before | json }} → {{ change.after | json }}</pre></details>
                       </li>
                     }
@@ -812,6 +838,41 @@ export class Home implements OnInit {
                       <p class="schedule-note">{{ scheduleDraft.kind === 'milestone' ? '一般改期只調整最新目標；原始目標誤植時選擇「更正原始資料」。重開時自動清除實際達成日。' : '一般改期只調整目前計畫；原始日期誤植時選擇「更正原始資料」。重開時請清除實際完成日。' }}</p>
                       @if (editingSchedule.kind === 'phase' && editingSchedule.state !== 'completed' && scheduleDraft.state === 'completed' && editingSchedule.unfinishedTasks?.length) { <label class="schedule-exception"><input type="checkbox" [(ngModel)]="scheduleDraft.acknowledgeIncompleteTasks" />我已檢視未完成任務，並在修改原因中說明提前確認階段的理由。</label> }
                       <label>修改原因 <input [(ngModel)]="scheduleDraft.reason" required /></label>
+
+                      <div class="dependency-panel">
+                        <h5>前置項目管理</h5>
+                        @if (editingSchedule.predecessors?.length) {
+                          <ul class="dep-list">
+                            @for (p of editingSchedule.predecessors; track p.id) {
+                              <li class="dep-list-item">
+                                <span class="dep-badge">[{{ p.kind === 'phase' ? '階段' : p.kind === 'task' ? '任務' : '里程碑' }}]</span>
+                                <strong>{{ p.name }}</strong>
+                                <button type="button" class="btn-remove-link" (click)="removeDependency(p.id)">解除關聯</button>
+                              </li>
+                            }
+                          </ul>
+                        } @else {
+                          <p class="dep-empty">目前未設定前置項目。</p>
+                        }
+                        @if (candidatePredecessors(editingSchedule).length) {
+                          <div class="dep-add-box">
+                            <label>選擇前置項目
+                              <select [(ngModel)]="selectedPredecessorId">
+                                <option value="">請選擇前置項目...</option>
+                                @for (cand of candidatePredecessors(editingSchedule); track cand.id) {
+                                  <option [value]="cand.id">[{{ cand.kind === 'phase' ? '階段' : cand.kind === 'task' ? '任務' : '里程碑' }}] {{ cand.name }}</option>
+                                }
+                              </select>
+                            </label>
+                            <label>關聯原因
+                              <input [(ngModel)]="linkReason" placeholder="例如：需待架構確認後方可進行" />
+                            </label>
+                            <button type="button" class="btn-add-link" (click)="addDependency()" [disabled]="!selectedPredecessorId || !linkReason.trim()">
+                              建立前置關聯
+                            </button>
+                          </div>
+                        }
+                      </div>
                     }
                     <button (click)="saveSchedule()" [disabled]="!token || !scheduleDraft.name.trim() || (scheduleDraft.kind === 'task' && !scheduleDraft.owner.trim()) || (scheduleDraft.kind === 'milestone' && !editingSchedule && !scheduleDraft.targetDate) || (scheduleDraft.kind === 'milestone' && editingSchedule && scheduleDraft.state === 'achieved' && !scheduleDraft.actualDate) || (editingSchedule && !scheduleDraft.reason.trim()) || (editingSchedule?.kind === 'phase' && editingSchedule?.state !== 'completed' && scheduleDraft.state === 'completed' && editingSchedule?.unfinishedTasks?.length && !scheduleDraft.acknowledgeIncompleteTasks)">
                       {{ editingSchedule ? "儲存時程" : "新增時程" }}
@@ -936,6 +997,8 @@ export class ReportEditor implements OnInit, OnDestroy {
   scheduleEntries: ScheduleEntry[] = [];
   editingSchedule: ScheduleEntry | null = null;
   scheduleDraft = this.emptyScheduleDraft();
+  selectedPredecessorId = "";
+  linkReason = "";
   baselineHistory: any[] = [];
   ecimMembers: EcimMember[] = [];
   ecimCandidates: EcimCandidate[] = [];
@@ -1312,6 +1375,8 @@ export class ReportEditor implements OnInit, OnDestroy {
   }
   editSchedule(entry: ScheduleEntry) {
     this.editingSchedule = entry;
+    this.selectedPredecessorId = "";
+    this.linkReason = "";
     this.scheduleDraft = {
       kind: entry.kind,
       name: entry.name,
@@ -1382,6 +1447,71 @@ export class ReportEditor implements OnInit, OnDestroy {
   resetScheduleDraft() {
     this.editingSchedule = null;
     this.scheduleDraft = this.emptyScheduleDraft();
+    this.selectedPredecessorId = "";
+    this.linkReason = "";
+    this.changes.detectChanges();
+  }
+  candidatePredecessors(entry: ScheduleEntry) {
+    const existing = new Set(entry.predecessors?.map((p) => p.id) ?? []);
+    return this.scheduleEntries.filter((e) => {
+      if (e.id === entry.id || existing.has(e.id)) return false;
+      if (entry.kind === "phase" && e.kind === "task" && e.phaseId === entry.id) return false;
+      if (entry.kind === "task" && entry.phaseId && e.id === entry.phaseId) return false;
+      return true;
+    });
+  }
+  async addDependency() {
+    if (!this.selected || !this.editingSchedule || !this.selectedPredecessorId || !this.linkReason.trim()) return;
+    try {
+      const result = (await firstValueFrom(
+        this.http.post(`/api/items/${this.selected.id}/schedule/dependencies`, {
+          predecessorId: this.selectedPredecessorId,
+          successorId: this.editingSchedule.id,
+          reason: this.linkReason.trim(),
+          token: this.token,
+          baseProjectVersion: this.baseVersion,
+        }),
+      )) as { projectVersion: number };
+      this.baseVersion = result.projectVersion;
+      await this.loadSchedule();
+      this.editingSchedule = this.scheduleEntries.find((e) => e.id === this.editingSchedule?.id) ?? null;
+      this.selectedPredecessorId = "";
+      this.linkReason = "";
+      this.message = "已建立前置關聯。";
+    } catch (error: any) {
+      if (error.status === 409) {
+        this.conflict = error.error;
+        if (error.error?.latest?.schedule) this.scheduleEntries = error.error.latest.schedule;
+      }
+      this.message = error.error?.error || "無法建立前置關聯。";
+    }
+    this.changes.detectChanges();
+  }
+  async removeDependency(predecessorId: string) {
+    if (!this.selected || !this.editingSchedule) return;
+    const reason = prompt("請輸入解除前置關聯的原因：")?.trim();
+    if (!reason) return;
+    try {
+      const result = (await firstValueFrom(
+        this.http.post(`/api/items/${this.selected.id}/schedule/dependencies/delete`, {
+          predecessorId,
+          successorId: this.editingSchedule.id,
+          reason,
+          token: this.token,
+          baseProjectVersion: this.baseVersion,
+        }),
+      )) as { projectVersion: number };
+      this.baseVersion = result.projectVersion;
+      await this.loadSchedule();
+      this.editingSchedule = this.scheduleEntries.find((e) => e.id === this.editingSchedule?.id) ?? null;
+      this.message = "已解除前置關聯。";
+    } catch (error: any) {
+      if (error.status === 409) {
+        this.conflict = error.error;
+        if (error.error?.latest?.schedule) this.scheduleEntries = error.error.latest.schedule;
+      }
+      this.message = error.error?.error || "無法解除前置關聯。";
+    }
     this.changes.detectChanges();
   }
   async saveSchedule() {
@@ -1692,7 +1822,7 @@ export class ReportEditor implements OnInit, OnDestroy {
                     <p><strong>專案甘特圖</strong>（基準／預估／實際）</p>
                     @for (entry of publicationPhases(item.schedule || []); track entry.id) {
                       <div class="gantt-row">
-                        <span>{{ entry.name }}</span>
+                        <span>{{ entry.name }}@if (entry.warnings?.length) { <small class="gantt-warn-icon" [title]="entry.warnings![0].message">⚠️</small> }</span>
                         <div class="gantt-track">
                           @if (entry.kind === 'milestone') {
                             <i
@@ -1792,6 +1922,26 @@ export class ReportEditor implements OnInit, OnDestroy {
                           · 實際 {{ entry.actualStart || "—" }}–{{
                             entry.actualEnd || "—"
                           }}
+                        }
+                        @if (entry.predecessors?.length || entry.successors?.length) {
+                          <div class="schedule-dependencies">
+                            @for (p of entry.predecessors; track p.id) {
+                              <span class="dependency-chip predecessor-chip">前置：{{ p.name }}</span>
+                            }
+                            @for (s of entry.successors; track s.id) {
+                              <span class="dependency-chip successor-chip">後續：{{ s.name }}</span>
+                            }
+                          </div>
+                        }
+                        @if (entry.warnings?.length) {
+                          <div class="schedule-warnings">
+                            @for (w of entry.warnings; track w.message) {
+                              <div class="schedule-warning-pill" [attr.data-type]="w.type">
+                                <span class="warning-icon">{{ w.type === 'active-warning' ? '⚠️' : '⚡' }}</span>
+                                <span>{{ w.message }}</span>
+                              </div>
+                            }
+                          </div>
                         }
                       </li>
                     }
