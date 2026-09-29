@@ -276,5 +276,57 @@ label { display: block; margin: 1rem 0; } input, textarea { display: block; box-
 .btn-danger { background: #dc2626; color: white; border: none; padding: .45rem .95rem; font-size: .84rem; font-weight: 600; border-radius: 6px; }
 .btn-danger:hover { background: #b91c1c; }
 
+/* Issue #8: Publication Enhancements & Frontend-Design */
+.publication-header-bar { display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 1rem; margin-bottom: .5rem; }
+.publication-title-group { display: flex; align-items: baseline; gap: .75rem; flex-wrap: wrap; }
+.publication-badge { display: inline-flex; align-items: center; gap: .35rem; background: #e0f2fe; color: #0284c7; border: 1px solid #bae6fd; font-size: .78rem; font-weight: 700; padding: .2rem .55rem; border-radius: 99px; letter-spacing: .02em; }
+.publication-actions { display: flex; gap: .5rem; }
+.btn-print-pub { background: #0284c7; color: white; border: none; border-radius: 6px; padding: .4rem .85rem; font-size: .84rem; font-weight: 600; display: inline-flex; align-items: center; gap: .35rem; transition: background .15s; }
+.btn-print-pub:hover { background: #0369a1; }
+
+.schedule-header-actions { display: inline-flex; align-items: center; gap: .4rem; margin-left: .5rem; }
+.btn-history-inspect { background: #f8fafc; color: #475569; border: 1px solid #cbd5e1; border-radius: 5px; font-size: .75rem; padding: .15rem .5rem; cursor: pointer; transition: all .15s; line-height: 1.4; vertical-align: middle; }
+.btn-history-inspect:hover { background: #f1f5f9; color: #0f172a; border-color: #94a3b8; }
+
+.publication-frozen-badge { display: inline-flex; align-items: center; font-size: .7rem; color: #854d0e; background: #fef9c3; border: 1px solid #fef08a; border-radius: 4px; padding: .08rem .4rem; margin-left: .4rem; font-weight: 600; }
+
+.pub-ext-deps-section { margin-top: 1.25rem; background: #faf5ff; border: 1px solid #e9d5ff; border-radius: 10px; padding: 1rem 1.25rem; }
+.pub-ext-deps-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: .8rem; border-bottom: 1px solid #f3e8ff; padding-bottom: .5rem; }
+.pub-ext-deps-header h4 { margin: 0; font-size: 1rem; color: #581c87; font-family: 'Noto Serif TC', serif; }
+.pub-ext-dep-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: .8rem; }
+.pub-ext-dep-card { background: white; border: 1px solid #e9d5ff; border-radius: 8px; padding: .8rem; box-shadow: 0 1px 3px rgba(147, 51, 234, 0.05); display: flex; flex-direction: column; gap: .4rem; }
+.pub-ext-dep-top { display: flex; justify-content: space-between; align-items: flex-start; gap: .5rem; }
+.pub-ext-dep-desc { font-weight: 600; font-size: .9rem; color: #1e1b4b; }
+.pub-ext-dep-meta { font-size: .78rem; color: #64748b; line-height: 1.4; }
+.pub-ext-dep-links { display: flex; flex-wrap: wrap; gap: .3rem; margin-top: .2rem; }
+.pub-ext-link-tag { font-size: .72rem; background: #f3e8ff; color: #6b21a8; padding: .1rem .4rem; border-radius: 4px; }
+
+/* History Timeline Modal */
+.history-modal-backdrop { position: fixed; inset: 0; background: rgba(15, 23, 42, 0.5); backdrop-filter: blur(2px); display: flex; align-items: center; justify-content: center; z-index: 1050; }
+.history-modal { background: white; border-radius: 12px; width: 92%; max-width: 620px; max-height: 85vh; display: flex; flex-direction: column; box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.15), 0 10px 10px -5px rgba(0, 0, 0, 0.04); overflow: hidden; border: 1px solid #e2e8f0; animation: modalPop .15s ease-out; }
+.history-modal-header { padding: 1rem 1.4rem; background: #f8fafc; border-bottom: 1px solid #e2e8f0; display: flex; justify-content: space-between; align-items: center; }
+.history-modal-title { margin: 0; font-size: 1.1rem; color: #0f172a; display: flex; align-items: center; gap: .6rem; }
+.history-modal-subtitle { margin: .25rem 0 0; font-size: .78rem; color: #64748b; }
+.history-modal-body { padding: 1.4rem; overflow-y: auto; flex: 1; }
+.history-modal-footer { padding: .8rem 1.4rem; background: #f8fafc; border-top: 1px solid #e2e8f0; display: flex; justify-content: flex-end; }
+
+.history-timeline { list-style: none; padding: 0 0 0 1.25rem; margin: 0; position: relative; border-left: 2px solid #e2e8f0; }
+.history-timeline-entry { position: relative; padding-bottom: 1.5rem; }
+.history-timeline-entry:last-child { padding-bottom: 0; }
+.history-timeline-dot { position: absolute; left: -1.75rem; top: .2rem; width: 12px; height: 12px; border-radius: 99px; background: white; border: 2px solid #0284c7; }
+.history-card { background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 8px; padding: .8rem 1rem; }
+.history-card-header { display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: .4rem; margin-bottom: .45rem; }
+.history-action-badge { font-size: .75rem; font-weight: 600; padding: .12rem .5rem; border-radius: 4px; background: #e0f2fe; color: #0369a1; }
+.history-time-actor { font-size: .78rem; color: #64748b; }
+.history-reason-box { font-size: .84rem; color: #1e293b; background: white; border: 1px solid #e2e8f0; border-left: 3px solid #0284c7; padding: .5rem .75rem; border-radius: 4px; margin-bottom: .45rem; line-height: 1.45; }
+.history-reason-label { font-weight: 600; color: #475569; font-size: .75rem; margin-bottom: .15rem; }
+.history-diff-box { font-size: .78rem; background: #f1f5f9; border-radius: 4px; padding: .4rem .6rem; color: #334155; line-height: 1.5; }
+.history-empty-note { text-align: center; color: #64748b; font-size: .9rem; padding: 2rem 1rem; }
+
+@media print {
+  .btn-print-pub, .btn-history-inspect, .history-modal-backdrop, .publication-actions { display: none !important; }
+  .history-modal { display: none !important; }
+}
+
 
 

@@ -46,6 +46,7 @@ type Item = {
   version: number;
   lease: Lease;
   schedule?: ScheduleEntry[];
+  externalDependencies?: ExternalDependency[];
 };
 const detailsOf = (value: ItemDetails | string | undefined): ItemDetails =>
   typeof value === "string" ? JSON.parse(value) : (value ?? {});
@@ -124,6 +125,14 @@ type ExternalDependency = {
   linkedScheduleEntries: ExternalDependencyLinkRef[];
   history: ExternalDependencyHistoryEntry[];
 };
+type ScheduleRevisionView = {
+  actor: string;
+  at: string;
+  action: string;
+  reason: string | null;
+  before: any;
+  after: any;
+};
 type ScheduleEntry = {
   id: string;
   kind: "phase" | "task" | "milestone";
@@ -146,6 +155,7 @@ type ScheduleEntry = {
   successors?: DependencyRef[];
   warnings?: DependencyWarning[];
   externalNotices?: ExternalDeliveryNotice[];
+  history?: ScheduleRevisionView[];
 };
 type EcimMember = {
   userId: string;
@@ -2748,17 +2758,27 @@ export class ReportEditor implements OnInit, OnDestroy {
   standalone: true,
   imports: [DatePipe],
   template: ` <header>
-      <h1>
-        正式處會週報 <small>{{ publication?.meetingDate }}</small>
-      </h1>
-      <a href="#/">週報清單</a>
+      <div class="publication-title-group">
+        <h1>
+          正式處會週報 <small>{{ publication?.meetingDate }}</small>
+        </h1>
+        @if (publication) {
+          <span class="publication-badge">🔒 正式不可變快照</span>
+        }
+      </div>
+      <div class="publication-actions">
+        <button type="button" class="btn-print-pub" (click)="printReport()">🖨️ 列印 / 另存 PDF</button>
+        <a href="#/">週報清單</a>
+      </div>
     </header>
     @if (publication) {
       <main class="publication">
-        <p class="publication-meta">
-          版本 {{ publication.version }} · 發布於
-          {{ publication.publishedAt | date: "short" }}
-        </p>
+        <div class="publication-header-bar">
+          <p class="publication-meta">
+            版本 {{ publication.version }} · 發布於
+            {{ publication.publishedAt | date: "short" }}
+          </p>
+        </div>
         <section class="publication-sources">
           <h2>來源狀態</h2>
           <ul>
@@ -2924,6 +2944,15 @@ export class ReportEditor implements OnInit, OnDestroy {
                             entry.actualEnd || "—"
                           }}
                         }
+                        <div class="schedule-header-actions">
+                          <button
+                            type="button"
+                            class="btn-history-inspect"
+                            (click)="openHistoryModal(entry)"
+                            [title]="'檢視發布時修訂歷史 (' + (entry.history?.length || 0) + ' 筆)'">
+                            📜 修訂歷史 ({{ entry.history?.length || 0 }})
+                          </button>
+                        </div>
                         @if (entry.predecessors?.length || entry.successors?.length) {
                           <div class="schedule-dependencies">
                             @for (p of entry.predecessors; track p.id) {
@@ -2940,6 +2969,7 @@ export class ReportEditor implements OnInit, OnDestroy {
                               <div class="schedule-warning-pill" [attr.data-type]="w.type">
                                 <span class="warning-icon">{{ w.type === 'active-warning' ? '⚠️' : '⚡' }}</span>
                                 <span>{{ w.message }}</span>
+                                <span class="publication-frozen-badge">發布時凍結</span>
                               </div>
                             }
                           </div>
@@ -2950,7 +2980,7 @@ export class ReportEditor implements OnInit, OnDestroy {
                               <div class="external-notice-pill" [class.is-overdue]="n.isOverdue">
                                 <span class="external-icon">{{ n.isOverdue ? '⚠️' : '📦' }}</span>
                                 <div class="external-notice-content">
-                                  <span class="external-notice-title">{{ n.isOverdue ? '外部交付逾期提醒' : '外部交付提醒' }}</span>
+                                  <span class="external-notice-title">{{ n.isOverdue ? '外部交付逾期提醒（發布快照）' : '外部交付提醒（發布快照）' }}</span>
                                   <span class="external-notice-msg">{{ n.message }}</span>
                                 </div>
                               </div>
@@ -2980,15 +3010,112 @@ export class ReportEditor implements OnInit, OnDestroy {
                                 <span> · 保留實際開始日 {{ entry.actualStart }}</span>
                               }
                             }
+                            <div class="schedule-header-actions">
+                              <button
+                                type="button"
+                                class="btn-history-inspect"
+                                (click)="openHistoryModal(entry)"
+                                [title]="'檢視發布時修訂歷史 (' + (entry.history?.length || 0) + ' 筆)'">
+                                📜 修訂歷史 ({{ entry.history?.length || 0 }})
+                              </button>
+                            </div>
                           </li>
                         }
                       </ul>
                     </details>
                   }
                 }
+                @if (item.externalDependencies?.length) {
+                  <div class="pub-ext-deps-section">
+                    <div class="pub-ext-deps-header">
+                      <h4>跨部門相依事項（發布快照）</h4>
+                      <small>共 {{ item.externalDependencies!.length }} 項外部承諾</small>
+                    </div>
+                    <div class="pub-ext-dep-grid">
+                      @for (dep of item.externalDependencies; track dep.id) {
+                        <div class="pub-ext-dep-card">
+                          <div class="pub-ext-dep-top">
+                            <span class="pub-ext-dep-desc">{{ dep.description }}</span>
+                            <span class="status-badge" [class.status-accepted]="dep.status === 'delivered'" [class.status-pending]="dep.status === 'pending'">
+                              {{ dep.status === 'delivered' ? '已交付' : '進行中' }}
+                            </span>
+                          </div>
+                          <div class="pub-ext-dep-meta">
+                            <div>供應單位：<strong>{{ dep.supplier }}</strong></div>
+                            <div>約定交付日：<strong>{{ dep.dueDate }}</strong></div>
+                          </div>
+                          @if (dep.linkedScheduleEntries.length) {
+                            <div class="pub-ext-dep-links">
+                              @for (link of dep.linkedScheduleEntries; track link.scheduleEntryId) {
+                                <span class="pub-ext-link-tag">關聯：{{ link.scheduleEntryName }}</span>
+                              }
+                            </div>
+                          }
+                        </div>
+                      }
+                    </div>
+                  </div>
+                }
               </article>
             }
           </section>
+        }
+
+        @if (selectedHistoryEntry; as entry) {
+          <div class="history-modal-backdrop" (click)="closeHistoryModal()">
+            <div class="history-modal" (click)="$event.stopPropagation()">
+              <div class="history-modal-header">
+                <div>
+                  <h3 class="history-modal-title">
+                    <span>📜 時程修訂歷程</span>
+                    <span class="task-kind-tag">{{ entry.kind === 'phase' ? '階段' : entry.kind === 'task' ? '關鍵任務' : '重要里程碑' }}</span>
+                  </h3>
+                  <p class="history-modal-subtitle">
+                    {{ entry.name }} · 🔒 快照版本 {{ publication.version }}（發布時已固化）
+                  </p>
+                </div>
+                <button type="button" class="modal-close-btn" (click)="closeHistoryModal()">✕</button>
+              </div>
+              <div class="history-modal-body">
+                @if (entry.history?.length) {
+                  <ul class="history-timeline">
+                    @for (rev of entry.history; track rev.at + rev.action) {
+                      <li class="history-timeline-entry">
+                        <div class="history-timeline-dot"></div>
+                        <div class="history-card">
+                          <div class="history-card-header">
+                            <span class="history-action-badge">{{ actionBadge(rev.action) }}</span>
+                            <span class="history-time-actor">{{ formatDateTime(rev.at) }} · {{ rev.actor }}</span>
+                          </div>
+                          @if (rev.reason) {
+                            <div class="history-reason-box">
+                              <div class="history-reason-label">變更原因：</div>
+                              <div>{{ rev.reason }}</div>
+                            </div>
+                          }
+                          @if (rev.before || rev.after) {
+                            <div class="history-diff-box">
+                              @if (entry.kind === 'milestone') {
+                                <div>目標日期：{{ rev.before?.baselineDate || rev.before?.forecastDate || '—' }} → <strong>{{ rev.after?.baselineDate || rev.after?.forecastDate || '—' }}</strong></div>
+                              } @else {
+                                <div>計畫區間：{{ rev.before?.baselineStart || '—' }}~{{ rev.before?.baselineEnd || '—' }} → <strong>{{ rev.after?.baselineStart || '—' }}~{{ rev.after?.baselineEnd || '—' }}</strong></div>
+                              }
+                              <div>狀態：{{ rev.before?.state || 'open' }} → <strong>{{ rev.after?.state || 'open' }}</strong></div>
+                            </div>
+                          }
+                        </div>
+                      </li>
+                    }
+                  </ul>
+                } @else {
+                  <div class="history-empty-note">此項目於發布前無修訂記錄或僅有初始版本。</div>
+                }
+              </div>
+              <div class="history-modal-footer">
+                <button type="button" class="btn-ghost" (click)="closeHistoryModal()">關閉</button>
+              </div>
+            </div>
+          </div>
         }
       </main>
     }`,
@@ -3005,7 +3132,46 @@ export class PublicationPage implements OnInit {
       })
     | null = null;
   detailsOf = detailsOf;
+  selectedHistoryEntry: ScheduleEntry | null = null;
   private publicationId = this.route.snapshot.paramMap.get("id")!;
+
+  openHistoryModal(entry: ScheduleEntry) {
+    this.selectedHistoryEntry = entry;
+    this.changes.detectChanges();
+  }
+  closeHistoryModal() {
+    this.selectedHistoryEntry = null;
+    this.changes.detectChanges();
+  }
+  @HostListener("document:keydown.escape") onEscape() {
+    if (this.selectedHistoryEntry) {
+      this.closeHistoryModal();
+    }
+  }
+  printReport() {
+    window.print();
+  }
+  formatDateTime(iso: string) {
+    if (!iso) return "—";
+    const d = new Date(iso);
+    return isNaN(d.getTime()) ? iso : d.toLocaleString("zh-TW", { hour12: false });
+  }
+  actionBadge(action: string) {
+    const map: Record<string, string> = {
+      create: "初始建立",
+      reschedule: "計畫改期",
+      "correct-baseline": "更正原始計畫",
+      "state-change": "狀態調整",
+      cancel: "取消項目",
+      reactivate: "重新啟用",
+      "link-dependency": "建立前置相依",
+      "unlink-dependency": "解除前置相依",
+      "link-external-dependency": "關聯外部相依",
+      "unlink-external-dependency": "解除外部相依",
+      "predecessor-updated": "前置變動連鎖修訂",
+    };
+    return map[action] ?? action;
+  }
   label(section: string) {
     return labels[section] ?? section;
   }

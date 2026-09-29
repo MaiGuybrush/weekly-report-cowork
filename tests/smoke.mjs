@@ -1009,19 +1009,68 @@ try {
   assert.equal(publishedMilestone.baselineEnd, null);
   assert.equal(publishedMilestone.forecastStart, null);
   assert.equal(publishedMilestone.forecastEnd, null);
+  assert.ok(Array.isArray(publishedMilestone.history) && publishedMilestone.history.length > 0, 'published milestone should include revision history');
+  assert.equal(publishedMilestone.history[0].action, 'create');
+  assert.ok(Array.isArray(publishedProject.externalDependencies) && publishedProject.externalDependencies.length > 0, 'published project should include external dependencies');
+  const pubExtDep = publishedProject.externalDependencies[0];
+  assert.ok(pubExtDep.description);
+  assert.ok(Array.isArray(pubExtDep.history));
+
+  const pubMilestoneHist = await call(`/api/publications/${firstPublication.body.id}/items/${scheduleId}/schedule-entries/${milestone.body.id}/history`, 'R');
+  assert.equal(pubMilestoneHist.status, 200);
+  assert.deepEqual(pubMilestoneHist.body, publishedMilestone.history);
+  assert.equal((await call(`/api/publications/${firstPublication.body.id}/items/${scheduleId}/schedule-entries/${milestone.body.id}/history`, 'missing')).status, 403);
+
+  const pubExtDepHist = await call(`/api/publications/${firstPublication.body.id}/items/${scheduleId}/external-dependencies/${pubExtDep.id}/history`, 'R');
+  assert.equal(pubExtDepHist.status, 200);
+  assert.deepEqual(pubExtDepHist.body, pubExtDep.history);
+
   assert.equal((await call('/api/publications/latest', 'R2')).body.id, firstPublication.body.id);
   assert.equal((await call(`/api/publications/${firstPublication.body.id}`, 'missing')).status, 403);
   assert.equal((await call(`/api/publications/${firstPublication.body.id}`, 'H1')).status, 403);
   assert.equal((await call('/api/access/users', 'G', 'POST', { empNo: 'H1', name: 'Head One', role: 'Head', section: 's1', readerAccess: true })).body.readerAccess, true);
   assert.equal((await call('/api/me', 'H1')).body.readerAccess, true);
   assert.equal((await call(`/api/publications/${firstPublication.body.id}`, 'H1')).status, 200);
+
+  // Post-publication edits in working draft to verify immutable snapshot isolation
   const publishedItem = await call(`/api/items/${id}`, 'G');
   const postPublicationLease = await call(`/api/items/${id}/lease`, 'G', 'POST', {});
   assert.equal((await call(`/api/items/${id}/private-draft`, 'G', 'PUT', { title: 'Project A revised', content: 'changed after publication' })).status, 204);
   assert.equal((await call(`/api/items/${id}/commit`, 'G', 'POST', { token: postPublicationLease.body.token, baseVersion: publishedItem.body.version })).status, 200);
-  assert.equal((await call(`/api/publications/${firstPublication.body.id}`, 'R')).body.items.find(item => item.id === id).content, 'committed text');
+
+  // Modify schedule in working draft after first publication
+  const schedLease = await call(`/api/items/${scheduleId}/lease`, 'H1', 'POST', {});
+  assert.equal(schedLease.status, 200);
+  const schedItem = await call(`/api/items/${scheduleId}`, 'H1');
+  const currentSchedList = (await call(taskPath, 'H1')).body;
+  const currentMilestone = currentSchedList.find(e => e.id === milestone.body.id);
+  const postPubSchedEdit = await call(`${taskPath}/${milestone.body.id}`, 'H1', 'PUT', {
+    kind: 'milestone',
+    name: publishedMilestone.name,
+    baselineDate: publishedMilestone.baselineDate,
+    forecastDate: '2026-10-25',
+    state: 'pending',
+    action: 'update',
+    reason: '延後上線時程',
+    token: schedLease.body.token,
+    baseVersion: currentMilestone.version,
+    baseProjectVersion: schedItem.body.version,
+  });
+  assert.equal(postPubSchedEdit.status, 200);
+
+  // Verify first publication remains strictly unchanged (isolated and immutable)
+  const firstPubCheck = await call(`/api/publications/${firstPublication.body.id}`, 'R');
+  assert.equal(firstPubCheck.body.items.find(item => item.id === id).content, 'committed text');
+  const firstPubMilestoneCheck = firstPubCheck.body.items.find(item => item.id === scheduleId).schedule.find(entry => entry.id === milestone.body.id);
+  assert.equal(firstPubMilestoneCheck.forecastDate, '2026-10-18', 'first publication milestone date must remain immutable');
+  assert.equal(firstPubMilestoneCheck.history.length, publishedMilestone.history.length, 'first publication milestone history count must remain frozen');
+
   const secondPublication = await call(`/api/reports/${reportId}/publications`, 'G', 'POST', { requestId: 'publication-2' });
   assert.equal(secondPublication.body.version, 2);
+  const secondPubData = await call(`/api/publications/${secondPublication.body.id}`, 'R');
+  const secondPubMilestone = secondPubData.body.items.find(item => item.id === scheduleId).schedule.find(entry => entry.id === milestone.body.id);
+  assert.equal(secondPubMilestone.forecastDate, '2026-10-25', 'second publication must reflect new post-edit state');
+  assert.equal(secondPubMilestone.history.length, publishedMilestone.history.length + 1, 'second publication must include latest revision');
   const next = await call('/api/reports', 'G', 'POST', { meetingDate: '2026-10-08' });
   assert.equal(next.status, 200);
   const carried = (await call(`/api/reports/${next.body.id}`, 'G')).body.items.find(item => item.continuityId === publishedItem.body.continuityId);

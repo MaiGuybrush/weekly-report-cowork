@@ -444,11 +444,23 @@ try {
   assert.equal(await page.getByText('完成簽收').waitFor({ timeout: 15000 }), undefined);
   assert.ok(await page.locator('.publication-cancelled-section').count() > 0, 'cancelled section should exist in publication');
   assert.ok(await page.locator('.publication-cancelled-list').getByText('前置測試任務').count() > 0, 'cancelled item should appear in publication cancelled list');
+
+  // Verify Publication Revision History Inspector (Issue #8)
+  const inspectBtn = page.locator('li.schedule-milestone .btn-history-inspect').first();
+  await inspectBtn.waitFor({ timeout: 15000 });
+  await inspectBtn.click();
+  await page.locator('.history-modal').waitFor({ timeout: 15000 });
+  assert.ok(await page.getByText('時程修訂歷程').count() > 0, 'history modal should open and display title');
+  assert.ok(await page.locator('.history-timeline-entry').count() > 0, 'history timeline should show entries');
+  await page.locator('.history-modal-footer .btn-ghost').click();
+  await page.locator('.history-modal').waitFor({ state: 'detached', timeout: 5000 });
+
   await page.getByRole('link', { name: '來源' }).waitFor({ timeout: 15000 });
   await page.getByText('確認負責人', { exact: false }).waitFor({ timeout: 15000 });
   assert.match(page.url(), new RegExp(`#/publications/`));
   await page.emulateMedia({ media: 'print' });
   assert.equal(await page.locator('header a').evaluate(element => getComputedStyle(element).display), 'none');
+  assert.equal(await page.locator('.btn-history-inspect').first().evaluate(element => getComputedStyle(element).display), 'none');
   assert.equal(await page.locator('nav').count(), 0);
   assert.equal(await page.locator('.publication article').first().evaluate(element => getComputedStyle(element).breakInside), 'avoid');
   const pdf = await page.pdf({ format: 'A4', printBackground: true });

@@ -317,6 +317,32 @@ app.MapGet("/api/publications/{publicationId}", (HttpContext ctx, Store store, s
     var snapshot = System.Text.Json.JsonSerializer.Deserialize<ReportSnapshot>(rows.GetString(3));
     return Results.Ok(new { id = publicationId, version = rows.GetInt32(0), publishedAt = rows.GetString(1), publishedBy = rows.GetString(2), meetingDate = snapshot!.MeetingDate, sections = ReportSections.All, items = snapshot.Items, sourceStatus = snapshot.SourceStatus });
 });
+app.MapGet("/api/publications/{publicationId}/items/{itemId}/schedule-entries/{entryId}/history", (HttpContext ctx, Store store, string publicationId, string itemId, string entryId) =>
+{
+    if (!CanReadPublication(Current(ctx))) return Results.StatusCode(403);
+    using var db = store.Open();
+    using var rows = Store.Sql(db, "SELECT snapshot FROM publications WHERE id=$id", ("$id", publicationId)).ExecuteReader();
+    if (!rows.Read()) return Results.NotFound();
+    var snapshot = System.Text.Json.JsonSerializer.Deserialize<ReportSnapshot>(rows.GetString(0));
+    var item = snapshot?.Items.FirstOrDefault(i => i.Id == itemId);
+    if (item is null) return Results.NotFound();
+    var entry = item.Schedule?.FirstOrDefault(e => e.Id == entryId);
+    if (entry is null) return Results.NotFound();
+    return Results.Ok(entry.History ?? []);
+});
+app.MapGet("/api/publications/{publicationId}/items/{itemId}/external-dependencies/{depId}/history", (HttpContext ctx, Store store, string publicationId, string itemId, string depId) =>
+{
+    if (!CanReadPublication(Current(ctx))) return Results.StatusCode(403);
+    using var db = store.Open();
+    using var rows = Store.Sql(db, "SELECT snapshot FROM publications WHERE id=$id", ("$id", publicationId)).ExecuteReader();
+    if (!rows.Read()) return Results.NotFound();
+    var snapshot = System.Text.Json.JsonSerializer.Deserialize<ReportSnapshot>(rows.GetString(0));
+    var item = snapshot?.Items.FirstOrDefault(i => i.Id == itemId);
+    if (item is null) return Results.NotFound();
+    var dep = item.ExternalDependencies?.FirstOrDefault(d => d.Id == depId);
+    if (dep is null) return Results.NotFound();
+    return Results.Ok(dep.History ?? []);
+});
 app.MapGet("/api/publications/latest", (HttpContext ctx, Store store) =>
 {
     if (!CanReadPublication(Current(ctx))) return Results.StatusCode(403);
@@ -928,56 +954,7 @@ app.MapGet("/api/items/{itemId}/external-dependencies", (HttpContext ctx, Store 
     var user = Current(ctx);
     if (item.Section != "projects" || !CanMaintainProject(user, item) && !IsProjectParticipant(db, itemId, user.Section) && (item.Version == 0 || user.Role != "Reader")) return Results.StatusCode(403);
 
-    var list = new List<ExternalDependencyView>();
-    using (var rows = Store.Sql(db, "SELECT id,project_id,description,supplier,due_date,status,created_by,created_at,updated_at FROM project_external_dependencies WHERE project_id=$project ORDER BY rowid", ("$project", itemId)).ExecuteReader())
-    {
-        while (rows.Read())
-        {
-            list.Add(new ExternalDependencyView(
-                rows.GetString(0), rows.GetString(1), rows.GetString(2), rows.GetString(3), rows.GetString(4), rows.GetString(5), rows.GetString(6), rows.GetString(7), rows.GetString(8), [], []));
-        }
-    }
-
-    var dict = list.ToDictionary(x => x.Id);
-
-    using (var linkRows = Store.Sql(db, """
-        SELECT l.external_dependency_id, e.id, e.name, e.kind
-        FROM project_external_dependency_links l
-        JOIN project_schedule_entries e ON e.id=l.schedule_entry_id
-        WHERE l.project_id=$project
-        ORDER BY e.rowid
-        """, ("$project", itemId)).ExecuteReader())
-    {
-        while (linkRows.Read())
-        {
-            var depId = linkRows.GetString(0);
-            if (dict.TryGetValue(depId, out var dep))
-            {
-                dep.LinkedScheduleEntries.Add(new ExternalDependencyLinkRef(linkRows.GetString(1), linkRows.GetString(2), linkRows.GetString(3)));
-            }
-        }
-    }
-
-    using (var histRows = Store.Sql(db, """
-        SELECT external_dependency_id, actor, at, action, reason, schedule_entry_id, schedule_entry_name
-        FROM project_external_dependency_history
-        WHERE external_dependency_id IN (SELECT id FROM project_external_dependencies WHERE project_id=$project)
-        ORDER BY id
-        """, ("$project", itemId)).ExecuteReader())
-    {
-        while (histRows.Read())
-        {
-            var depId = histRows.GetString(0);
-            if (dict.TryGetValue(depId, out var dep))
-            {
-                dep.History.Add(new ExternalDependencyHistoryEntry(
-                    histRows.GetString(1), histRows.GetString(2), histRows.GetString(3),
-                    NullableString(histRows, 4), NullableString(histRows, 5), NullableString(histRows, 6)));
-            }
-        }
-    }
-
-    return Results.Ok(list);
+    return Results.Ok(GetExternalDependencies(db, itemId));
 });
 app.MapPost("/api/items/{itemId}/external-dependencies", (HttpContext ctx, Store store, string itemId, ExternalDependencyRequest request) =>
 {
@@ -1148,10 +1125,7 @@ app.MapGet("/api/items/{itemId}/schedule/{entryId}/history", (HttpContext ctx, S
     if (item.Section != "projects" || !CanMaintainProject(user, item) && !IsProjectParticipant(db, itemId, user.Section)) return Results.StatusCode(403);
     var entry = ScheduleEntry(db, entryId);
     if (entry is null || entry.ProjectId != itemId) return Results.NotFound();
-    using var rows = Store.Sql(db, "SELECT actor,at,action,reason,before_state,after_state FROM project_schedule_revisions WHERE entry_id=$id ORDER BY id", ("$id", entryId)).ExecuteReader();
-    var history = new List<object>();
-    while (rows.Read()) history.Add(new { actor = rows.GetString(0), at = rows.GetString(1), action = rows.GetString(2), reason = NullableString(rows, 3), before = rows.IsDBNull(4) ? (System.Text.Json.JsonElement?)null : System.Text.Json.JsonSerializer.Deserialize<System.Text.Json.JsonElement>(rows.GetString(4)), after = System.Text.Json.JsonSerializer.Deserialize<System.Text.Json.JsonElement>(rows.GetString(5)) });
-    return Results.Ok(history);
+    return Results.Ok(GetScheduleRevisions(db, entryId));
 });
 app.MapGet("/api/items/{itemId}", (HttpContext ctx, Store store, string itemId) =>
 {
@@ -1708,7 +1682,77 @@ static IResult RemoveExternalLink(HttpContext ctx, Store store, string itemId, s
     tx.Commit();
     return Results.Ok(new { projectVersion = item.Version + 1 });
 }
-static List<ScheduleEntry> ScheduleEntries(SqliteConnection db, string itemId)
+static List<ScheduleRevisionView> GetScheduleRevisions(SqliteConnection db, string entryId)
+{
+    using var rows = Store.Sql(db, "SELECT actor,at,action,reason,before_state,after_state FROM project_schedule_revisions WHERE entry_id=$id ORDER BY id", ("$id", entryId)).ExecuteReader();
+    var history = new List<ScheduleRevisionView>();
+    while (rows.Read())
+    {
+        history.Add(new ScheduleRevisionView(
+            rows.GetString(0),
+            rows.GetString(1),
+            rows.GetString(2),
+            NullableString(rows, 3),
+            rows.IsDBNull(4) ? null : System.Text.Json.JsonSerializer.Deserialize<System.Text.Json.JsonElement>(rows.GetString(4)),
+            System.Text.Json.JsonSerializer.Deserialize<System.Text.Json.JsonElement>(rows.GetString(5))
+        ));
+    }
+    return history;
+}
+static List<ExternalDependencyView> GetExternalDependencies(SqliteConnection db, string itemId)
+{
+    var list = new List<ExternalDependencyView>();
+    using (var rows = Store.Sql(db, "SELECT id,project_id,description,supplier,due_date,status,created_by,created_at,updated_at FROM project_external_dependencies WHERE project_id=$project ORDER BY rowid", ("$project", itemId)).ExecuteReader())
+    {
+        while (rows.Read())
+        {
+            list.Add(new ExternalDependencyView(
+                rows.GetString(0), rows.GetString(1), rows.GetString(2), rows.GetString(3), rows.GetString(4), rows.GetString(5), rows.GetString(6), rows.GetString(7), rows.GetString(8), [], []));
+        }
+    }
+
+    var dict = list.ToDictionary(x => x.Id);
+
+    using (var linkRows = Store.Sql(db, """
+        SELECT l.external_dependency_id, e.id, e.name, e.kind
+        FROM project_external_dependency_links l
+        JOIN project_schedule_entries e ON e.id=l.schedule_entry_id
+        WHERE l.project_id=$project
+        ORDER BY e.rowid
+        """, ("$project", itemId)).ExecuteReader())
+    {
+        while (linkRows.Read())
+        {
+            var depId = linkRows.GetString(0);
+            if (dict.TryGetValue(depId, out var dep))
+            {
+                dep.LinkedScheduleEntries.Add(new ExternalDependencyLinkRef(linkRows.GetString(1), linkRows.GetString(2), linkRows.GetString(3)));
+            }
+        }
+    }
+
+    using (var histRows = Store.Sql(db, """
+        SELECT external_dependency_id, actor, at, action, reason, schedule_entry_id, schedule_entry_name
+        FROM project_external_dependency_history
+        WHERE external_dependency_id IN (SELECT id FROM project_external_dependencies WHERE project_id=$project)
+        ORDER BY id
+        """, ("$project", itemId)).ExecuteReader())
+    {
+        while (histRows.Read())
+        {
+            var depId = histRows.GetString(0);
+            if (dict.TryGetValue(depId, out var dep))
+            {
+                dep.History.Add(new ExternalDependencyHistoryEntry(
+                    histRows.GetString(1), histRows.GetString(2), histRows.GetString(3),
+                    NullableString(histRows, 4), NullableString(histRows, 5), NullableString(histRows, 6)));
+            }
+        }
+    }
+
+    return list;
+}
+static List<ScheduleEntry> ScheduleEntries(SqliteConnection db, string itemId, bool includeHistory = false)
 {
     using var rows = Store.Sql(db, "SELECT id,project_id,kind,name,baseline_start,baseline_end,forecast_start,forecast_end,actual_start,actual_end,version,state,owner,phase_id,baseline_date,forecast_date,actual_date FROM project_schedule_entries WHERE project_id=$project ORDER BY rowid", ("$project", itemId)).ExecuteReader();
     var rawEntries = new List<ScheduleEntry>();
@@ -1803,7 +1847,8 @@ static List<ScheduleEntry> ScheduleEntries(SqliteConnection db, string itemId)
         Predecessors = predMap.GetValueOrDefault(entry.Id) ?? [],
         Successors = succMap.GetValueOrDefault(entry.Id) ?? [],
         Warnings = warningMap.GetValueOrDefault(entry.Id) ?? [],
-        ExternalNotices = extNoticeMap.GetValueOrDefault(entry.Id) ?? []
+        ExternalNotices = extNoticeMap.GetValueOrDefault(entry.Id) ?? [],
+        History = includeHistory ? GetScheduleRevisions(db, entry.Id) : null
     }).ToList();
 }
 static ScheduleEntry? ScheduleEntry(SqliteConnection db, string entryId)
@@ -1819,7 +1864,16 @@ static ReportSnapshot Snapshot(SqliteConnection db, string reportId, IConfigurat
     {
         while (rows.Read()) items.Add(new PublishedItem(rows.GetString(0), rows.GetString(1), rows.GetString(2), rows.GetString(3), rows.GetString(4), rows.GetString(5), rows.GetString(7), rows.GetInt32(8), rows.GetString(6)));
     }
-    items = items.Select(item => item with { Schedule = ScheduleEntries(db, item.Id) }).ToList();
+    items = items.Select(item => {
+        if (item.Section == "projects")
+        {
+            return item with {
+                Schedule = ScheduleEntries(db, item.Id, includeHistory: true),
+                ExternalDependencies = GetExternalDependencies(db, item.Id)
+            };
+        }
+        return item with { Schedule = ScheduleEntries(db, item.Id) };
+    }).ToList();
     var sections = EcimMembers(config).Select(member => member.Section).ToHashSet();
     using (var sectionRows = Store.Sql(db, "SELECT DISTINCT section FROM users WHERE role='Head' AND section IS NOT NULL ORDER BY section").ExecuteReader())
         while (sectionRows.Read()) sections.Add(sectionRows.GetString(0));
@@ -1886,8 +1940,9 @@ record ExternalDependencyHistoryEntry(string Actor, string At, string Action, st
 record ExternalDependencyView(string Id, string ProjectId, string Description, string Supplier, string DueDate, string Status, string CreatedBy, string CreatedAt, string UpdatedAt, List<ExternalDependencyLinkRef> LinkedScheduleEntries, List<ExternalDependencyHistoryEntry> History);
 record ExternalDependencyRequest(string? Description, string? Supplier, string? DueDate, string? Status, string? Reason, string? Token, int? BaseProjectVersion);
 record ExternalDependencyLinkRequest(string? ScheduleEntryId, string? Reason, string? Token, int? BaseProjectVersion);
-record ScheduleEntry(string Id, string ProjectId, string Kind, string Name, string? BaselineStart, string? BaselineEnd, string? ForecastStart, string? ForecastEnd, string? ActualStart, string? ActualEnd, int Version, string State = "open", string? Owner = null, string? PhaseId = null, List<string>? UnfinishedTasks = null, string? BaselineDate = null, string? ForecastDate = null, string? ActualDate = null, List<DependencyRef>? Predecessors = null, List<DependencyRef>? Successors = null, List<DependencyWarning>? Warnings = null, List<ExternalDeliveryNotice>? ExternalNotices = null);
-record PublishedItem(string Id, string ContinuityId, string Section, string OwnerSection, string Title, string Content, string Status, int Version, string Details = "{}", List<ScheduleEntry>? Schedule = null);
+record ScheduleRevisionView(string Actor, string At, string Action, string? Reason, System.Text.Json.JsonElement? Before, System.Text.Json.JsonElement? After);
+record ScheduleEntry(string Id, string ProjectId, string Kind, string Name, string? BaselineStart, string? BaselineEnd, string? ForecastStart, string? ForecastEnd, string? ActualStart, string? ActualEnd, int Version, string State = "open", string? Owner = null, string? PhaseId = null, List<string>? UnfinishedTasks = null, string? BaselineDate = null, string? ForecastDate = null, string? ActualDate = null, List<DependencyRef>? Predecessors = null, List<DependencyRef>? Successors = null, List<DependencyWarning>? Warnings = null, List<ExternalDeliveryNotice>? ExternalNotices = null, List<ScheduleRevisionView>? History = null);
+record PublishedItem(string Id, string ContinuityId, string Section, string OwnerSection, string Title, string Content, string Status, int Version, string Details = "{}", List<ScheduleEntry>? Schedule = null, List<ExternalDependencyView>? ExternalDependencies = null);
 record SourceStatus(string Section, string Status, string? PeriodFrom, string? PeriodTo, string? FinishedAt);
 record FieldOrigin(string? LastSourceValue, string LatestSourceValue, string ReportValue, bool HumanOverride);
 record CandidateDecisionRequest(string? Action, string? TargetItemId);
