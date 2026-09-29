@@ -265,6 +265,85 @@ try {
   assert.equal(taskReopened.status, 200);
   assert.equal((await call(taskPath, 'H1')).body.find(entry => entry.id === task.body.id).actualEnd, null);
   assert.equal((await call(`${taskPath}/${task.body.id}/history`, 'H1')).body.at(-1).before.actualEnd, '2026-10-13');
+
+  // Milestone tests (#3)
+  const milestoneDraft = { kind: 'milestone', name: 'Design Review', targetDate: '2026-10-15', state: 'pending' };
+  assert.equal((await call(taskPath, 'H1', 'POST', { ...milestoneDraft, targetDate: '', token: scheduleLease.body.token, baseProjectVersion: taskReopened.body.projectVersion })).status, 400);
+  assert.equal((await call(taskPath, 'H1', 'POST', { ...milestoneDraft, baselineStart: '2026-10-15', baselineEnd: '2026-10-15', token: scheduleLease.body.token, baseProjectVersion: taskReopened.body.projectVersion })).status, 400);
+  assert.equal((await call(taskPath, 'H1', 'POST', { ...milestoneDraft, state: 'achieved', token: scheduleLease.body.token, baseProjectVersion: taskReopened.body.projectVersion })).status, 400);
+  assert.equal((await call(taskPath, 'H2', 'POST', { ...milestoneDraft, token: scheduleLease.body.token, baseProjectVersion: taskReopened.body.projectVersion })).status, 403);
+  const milestone = await call(taskPath, 'H1', 'POST', { ...milestoneDraft, token: scheduleLease.body.token, baseProjectVersion: taskReopened.body.projectVersion });
+  assert.equal(milestone.status, 201);
+  let milestoneProjectVersion = milestone.body.projectVersion;
+  const milestoneList = await call(taskPath, 'H1');
+  const createdMilestone = milestoneList.body.find(entry => entry.id === milestone.body.id);
+  assert.equal(createdMilestone.kind, 'milestone');
+  assert.equal(createdMilestone.baselineDate, '2026-10-15');
+  assert.equal(createdMilestone.forecastDate, '2026-10-15');
+  assert.equal(createdMilestone.actualDate, null);
+  assert.equal(createdMilestone.state, 'pending');
+  assert.equal(createdMilestone.baselineStart, null);
+  assert.equal(createdMilestone.baselineEnd, null);
+  assert.equal(createdMilestone.forecastStart, null);
+  assert.equal(createdMilestone.forecastEnd, null);
+  assert.equal(createdMilestone.actualStart, null);
+  assert.equal(createdMilestone.actualEnd, null);
+
+  // Past target date does not automatically achieve
+  const overdueDraft = { kind: 'milestone', name: 'Past Gateway', targetDate: '2026-09-01', state: 'pending' };
+  const overdueMilestone = await call(taskPath, 'H1', 'POST', { ...overdueDraft, token: scheduleLease.body.token, baseProjectVersion: milestoneProjectVersion });
+  assert.equal(overdueMilestone.status, 201);
+  milestoneProjectVersion = overdueMilestone.body.projectVersion;
+  const overdueEntry = (await call(taskPath, 'H1')).body.find(entry => entry.id === overdueMilestone.body.id);
+  assert.equal(overdueEntry.state, 'pending');
+  assert.equal(overdueEntry.actualDate, null);
+
+  // Reschedule milestone requires reason and preserves baseline date
+  const milestoneBase = { kind: 'milestone', name: 'Design Review', baselineDate: '2026-10-15', forecastDate: '2026-10-18', state: 'pending', actualDate: null, baseVersion: 1, baseProjectVersion: milestoneProjectVersion, token: scheduleLease.body.token };
+  assert.equal((await call(`${taskPath}/${milestone.body.id}`, 'H1', 'PUT', milestoneBase)).status, 400);
+  const rescheduledMilestone = await call(`${taskPath}/${milestone.body.id}`, 'H1', 'PUT', { ...milestoneBase, reason: 'Vendor schedule slipped' });
+  assert.equal(rescheduledMilestone.status, 200);
+  milestoneProjectVersion = rescheduledMilestone.body.projectVersion;
+  const rescheduledEntry = (await call(taskPath, 'H1')).body.find(entry => entry.id === milestone.body.id);
+  assert.equal(rescheduledEntry.baselineDate, '2026-10-15');
+  assert.equal(rescheduledEntry.forecastDate, '2026-10-18');
+  assert.equal(rescheduledEntry.actualDate, null);
+
+  // Changing baseline date requires correct-original action
+  assert.equal((await call(`${taskPath}/${milestone.body.id}`, 'H1', 'PUT', { ...milestoneBase, baselineDate: '2026-10-16', baseVersion: 2, baseProjectVersion: milestoneProjectVersion, reason: 'Typo correction' })).status, 400);
+  const correctedMilestone = await call(`${taskPath}/${milestone.body.id}`, 'H1', 'PUT', { ...milestoneBase, baselineDate: '2026-10-16', action: 'correct-original', baseVersion: 2, baseProjectVersion: milestoneProjectVersion, reason: 'Typo in original target' });
+  assert.equal(correctedMilestone.status, 200);
+  milestoneProjectVersion = correctedMilestone.body.projectVersion;
+  assert.equal((await call(taskPath, 'H1')).body.find(entry => entry.id === milestone.body.id).baselineDate, '2026-10-16');
+
+  // Achieve requires actualDate
+  assert.equal((await call(`${taskPath}/${milestone.body.id}`, 'H1', 'PUT', { ...milestoneBase, baselineDate: '2026-10-16', state: 'achieved', actualDate: null, baseVersion: 3, baseProjectVersion: milestoneProjectVersion, reason: 'Review signed off' })).status, 400);
+  const achievedMilestone = await call(`${taskPath}/${milestone.body.id}`, 'H1', 'PUT', { ...milestoneBase, baselineDate: '2026-10-16', state: 'achieved', actualDate: '2026-10-19', baseVersion: 3, baseProjectVersion: milestoneProjectVersion, reason: 'Review signed off' });
+  assert.equal(achievedMilestone.status, 200);
+  milestoneProjectVersion = achievedMilestone.body.projectVersion;
+  const achievedEntry = (await call(taskPath, 'H1')).body.find(entry => entry.id === milestone.body.id);
+  assert.equal(achievedEntry.state, 'achieved');
+  assert.equal(achievedEntry.actualDate, '2026-10-19');
+  assert.equal(achievedEntry.forecastDate, '2026-10-18');
+
+  // Correct actualDate
+  const correctedActual = await call(`${taskPath}/${milestone.body.id}`, 'H1', 'PUT', { ...milestoneBase, baselineDate: '2026-10-16', state: 'achieved', actualDate: '2026-10-20', baseVersion: 4, baseProjectVersion: milestoneProjectVersion, reason: 'Corrected to minutes sign date' });
+  assert.equal(correctedActual.status, 200);
+  milestoneProjectVersion = correctedActual.body.projectVersion;
+  assert.equal((await call(taskPath, 'H1')).body.find(entry => entry.id === milestone.body.id).actualDate, '2026-10-20');
+
+  // Reopen milestone clears actualDate but preserves it in history
+  const reopenedMilestone = await call(`${taskPath}/${milestone.body.id}`, 'H1', 'PUT', { ...milestoneBase, baselineDate: '2026-10-16', state: 'pending', actualDate: null, action: 'reopen', baseVersion: 5, baseProjectVersion: milestoneProjectVersion, reason: 'Reopened for conditional items' });
+  assert.equal(reopenedMilestone.status, 200);
+  milestoneProjectVersion = reopenedMilestone.body.projectVersion;
+  const reopenedEntry = (await call(taskPath, 'H1')).body.find(entry => entry.id === milestone.body.id);
+  assert.equal(reopenedEntry.state, 'pending');
+  assert.equal(reopenedEntry.actualDate, null);
+  const milestoneHistory = await call(`${taskPath}/${milestone.body.id}/history`, 'H1');
+  assert.equal(milestoneHistory.body.at(-1).action, 'reopen');
+  assert.equal(milestoneHistory.body.at(-1).before.actualDate, '2026-10-20');
+  assert.equal(milestoneHistory.body.at(-1).after.actualDate, null);
+
   assert.equal((await call(`/api/items/${id}/project-participants`, 'H2', 'POST', { section: 's2' })).status, 403);
   assert.equal((await call(`/api/items/${id}/project-participants`, 'H1', 'POST', { section: 's2' })).status, 204);
   assert.equal((await call(`/api/items/${id}/project-work`, 'H3')).status, 403);
@@ -373,6 +452,16 @@ try {
   assert.equal(published.body.items.find(item => item.id === id).content, 'committed text');
   assert.deepEqual(JSON.parse(published.body.items.find(item => item.id === personnel.body.id).details), personnelDetails);
   assert.deepEqual(JSON.parse(published.body.items.find(item => item.id === decisionItem.body.id).details).sourceLinks, decisionDetails.sourceLinks);
+  const publishedProject = published.body.items.find(item => item.id === scheduleId);
+  const publishedMilestone = publishedProject.schedule.find(entry => entry.id === milestone.body.id);
+  assert.equal(publishedMilestone.kind, 'milestone');
+  assert.equal(publishedMilestone.baselineDate, '2026-10-16');
+  assert.equal(publishedMilestone.forecastDate, '2026-10-18');
+  assert.equal(publishedMilestone.actualDate, null);
+  assert.equal(publishedMilestone.baselineStart, null);
+  assert.equal(publishedMilestone.baselineEnd, null);
+  assert.equal(publishedMilestone.forecastStart, null);
+  assert.equal(publishedMilestone.forecastEnd, null);
   assert.equal((await call('/api/publications/latest', 'R2')).body.id, firstPublication.body.id);
   assert.equal((await call(`/api/publications/${firstPublication.body.id}`, 'missing')).status, 403);
   assert.equal((await call(`/api/publications/${firstPublication.body.id}`, 'H1')).status, 403);

@@ -23,6 +23,12 @@ label { display: block; margin: 1rem 0; } input, textarea { display: block; box-
 .schedule-state { display: inline-block; margin-left: .5rem; padding: .08rem .5rem; border-radius: 3px; background: #e6eceb; color: #2e5651; font-size: .78rem; line-height: 1.6; }
 .schedule-state[data-state="completed"] { background: #dceee4; color: #246048; }
 .schedule-state[data-state="cancelled"] { background: #eee9e5; color: #75665d; }
+.schedule-state[data-state="pending"] { background: #fef3c7; color: #92400e; }
+.schedule-state[data-state="achieved"] { background: #dcfce7; color: #166534; }
+.milestone-marker { position: absolute; top: 50%; width: 10px; height: 10px; background: #f59e0b; transform: translate(-50%, -50%) rotate(45deg); border-radius: 2px; }
+.milestone-marker[data-state="achieved"] { background: #10b981; }
+.milestone-marker[data-state="cancelled"] { background: #9ca3af; }
+.project-schedule > ul > li.schedule-milestone { margin-left: .5rem; padding-left: .8rem; border-left: 3px solid #f59e0b; background: #fffdfa; }
 .schedule-form { margin-top: 1.25rem; padding: 1.2rem; background: white; border: 1px solid #d7e2de; border-radius: 8px; }
 .schedule-form label { display: inline-block; vertical-align: top; width: min(100%, 220px); margin: .5rem .6rem .5rem 0; font-size: .82rem; color: #37534f; }
 .schedule-form input, .schedule-form select { display: block; box-sizing: border-box; width: 100%; margin-top: .35rem; padding: .55rem; border: 1px solid #aebfbb; border-radius: 4px; background: #fff; font: inherit; }

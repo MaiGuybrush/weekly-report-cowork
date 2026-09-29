@@ -53,6 +53,9 @@ public sealed class Store(IConfiguration config)
         EnsureColumn(db, "project_schedule_entries", "state", "TEXT NOT NULL DEFAULT 'open'");
         EnsureColumn(db, "project_schedule_entries", "owner", "TEXT");
         EnsureColumn(db, "project_schedule_entries", "phase_id", "TEXT REFERENCES project_schedule_entries(id)");
+        EnsureColumn(db, "project_schedule_entries", "baseline_date", "TEXT");
+        EnsureColumn(db, "project_schedule_entries", "forecast_date", "TEXT");
+        EnsureColumn(db, "project_schedule_entries", "actual_date", "TEXT");
         EnsureColumn(db, "ecim_candidates", "candidate_type", "TEXT NOT NULL DEFAULT 'new-source'");
         EnsureColumn(db, "ecim_candidates", "reason", "TEXT");
         EnsureColumn(db, "ecim_candidates", "target_item_id", "TEXT");

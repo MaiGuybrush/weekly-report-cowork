@@ -70,8 +70,11 @@ type ScheduleEntry = {
   forecastEnd: string | null;
   actualStart: string | null;
   actualEnd: string | null;
+  baselineDate?: string | null;
+  forecastDate?: string | null;
+  actualDate?: string | null;
   version: number;
-  state: "open" | "in-progress" | "completed" | "cancelled";
+  state: "open" | "in-progress" | "completed" | "cancelled" | "pending" | "achieved";
 };
 type EcimMember = {
   userId: string;
@@ -566,48 +569,62 @@ export class Home implements OnInit {
                       <div class="gantt-row" (click)="editSchedule(entry)">
                         <span>{{ entry.name }}</span>
                         <div class="gantt-track">
-                          <i
-                            class="baseline"
-                            [style.left.%]="
-                              schedulePosition(entry.baselineStart)
-                            "
-                            [style.width.%]="
-                              scheduleWidth(
-                                entry.baselineStart,
-                                entry.baselineEnd
-                              )
-                            "
-                          ></i
-                          ><i
-                            class="forecast"
-                            [style.left.%]="
-                              schedulePosition(entry.forecastStart)
-                            "
-                            [style.width.%]="
-                              scheduleWidth(
-                                entry.forecastStart,
-                                entry.forecastEnd
-                              )
-                            "
-                          ></i>
-                          @if (entry.actualStart || entry.actualEnd) {
+                          @if (entry.kind === 'milestone') {
                             <i
-                              class="actual"
+                              class="milestone-marker"
+                              [attr.data-state]="entry.state"
                               [style.left.%]="
                                 schedulePosition(
-                                  entry.actualStart || entry.actualEnd
-                                )
-                              "
-                              [style.width.%]="
-                                scheduleWidth(
-                                  entry.actualStart || entry.actualEnd,
-                                  entry.actualEnd || entry.actualStart
+                                  entry.state === 'achieved'
+                                    ? entry.actualDate
+                                    : entry.forecastDate
                                 )
                               "
                             ></i>
+                          } @else {
+                            <i
+                              class="baseline"
+                              [style.left.%]="
+                                schedulePosition(entry.baselineStart)
+                              "
+                              [style.width.%]="
+                                scheduleWidth(
+                                  entry.baselineStart,
+                                  entry.baselineEnd
+                                )
+                              "
+                            ></i
+                            ><i
+                              class="forecast"
+                              [style.left.%]="
+                                schedulePosition(entry.forecastStart)
+                              "
+                              [style.width.%]="
+                                scheduleWidth(
+                                  entry.forecastStart,
+                                  entry.forecastEnd
+                                )
+                              "
+                            ></i>
+                            @if (entry.actualStart || entry.actualEnd) {
+                              <i
+                                class="actual"
+                                [style.left.%]="
+                                  schedulePosition(
+                                    entry.actualStart || entry.actualEnd
+                                  )
+                                "
+                                [style.width.%]="
+                                  scheduleWidth(
+                                    entry.actualStart || entry.actualEnd,
+                                    entry.actualEnd || entry.actualStart
+                                  )
+                                "
+                              ></i>
+                            }
                           }
                         </div>
-                        <small>基準／預估／實際</small>
+                        <small>{{ entry.kind === 'milestone' ? (entry.state === 'achieved' ? '實際達成' : '最新目標') : '基準／預估／實際' }}</small>
                       </div>
                     }
                     @if (completedScheduleEntries().length) {
@@ -667,26 +684,37 @@ export class Home implements OnInit {
                 }
                 <ul>
                   @for (entry of scheduleDisplayEntries(); track entry.id) {
-                    <li [class.schedule-task]="entry.kind === 'task'">
+                    <li [class.schedule-task]="entry.kind === 'task'" [class.schedule-milestone]="entry.kind === 'milestone'">
                       <strong
-                        >{{ entry.kind === "phase" ? "階段" : entry.kind === "task" ? "關鍵任務" : "里程碑" }}：{{
+                        >{{ entry.kind === "phase" ? "階段" : entry.kind === "task" ? "關鍵任務" : "重要里程碑" }}：{{
                           entry.name
                         }}</strong
                       >
                       <span class="schedule-state" [attr.data-state]="entry.state">{{ scheduleStateLabel(entry.state) }}</span>
                       @if (entry.kind === 'task') { <span class="schedule-owner">負責 {{ entry.owner }} · {{ phaseName(entry.phaseId) }}</span> }
-                      · 原始計畫 {{ entry.baselineStart || "—" }}–{{
-                        entry.baselineEnd || "—"
-                      }}
-                      · 目前計畫 {{ entry.forecastStart || "—" }}–{{
-                        entry.forecastEnd || "—"
-                      }}
-                      · 實際 {{ entry.actualStart || "—" }}–{{
-                        entry.actualEnd || "—"
-                      }}
-                      · 開始偏差 {{ scheduleStartVariance(entry) }}
-                      · 完成偏差 {{ scheduleVariance(entry) }}
-                      @if (entry.kind === 'phase' && entry.unfinishedTasks?.length) { <div class="schedule-warning">尚有 {{ entry.unfinishedTasks?.length }} 項未完成任務：{{ entry.unfinishedTasks?.join('、') }}。階段須由維護人另行確認。</div> }
+                      @if (entry.kind === 'milestone') {
+                        <span class="schedule-milestone-info">
+                          · {{ entry.state === 'achieved' ? '實際達成' : '最新目標' }} {{ (entry.state === 'achieved' ? entry.actualDate : entry.forecastDate) || "—" }}
+                          · 原始目標 {{ entry.baselineDate || "—" }}
+                          @if (entry.state === 'achieved' && entry.forecastDate) {
+                            · 最新目標 {{ entry.forecastDate }}
+                          }
+                          · 偏差 {{ scheduleMilestoneVariance(entry) }}
+                        </span>
+                      } @else {
+                        · 原始計畫 {{ entry.baselineStart || "—" }}–{{
+                          entry.baselineEnd || "—"
+                        }}
+                        · 目前計畫 {{ entry.forecastStart || "—" }}–{{
+                          entry.forecastEnd || "—"
+                        }}
+                        · 實際 {{ entry.actualStart || "—" }}–{{
+                          entry.actualEnd || "—"
+                        }}
+                        · 開始偏差 {{ scheduleStartVariance(entry) }}
+                        · 完成偏差 {{ scheduleVariance(entry) }}
+                        @if (entry.kind === 'phase' && entry.unfinishedTasks?.length) { <div class="schedule-warning">尚有 {{ entry.unfinishedTasks?.length }} 項未完成任務：{{ entry.unfinishedTasks?.join('、') }}。階段須由維護人另行確認。</div> }
+                      }
                       @if (canMaintain(item)) {
                         <button (click)="editSchedule(entry)">編輯</button>
                       }
@@ -711,9 +739,10 @@ export class Home implements OnInit {
                     <h4>{{ editingSchedule ? "編輯交付項目" : "新增交付項目" }}</h4>
                     <label
                       >類型
-                      <select [(ngModel)]="scheduleDraft.kind" [disabled]="!!editingSchedule">
+                      <select [(ngModel)]="scheduleDraft.kind" [disabled]="!!editingSchedule" (ngModelChange)="onScheduleKindChange()">
                         <option value="phase">階段</option>
                         <option value="task">關鍵任務</option>
+                        <option value="milestone">重要里程碑</option>
                       </select></label
                     >
                     <label
@@ -723,7 +752,25 @@ export class Home implements OnInit {
                       <label>負責人或單位 <input [(ngModel)]="scheduleDraft.owner" required /></label>
                       <label>所屬階段 <select [(ngModel)]="scheduleDraft.phaseId"><option value="">直接隸屬專案</option>@for (phase of schedulePhases(); track phase.id) {<option [value]="phase.id">{{ phase.name }}</option>}</select></label>
                     }
-                    @if (editingSchedule) {<label>狀態<select [(ngModel)]="scheduleDraft.state"><option value="open">開放</option><option value="in-progress">進行中</option><option value="completed">完成</option><option value="cancelled">取消</option></select></label>}
+                    @if (scheduleDraft.kind === 'milestone') {
+                      @if (!editingSchedule) {
+                        <label>目標日期 <input type="date" [(ngModel)]="scheduleDraft.targetDate" required /></label>
+                      } @else {
+                        <label>狀態
+                          <select [(ngModel)]="scheduleDraft.state" (ngModelChange)="onMilestoneStateChange()">
+                            <option value="pending">待達成</option>
+                            <option value="achieved">已達成</option>
+                            <option value="cancelled">已取消</option>
+                          </select>
+                        </label>
+                        <label>原始目標 <input type="date" [(ngModel)]="scheduleDraft.baselineDate" /></label>
+                        <label>最新目標 <input type="date" [(ngModel)]="scheduleDraft.forecastDate" /></label>
+                        @if (scheduleDraft.state === 'achieved') {
+                          <label>實際達成日 <input type="date" [(ngModel)]="scheduleDraft.actualDate" required /></label>
+                        }
+                      }
+                    } @else {
+                      @if (editingSchedule) {<label>狀態<select [(ngModel)]="scheduleDraft.state"><option value="open">開放</option><option value="in-progress">進行中</option><option value="completed">完成</option><option value="cancelled">取消</option></select></label>}
                     <label
                       >原始計畫開始
                       <input
@@ -759,13 +806,14 @@ export class Home implements OnInit {
                       <input type="date" [(ngModel)]="scheduleDraft.actualEnd"
                     /></label>
                     }
+                    }
                     @if (editingSchedule) {
-                      <label>操作<select [(ngModel)]="scheduleDraft.action"><option value="update">一般修訂</option><option value="correct-original">更正原始資料</option><option value="reopen">重新開啟</option><option value="cancel">取消項目</option><option value="reactivate">重新啟用</option></select></label>
-                      <p class="schedule-note">一般改期只調整目前計畫；原始日期誤植時選擇「更正原始資料」。重開時請清除實際完成日。</p>
+                      <label>操作<select [(ngModel)]="scheduleDraft.action" (ngModelChange)="onScheduleActionChange()"><option value="update">一般修訂</option><option value="correct-original">更正原始資料</option><option value="reopen">重新開啟</option><option value="cancel">取消項目</option><option value="reactivate">重新啟用</option></select></label>
+                      <p class="schedule-note">{{ scheduleDraft.kind === 'milestone' ? '一般改期只調整最新目標；原始目標誤植時選擇「更正原始資料」。重開時自動清除實際達成日。' : '一般改期只調整目前計畫；原始日期誤植時選擇「更正原始資料」。重開時請清除實際完成日。' }}</p>
                       @if (editingSchedule.kind === 'phase' && editingSchedule.state !== 'completed' && scheduleDraft.state === 'completed' && editingSchedule.unfinishedTasks?.length) { <label class="schedule-exception"><input type="checkbox" [(ngModel)]="scheduleDraft.acknowledgeIncompleteTasks" />我已檢視未完成任務，並在修改原因中說明提前確認階段的理由。</label> }
                       <label>修改原因 <input [(ngModel)]="scheduleDraft.reason" required /></label>
                     }
-                    <button (click)="saveSchedule()" [disabled]="!token || !scheduleDraft.name.trim() || (scheduleDraft.kind === 'task' && !scheduleDraft.owner.trim()) || (editingSchedule && !scheduleDraft.reason.trim()) || (editingSchedule?.kind === 'phase' && editingSchedule?.state !== 'completed' && scheduleDraft.state === 'completed' && editingSchedule?.unfinishedTasks?.length && !scheduleDraft.acknowledgeIncompleteTasks)">
+                    <button (click)="saveSchedule()" [disabled]="!token || !scheduleDraft.name.trim() || (scheduleDraft.kind === 'task' && !scheduleDraft.owner.trim()) || (scheduleDraft.kind === 'milestone' && !editingSchedule && !scheduleDraft.targetDate) || (scheduleDraft.kind === 'milestone' && editingSchedule && scheduleDraft.state === 'achieved' && !scheduleDraft.actualDate) || (editingSchedule && !scheduleDraft.reason.trim()) || (editingSchedule?.kind === 'phase' && editingSchedule?.state !== 'completed' && scheduleDraft.state === 'completed' && editingSchedule?.unfinishedTasks?.length && !scheduleDraft.acknowledgeIncompleteTasks)">
                       {{ editingSchedule ? "儲存時程" : "新增時程" }}
                     </button>
                     @if (editingSchedule) {
@@ -1137,6 +1185,10 @@ export class ReportEditor implements OnInit, OnDestroy {
       owner: "",
       phaseId: "",
       acknowledgeIncompleteTasks: false,
+      targetDate: "",
+      baselineDate: "",
+      forecastDate: "",
+      actualDate: "",
       baselineStart: "",
       baselineEnd: "",
       forecastStart: "",
@@ -1148,6 +1200,37 @@ export class ReportEditor implements OnInit, OnDestroy {
       reason: "",
       action: "update",
     };
+  }
+  onScheduleKindChange() {
+    if (this.scheduleDraft.kind === "milestone") {
+      this.scheduleDraft.state = "pending";
+      this.scheduleDraft.owner = "";
+      this.scheduleDraft.phaseId = "";
+    } else if (this.scheduleDraft.state === "pending" || this.scheduleDraft.state === "achieved") {
+      this.scheduleDraft.state = "open";
+    }
+    this.changes.detectChanges();
+  }
+  onMilestoneStateChange() {
+    if (this.scheduleDraft.state !== "achieved") {
+      this.scheduleDraft.actualDate = "";
+    }
+    this.changes.detectChanges();
+  }
+  onScheduleActionChange() {
+    if (this.scheduleDraft.kind === "milestone") {
+      if (this.scheduleDraft.action === "reopen") {
+        this.scheduleDraft.state = "pending";
+        this.scheduleDraft.actualDate = "";
+      } else if (this.scheduleDraft.action === "cancel") {
+        this.scheduleDraft.state = "cancelled";
+        this.scheduleDraft.actualDate = "";
+      } else if (this.scheduleDraft.action === "reactivate") {
+        this.scheduleDraft.state = "pending";
+        this.scheduleDraft.actualDate = "";
+      }
+    }
+    this.changes.detectChanges();
   }
   async loadSchedule() {
     if (!this.selected) return;
@@ -1170,11 +1253,14 @@ export class ReportEditor implements OnInit, OnDestroy {
         entry.forecastEnd,
         entry.actualStart,
         entry.actualEnd,
+        entry.baselineDate,
+        entry.forecastDate,
+        entry.actualDate,
       ])
       .filter((date): date is string => !!date)
       .map((date) => new Date(`${date}T00:00:00`).getTime());
   }
-  schedulePosition(date: string | null) {
+  schedulePosition(date: string | null | undefined) {
     const dates = this.ganttDates();
     if (!date || !dates.length) return 0;
     const min = Math.min(...dates),
@@ -1190,7 +1276,7 @@ export class ReportEditor implements OnInit, OnDestroy {
           ),
         );
   }
-  scheduleWidth(start: string | null, end: string | null) {
+  scheduleWidth(start: string | null | undefined, end: string | null | undefined) {
     if (!start || !end) return 2;
     return Math.max(
       2,
@@ -1204,7 +1290,9 @@ export class ReportEditor implements OnInit, OnDestroy {
   }
   activeScheduleEntries() {
     return this.scheduleEntries.filter(
-      (entry) => entry.kind === "phase" && entry.state !== "completed",
+      (entry) =>
+        (entry.kind === "phase" && entry.state !== "completed") ||
+        (entry.kind === "milestone" && entry.state !== "cancelled"),
     );
   }
   schedulePhases() {
@@ -1215,7 +1303,12 @@ export class ReportEditor implements OnInit, OnDestroy {
   }
   scheduleDisplayEntries() {
     const phases = this.scheduleEntries.filter(entry => entry.kind === "phase");
-    return [...phases.flatMap(phase => [phase, ...this.scheduleEntries.filter(entry => entry.kind === "task" && entry.phaseId === phase.id)]), ...this.scheduleEntries.filter(entry => entry.kind === "task" && !entry.phaseId), ...this.scheduleEntries.filter(entry => entry.kind !== "phase" && entry.kind !== "task")];
+    return [
+      ...phases.flatMap(phase => [phase, ...this.scheduleEntries.filter(entry => entry.kind === "task" && entry.phaseId === phase.id)]),
+      ...this.scheduleEntries.filter(entry => entry.kind === "task" && !entry.phaseId),
+      ...this.scheduleEntries.filter(entry => entry.kind === "milestone"),
+      ...this.scheduleEntries.filter(entry => entry.kind !== "phase" && entry.kind !== "task" && entry.kind !== "milestone"),
+    ];
   }
   editSchedule(entry: ScheduleEntry) {
     this.editingSchedule = entry;
@@ -1225,6 +1318,10 @@ export class ReportEditor implements OnInit, OnDestroy {
       owner: entry.owner ?? "",
       phaseId: entry.phaseId ?? "",
       acknowledgeIncompleteTasks: false,
+      targetDate: entry.forecastDate ?? entry.baselineDate ?? "",
+      baselineDate: entry.baselineDate ?? "",
+      forecastDate: entry.forecastDate ?? "",
+      actualDate: entry.actualDate ?? "",
       baselineStart: entry.baselineStart ?? "",
       baselineEnd: entry.baselineEnd ?? "",
       forecastStart: entry.forecastStart ?? "",
@@ -1239,7 +1336,23 @@ export class ReportEditor implements OnInit, OnDestroy {
     this.changes.detectChanges();
   }
   scheduleStateLabel(state: ScheduleEntry["state"]) {
-    return ({ open: "開放", "in-progress": "進行中", completed: "完成", cancelled: "取消" })[state];
+    return (
+      {
+        open: "開放",
+        "in-progress": "進行中",
+        completed: "完成",
+        cancelled: "取消",
+        pending: "待達成",
+        achieved: "已達成",
+      }[state] ?? state
+    );
+  }
+  scheduleMilestoneVariance(entry: ScheduleEntry) {
+    if (!entry.baselineDate) return "—";
+    const date = entry.state === "achieved" ? entry.actualDate : entry.forecastDate;
+    if (!date) return "—";
+    const days = Math.round((Date.parse(date) - Date.parse(entry.baselineDate)) / 86400000);
+    return `${days > 0 ? "+" : ""}${days} 天`;
   }
   scheduleVariance(entry: ScheduleEntry) {
     const end = entry.actualEnd || entry.forecastEnd;
@@ -1274,30 +1387,45 @@ export class ReportEditor implements OnInit, OnDestroy {
   async saveSchedule() {
     if (!this.selected) return;
     const value = (date: string) => date || null;
-    const body = {
-      ...this.scheduleDraft,
-      owner: this.scheduleDraft.kind === "task" ? this.scheduleDraft.owner.trim() : null,
-      phaseId: this.scheduleDraft.kind === "task" ? this.scheduleDraft.phaseId || null : null,
-      baselineStart: value(this.scheduleDraft.baselineStart),
-      baselineEnd: value(this.scheduleDraft.baselineEnd),
-      forecastStart: this.editingSchedule ? value(this.scheduleDraft.forecastStart) : value(this.scheduleDraft.baselineStart),
-      forecastEnd: this.editingSchedule ? value(this.scheduleDraft.forecastEnd) : value(this.scheduleDraft.baselineEnd),
-      actualStart: value(this.scheduleDraft.actualStart),
-      actualEnd: value(this.scheduleDraft.actualEnd),
-    };
+    let body: any;
+    if (this.scheduleDraft.kind === "milestone") {
+      body = {
+        kind: "milestone",
+        name: this.scheduleDraft.name.trim(),
+        targetDate: value(this.scheduleDraft.targetDate),
+        baselineDate: value(this.scheduleDraft.baselineDate || this.scheduleDraft.targetDate),
+        forecastDate: value(this.scheduleDraft.forecastDate || this.scheduleDraft.targetDate),
+        actualDate: value(this.scheduleDraft.actualDate),
+        state: this.editingSchedule ? this.scheduleDraft.state : "pending",
+        reason: this.scheduleDraft.reason ? this.scheduleDraft.reason.trim() : null,
+        action: this.scheduleDraft.action,
+      };
+    } else {
+      body = {
+        ...this.scheduleDraft,
+        owner: this.scheduleDraft.kind === "task" ? this.scheduleDraft.owner.trim() : null,
+        phaseId: this.scheduleDraft.kind === "task" ? this.scheduleDraft.phaseId || null : null,
+        baselineStart: value(this.scheduleDraft.baselineStart),
+        baselineEnd: value(this.scheduleDraft.baselineEnd),
+        forecastStart: this.editingSchedule ? value(this.scheduleDraft.forecastStart) : value(this.scheduleDraft.baselineStart),
+        forecastEnd: this.editingSchedule ? value(this.scheduleDraft.forecastEnd) : value(this.scheduleDraft.baselineEnd),
+        actualStart: value(this.scheduleDraft.actualStart),
+        actualEnd: value(this.scheduleDraft.actualEnd),
+      };
+    }
     try {
       let result: { projectVersion: number };
       if (this.editingSchedule)
-        result = await firstValueFrom(
+        result = (await firstValueFrom(
           this.http.put(
             `/api/items/${this.selected.id}/schedule/${this.editingSchedule.id}`,
             { ...body, baseVersion: this.editingSchedule.version, token: this.token, baseProjectVersion: this.baseVersion },
           ),
-        ) as { projectVersion: number };
+        )) as { projectVersion: number };
       else
-        result = await firstValueFrom(
+        result = (await firstValueFrom(
           this.http.post(`/api/items/${this.selected.id}/schedule`, { ...body, token: this.token, baseProjectVersion: this.baseVersion }),
-        ) as { projectVersion: number };
+        )) as { projectVersion: number };
       this.baseVersion = result.projectVersion;
       await this.loadSchedule();
       this.resetScheduleDraft();
@@ -1566,58 +1694,73 @@ export class ReportEditor implements OnInit, OnDestroy {
                       <div class="gantt-row">
                         <span>{{ entry.name }}</span>
                         <div class="gantt-track">
-                          <i
-                            class="baseline"
-                            [style.left.%]="
-                              publicationPosition(
-                                item.schedule || [],
-                                entry.baselineStart
-                              )
-                            "
-                            [style.width.%]="
-                              publicationWidth(
-                                item.schedule || [],
-                                entry.baselineStart,
-                                entry.baselineEnd
-                              )
-                            "
-                          ></i
-                          ><i
-                            class="forecast"
-                            [style.left.%]="
-                              publicationPosition(
-                                item.schedule || [],
-                                entry.forecastStart
-                              )
-                            "
-                            [style.width.%]="
-                              publicationWidth(
-                                item.schedule || [],
-                                entry.forecastStart,
-                                entry.forecastEnd
-                              )
-                            "
-                          ></i>
-                          @if (entry.actualStart || entry.actualEnd) {
+                          @if (entry.kind === 'milestone') {
                             <i
-                              class="actual"
+                              class="milestone-marker"
+                              [attr.data-state]="entry.state"
                               [style.left.%]="
                                 publicationPosition(
                                   item.schedule || [],
-                                  entry.actualStart || entry.actualEnd
+                                  entry.state === 'achieved'
+                                    ? entry.actualDate
+                                    : entry.forecastDate
+                                )
+                              "
+                            ></i>
+                          } @else {
+                            <i
+                              class="baseline"
+                              [style.left.%]="
+                                publicationPosition(
+                                  item.schedule || [],
+                                  entry.baselineStart
                                 )
                               "
                               [style.width.%]="
                                 publicationWidth(
                                   item.schedule || [],
-                                  entry.actualStart || entry.actualEnd,
-                                  entry.actualEnd || entry.actualStart
+                                  entry.baselineStart,
+                                  entry.baselineEnd
+                                )
+                              "
+                            ></i
+                            ><i
+                              class="forecast"
+                              [style.left.%]="
+                                publicationPosition(
+                                  item.schedule || [],
+                                  entry.forecastStart
+                                )
+                              "
+                              [style.width.%]="
+                                publicationWidth(
+                                  item.schedule || [],
+                                  entry.forecastStart,
+                                  entry.forecastEnd
                                 )
                               "
                             ></i>
+                            @if (entry.actualStart || entry.actualEnd) {
+                              <i
+                                class="actual"
+                                [style.left.%]="
+                                  publicationPosition(
+                                    item.schedule || [],
+                                    entry.actualStart || entry.actualEnd
+                                  )
+                                "
+                                [style.width.%]="
+                                  publicationWidth(
+                                    item.schedule || [],
+                                    entry.actualStart || entry.actualEnd,
+                                    entry.actualEnd || entry.actualStart
+                                  )
+                                "
+                              ></i>
+                            }
                           }
                         </div>
-                        <small>偏差：{{ variance(entry) }}</small>
+                        <small>{{ entry.kind === 'milestone' ? (entry.state === 'achieved' ? '實際達成' : '最新目標') : '偏差：' + variance(entry) }}</small>
                       </div>
                     }
                   </div>
@@ -1625,22 +1768,31 @@ export class ReportEditor implements OnInit, OnDestroy {
                 @if (item.schedule?.length) {
                   <ul>
                     @for (entry of item.schedule; track entry.id) {
-                      <li>
+                      <li [class.schedule-task]="entry.kind === 'task'" [class.schedule-milestone]="entry.kind === 'milestone'">
                         <strong
                           >{{
                             entry.kind === "phase" ? "階段" : entry.kind === "task" ? "關鍵任務" : "重要里程碑"
                           }}：{{ entry.name }}</strong
                         >
                         @if (entry.kind === 'task') { · 負責 {{ entry.owner }} }
-                        · 基準 {{ entry.baselineStart || "—" }}–{{
-                          entry.baselineEnd || "—"
-                        }}
-                        · 預估 {{ entry.forecastStart || "—" }}–{{
-                          entry.forecastEnd || "—"
-                        }}
-                        · 實際 {{ entry.actualStart || "—" }}–{{
-                          entry.actualEnd || "—"
-                        }}
+                        @if (entry.kind === 'milestone') {
+                          · {{ entry.state === 'achieved' ? '實際達成' : '最新目標' }} {{ (entry.state === 'achieved' ? entry.actualDate : entry.forecastDate) || "—" }}
+                          · 原始目標 {{ entry.baselineDate || "—" }}
+                          @if (entry.state === 'achieved' && entry.forecastDate) {
+                            · 最新目標 {{ entry.forecastDate }}
+                          }
+                          · 偏差 {{ milestoneVariance(entry) }}
+                        } @else {
+                          · 基準 {{ entry.baselineStart || "—" }}–{{
+                            entry.baselineEnd || "—"
+                          }}
+                          · 預估 {{ entry.forecastStart || "—" }}–{{
+                            entry.forecastEnd || "—"
+                          }}
+                          · 實際 {{ entry.actualStart || "—" }}–{{
+                            entry.actualEnd || "—"
+                          }}
+                        }
                       </li>
                     }
                   </ul>
@@ -1669,7 +1821,7 @@ export class PublicationPage implements OnInit {
     return labels[section] ?? section;
   }
   publicationPhases(entries: ScheduleEntry[]) {
-    return entries.filter(entry => entry.kind === "phase");
+    return entries.filter(entry => entry.kind === "phase" || (entry.kind === "milestone" && entry.state !== "cancelled"));
   }
   private publicationDates(entries: ScheduleEntry[]) {
     return entries
@@ -1680,11 +1832,14 @@ export class PublicationPage implements OnInit {
         entry.forecastEnd,
         entry.actualStart,
         entry.actualEnd,
+        entry.baselineDate,
+        entry.forecastDate,
+        entry.actualDate,
       ])
       .filter((date): date is string => !!date)
       .map((date) => new Date(`${date}T00:00:00`).getTime());
   }
-  publicationPosition(entries: ScheduleEntry[], date: string | null) {
+  publicationPosition(entries: ScheduleEntry[], date: string | null | undefined) {
     const dates = this.publicationDates(entries);
     if (!date || !dates.length) return 0;
     const min = Math.min(...dates),
@@ -1702,8 +1857,8 @@ export class PublicationPage implements OnInit {
   }
   publicationWidth(
     entries: ScheduleEntry[],
-    start: string | null,
-    end: string | null,
+    start: string | null | undefined,
+    end: string | null | undefined,
   ) {
     return !start || !end
       ? 2
@@ -1712,6 +1867,13 @@ export class PublicationPage implements OnInit {
           this.publicationPosition(entries, end) -
             this.publicationPosition(entries, start),
         );
+  }
+  milestoneVariance(entry: ScheduleEntry) {
+    if (!entry.baselineDate) return "—";
+    const date = entry.state === "achieved" ? entry.actualDate : entry.forecastDate;
+    if (!date) return "—";
+    const days = Math.round((new Date(`${date}T00:00:00`).getTime() - new Date(`${entry.baselineDate}T00:00:00`).getTime()) / 86400000);
+    return `${days > 0 ? "+" : ""}${days} 天`;
   }
   variance(entry: ScheduleEntry) {
     if (!entry.baselineEnd || !entry.forecastEnd) return "—";

@@ -197,7 +197,58 @@ try {
   assert.equal(await schedulePanel.getByRole('button', { name: '儲存時程' }).isDisabled(), true);
   await schedulePanel.getByLabel('我已檢視未完成任務').check();
   await schedulePanel.getByRole('button', { name: '儲存時程' }).click();
-  await schedulePanel.getByText('完成偏差 +3 天').waitFor({ timeout: 15000 });
+  await schedulePanel.getByRole('heading', { name: '新增交付項目' }).waitFor({ timeout: 15000 });
+  await schedulePanel.getByLabel('類型').selectOption('milestone');
+  await schedulePanel.getByLabel('目標日期').waitFor({ timeout: 15000 });
+  assert.equal(await schedulePanel.getByLabel('原始計畫開始').count(), 0, 'milestone form must not have start date');
+  assert.equal(await schedulePanel.getByLabel('原始計畫結束').count(), 0, 'milestone form must not have end date');
+  await schedulePanel.getByLabel('名稱').fill('上線評估會議');
+  await schedulePanel.getByLabel('目標日期').fill('2026-10-15');
+  await schedulePanel.getByRole('button', { name: '新增時程' }).click();
+  await schedulePanel.getByText('重要里程碑：上線評估會議').waitFor({ timeout: 15000 });
+  await schedulePanel.getByText('待達成').waitFor({ timeout: 15000 });
+  await schedulePanel.getByText('最新目標 2026-10-15').waitFor({ timeout: 15000 });
+  const initialMilestoneText = await schedulePanel.locator('li.schedule-milestone').textContent();
+  assert.ok(!initialMilestoneText.includes('–'), 'milestone list must not display date range');
+
+  // 改期：最新目標延至 2026-10-18，原始目標維持 2026-10-15，偏差 +3 天
+  await schedulePanel.locator('li.schedule-milestone').getByRole('button', { name: '編輯' }).click();
+  await schedulePanel.getByLabel('最新目標').fill('2026-10-18');
+  await schedulePanel.getByLabel('修改原因', { exact: true }).fill('依據架構審查結論調整');
+  await schedulePanel.getByRole('button', { name: '儲存時程' }).click();
+  await schedulePanel.getByRole('heading', { name: '新增交付項目' }).waitFor({ timeout: 15000 });
+  await schedulePanel.locator('li.schedule-milestone').getByText('偏差 +3 天').waitFor({ timeout: 15000 });
+
+  // 達成：標記已達成，未填實際達成日不可儲存，填妥後儲存
+  await schedulePanel.locator('li.schedule-milestone').getByRole('button', { name: '編輯' }).click();
+  await schedulePanel.getByLabel('狀態').selectOption('achieved');
+  assert.equal(await schedulePanel.getByRole('button', { name: '儲存時程' }).isDisabled(), true, 'achieved milestone requires actualDate');
+  await schedulePanel.getByLabel('實際達成日').fill('2026-10-17');
+  await schedulePanel.getByLabel('修改原因', { exact: true }).fill('提早完成上線評估');
+  await schedulePanel.getByRole('button', { name: '儲存時程' }).click();
+  await schedulePanel.getByRole('heading', { name: '新增交付項目' }).waitFor({ timeout: 15000 });
+  await schedulePanel.locator('li.schedule-milestone').getByText('已達成').waitFor({ timeout: 15000 });
+  await schedulePanel.locator('li.schedule-milestone').getByText('實際達成 2026-10-17').waitFor({ timeout: 15000 });
+  await schedulePanel.locator('li.schedule-milestone').getByText('偏差 +2 天').waitFor({ timeout: 15000 });
+
+  // 重開：操作選 reopen，重置為待達成並清除實際達成日
+  await schedulePanel.locator('li.schedule-milestone').getByRole('button', { name: '編輯' }).click();
+  await schedulePanel.getByLabel('操作').selectOption('reopen');
+  await schedulePanel.getByLabel('修改原因', { exact: true }).fill('發現待辦項目需重新評估');
+  await schedulePanel.getByRole('button', { name: '儲存時程' }).click();
+  await schedulePanel.getByRole('heading', { name: '新增交付項目' }).waitFor({ timeout: 15000 });
+  await schedulePanel.locator('li.schedule-milestone').getByText('待達成').waitFor({ timeout: 15000 });
+  const reopenedMilestoneText = await schedulePanel.locator('li.schedule-milestone').textContent();
+  assert.ok(!reopenedMilestoneText.includes('實際達成'), 'reopened milestone must clear current actualDate');
+
+  // 重新確認達成以利發布
+  await schedulePanel.locator('li.schedule-milestone').getByRole('button', { name: '編輯' }).click();
+  await schedulePanel.getByLabel('狀態').selectOption('achieved');
+  await schedulePanel.getByLabel('實際達成日').fill('2026-10-18');
+  await schedulePanel.getByLabel('修改原因', { exact: true }).fill('第二次審查通過達成');
+  await schedulePanel.getByRole('button', { name: '儲存時程' }).click();
+  await schedulePanel.getByRole('heading', { name: '新增交付項目' }).waitFor({ timeout: 15000 });
+  await schedulePanel.locator('li.schedule-milestone').getByText('已達成').waitFor({ timeout: 15000 });
   await page.getByRole('button', { name: '發布正式版' }).click();
   const publication = page.getByRole('link', { name: '查看剛發布的固定版本' });
   await publication.waitFor({ timeout: 15000 });
@@ -209,6 +260,11 @@ try {
   await page.getByText('這是投影與列印驗收用的代表性長文字', { exact: false }).first().waitFor({ timeout: 15000 });
   assert.equal(await page.getByRole('heading', { name: '專案摘要', exact: true }).count(), 1);
   assert.equal(await page.getByRole('heading', { name: '專案摘要（二）', exact: true }).count(), 1);
+  await page.getByText('重要里程碑：上線評估會議').waitFor({ timeout: 15000 });
+  assert.ok(await page.locator('.milestone-marker').count() > 0, 'milestone diamond marker should be rendered in publication gantt');
+  const pubMilestoneText = await page.locator('li.schedule-milestone').first().textContent();
+  assert.ok(!pubMilestoneText.includes('–'), 'publication milestone must not display date range');
+  assert.ok(pubMilestoneText.includes('實際達成 2026-10-18'), 'publication milestone should display actual date');
   assert.equal(await page.getByRole('heading', { name: '交接維運系統', exact: true }).count(), 1);
   await page.getByText('完成簽收').waitFor({ timeout: 15000 });
   await page.getByRole('link', { name: '來源' }).waitFor({ timeout: 15000 });
