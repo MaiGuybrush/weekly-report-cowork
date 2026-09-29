@@ -31,6 +31,7 @@ public sealed class Store(IConfiguration config)
             CREATE TABLE IF NOT EXISTS project_work_revisions(id INTEGER PRIMARY KEY AUTOINCREMENT, project_id TEXT NOT NULL REFERENCES items(id), section TEXT NOT NULL, actor TEXT NOT NULL, at TEXT NOT NULL, before_version INTEGER NOT NULL, after_version INTEGER NOT NULL, before_work TEXT NOT NULL, after_work TEXT NOT NULL, before_schedule_proposal TEXT, after_schedule_proposal TEXT);
             CREATE TABLE IF NOT EXISTS project_schedule_entries(id TEXT PRIMARY KEY, project_id TEXT NOT NULL REFERENCES items(id), kind TEXT NOT NULL, name TEXT NOT NULL, baseline_start TEXT, baseline_end TEXT, forecast_start TEXT, forecast_end TEXT, actual_start TEXT, actual_end TEXT, version INTEGER NOT NULL DEFAULT 1, created_by TEXT NOT NULL, updated_at TEXT NOT NULL);
             CREATE TABLE IF NOT EXISTS project_baseline_history(id INTEGER PRIMARY KEY AUTOINCREMENT, entry_id TEXT NOT NULL REFERENCES project_schedule_entries(id), actor TEXT NOT NULL, at TEXT NOT NULL, before_baseline_start TEXT, before_baseline_end TEXT, after_baseline_start TEXT, after_baseline_end TEXT, reason TEXT NOT NULL);
+            CREATE TABLE IF NOT EXISTS project_schedule_revisions(id INTEGER PRIMARY KEY AUTOINCREMENT, entry_id TEXT NOT NULL REFERENCES project_schedule_entries(id), actor TEXT NOT NULL, at TEXT NOT NULL, action TEXT NOT NULL, reason TEXT, before_state TEXT, after_state TEXT NOT NULL);
             CREATE TABLE IF NOT EXISTS ecim_import_runs(id TEXT PRIMARY KEY, report_id TEXT NOT NULL REFERENCES reports(id), section TEXT NOT NULL, period_from TEXT, period_to TEXT, started_at TEXT NOT NULL, finished_at TEXT, status TEXT NOT NULL);
             CREATE TABLE IF NOT EXISTS ecim_member_results(id INTEGER PRIMARY KEY AUTOINCREMENT, run_id TEXT NOT NULL REFERENCES ecim_import_runs(id), user_id TEXT NOT NULL, status TEXT NOT NULL, error TEXT, work_count INTEGER NOT NULL DEFAULT 0, last_success_at TEXT);
             CREATE TABLE IF NOT EXISTS ecim_member_sync_state(section TEXT NOT NULL, user_id TEXT NOT NULL, last_success_at TEXT, PRIMARY KEY(section,user_id));
@@ -49,6 +50,7 @@ public sealed class Store(IConfiguration config)
         EnsureColumn(db, "access_audit", "before_reader_access", "INTEGER");
         EnsureColumn(db, "access_audit", "after_reader_access", "INTEGER NOT NULL DEFAULT 0");
         EnsureColumn(db, "project_work", "version", "INTEGER NOT NULL DEFAULT 0");
+        EnsureColumn(db, "project_schedule_entries", "state", "TEXT NOT NULL DEFAULT 'open'");
         EnsureColumn(db, "ecim_candidates", "candidate_type", "TEXT NOT NULL DEFAULT 'new-source'");
         EnsureColumn(db, "ecim_candidates", "reason", "TEXT");
         EnsureColumn(db, "ecim_candidates", "target_item_id", "TEXT");

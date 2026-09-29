@@ -8,8 +8,14 @@ var builder = WebApplication.CreateBuilder(args);
 builder.Logging.ClearProviders();
 builder.Logging.AddConsole();
 builder.Services.AddSingleton<Store>();
-builder.Services.AddHttpClient<JwtVerifier>();
+builder.Services.AddHttpClient();
+builder.Services.AddSingleton<JwtVerifier>();
 builder.Services.AddHttpClient<EcimClient>();
+builder.Services.AddCors(options => options.AddPolicy("web", policy =>
+{
+    var origins = builder.Configuration.GetSection("Cors:AllowedOrigins").Get<string[]>() ?? ["http://localhost:4200"];
+    policy.WithOrigins(origins).AllowAnyHeader().AllowAnyMethod();
+}));
 var app = builder.Build();
 app.Services.GetRequiredService<Store>().Initialize();
 var webRoot = Path.GetFullPath(Path.Combine(app.Environment.ContentRootPath, "../web/dist/weekly-report-web/browser"));
@@ -20,8 +26,13 @@ if (Directory.Exists(webRoot))
     app.UseStaticFiles(new StaticFileOptions { FileProvider = files });
 }
 
+app.MapGet("/api/health", () => Results.Ok(new { status = "ok" }));
+
+app.UseCors("web");
+
 app.Use(async (context, next) =>
 {
+    if (context.Request.Path.StartsWithSegments("/api/health")) { await next(); return; }
     if (!context.Request.Path.StartsWithSegments("/api")) { await next(); return; }
     var empNo = await context.RequestServices.GetRequiredService<JwtVerifier>().Verify(context.Request.Headers.Authorization);
     if (empNo is null) { context.Response.StatusCode = 401; return; }
@@ -390,15 +401,23 @@ app.MapGet("/api/items/{itemId}/schedule", (HttpContext ctx, Store store, string
 app.MapPost("/api/items/{itemId}/schedule", (HttpContext ctx, Store store, string itemId, ScheduleRequest request) =>
 {
     using var db = store.Open();
+    using var tx = db.BeginTransaction();
     var item = GetItem(db, itemId);
     if (item is null) return Results.NotFound();
     if (item.Section != "projects" || !CanMaintainProject(Current(ctx), item)) return Results.StatusCode(403);
-    if (!ValidSchedule(request)) return Results.BadRequest();
+    if (item.Version == 0) return Results.BadRequest(new { error = "commit the project item before creating schedule entries" });
+    if (request.Kind != "phase" || !ValidPhase(request) || request.State != "open" || request.ForecastStart != request.BaselineStart || request.ForecastEnd != request.BaselineEnd) return Results.BadRequest(new { error = "invalid phase" });
+    var conflict = ScheduleWriteConflict(db, item, Current(ctx), request);
+    if (conflict is not null) return conflict;
     var id = Guid.NewGuid().ToString();
     var at = DateTimeOffset.UtcNow.ToString("O");
-    Store.Sql(db, "INSERT INTO project_schedule_entries(id,project_id,kind,name,baseline_start,baseline_end,forecast_start,forecast_end,actual_start,actual_end,created_by,updated_at) VALUES($id,$project,$kind,$name,$baselineStart,$baselineEnd,$forecastStart,$forecastEnd,$actualStart,$actualEnd,$actor,$at)",
-        ("$id", id), ("$project", itemId), ("$kind", request.Kind!), ("$name", request.Name!.Trim()), ("$baselineStart", request.BaselineStart), ("$baselineEnd", request.BaselineEnd), ("$forecastStart", request.ForecastStart), ("$forecastEnd", request.ForecastEnd), ("$actualStart", request.ActualStart), ("$actualEnd", request.ActualEnd), ("$actor", Current(ctx).EmpNo), ("$at", at)).ExecuteNonQuery();
-    return Results.Created($"/api/items/{itemId}/schedule/{id}", new { id, version = 1 });
+    Store.Sql(db, "INSERT INTO project_schedule_entries(id,project_id,kind,name,baseline_start,baseline_end,forecast_start,forecast_end,actual_start,actual_end,state,created_by,updated_at) VALUES($id,$project,'phase',$name,$baselineStart,$baselineEnd,$forecastStart,$forecastEnd,$actualStart,$actualEnd,$state,$actor,$at)",
+        ("$id", id), ("$project", itemId), ("$name", request.Name!.Trim()), ("$baselineStart", request.BaselineStart), ("$baselineEnd", request.BaselineEnd), ("$forecastStart", request.ForecastStart), ("$forecastEnd", request.ForecastEnd), ("$actualStart", request.ActualStart), ("$actualEnd", request.ActualEnd), ("$state", request.State), ("$actor", Current(ctx).EmpNo), ("$at", at)).ExecuteNonQuery();
+    var created = ScheduleEntry(db, id)!;
+    SaveScheduleRevision(db, id, Current(ctx).EmpNo, at, "create", null, null, created);
+    AdvanceProjectVersion(db, item);
+    tx.Commit();
+    return Results.Created($"/api/items/{itemId}/schedule/{id}", new { id, version = 1, projectVersion = item.Version + 1 });
 });
 app.MapPut("/api/items/{itemId}/schedule/{entryId}", (HttpContext ctx, Store store, string itemId, string entryId, ScheduleRequest request) =>
 {
@@ -407,20 +426,30 @@ app.MapPut("/api/items/{itemId}/schedule/{entryId}", (HttpContext ctx, Store sto
     var item = GetItem(db, itemId);
     if (item is null) return Results.NotFound();
     if (item.Section != "projects" || !CanMaintainProject(Current(ctx), item)) return Results.StatusCode(403);
-    if (!ValidSchedule(request)) return Results.BadRequest();
     var current = ScheduleEntry(db, entryId);
     if (current is null || current.ProjectId != itemId) return Results.NotFound();
-    if (request.BaseVersion != current.Version) return Results.Conflict(new { error = "stale schedule version", latest = current });
-    var baselineChanged = current.BaselineStart != request.BaselineStart || current.BaselineEnd != request.BaselineEnd;
-    if (baselineChanged && string.IsNullOrWhiteSpace(request.BaselineChangeReason)) return Results.BadRequest(new { error = "baselineChangeReason required" });
+    if (current.Kind != "phase" || request.Kind != "phase" || !ValidPhase(request)) return Results.BadRequest(new { error = "invalid phase" });
+    var conflict = ScheduleWriteConflict(db, item, Current(ctx), request);
+    if (conflict is not null) return conflict;
+    if (request.BaseVersion != current.Version) return ScheduleConflict(db, itemId, item.Version, "stale schedule version");
+    if (string.IsNullOrWhiteSpace(request.Reason)) return Results.BadRequest(new { error = "reason required" });
+    var correction = request.Action == "correct-original";
+    if (request.Action is not (null or "update" or "correct-original" or "reopen" or "cancel" or "reactivate")) return Results.BadRequest(new { error = "invalid action" });
+    var originalChanged = current.BaselineStart != request.BaselineStart || current.BaselineEnd != request.BaselineEnd;
+    if (originalChanged != correction) return Results.BadRequest(new { error = "original plan changes require correct-original action" });
+    if (request.Action == "reopen" && (current.State != "completed" || request.State != "in-progress" || request.ActualEnd is not null || request.ActualStart != current.ActualStart)) return Results.BadRequest(new { error = "invalid reopen" });
+    if (request.Action == "cancel" && (current.State == "cancelled" || request.State != "cancelled")) return Results.BadRequest(new { error = "invalid cancel" });
+    if (request.Action == "reactivate" && (current.State != "cancelled" || request.State is not ("open" or "in-progress"))) return Results.BadRequest(new { error = "invalid reactivate" });
+    if (request.Action is not ("reopen" or "cancel") && current.State == "completed" && request.State != "completed") return Results.BadRequest(new { error = "reopen action required" });
+    if (request.State == "cancelled" && current.State != "cancelled" && request.Action != "cancel") return Results.BadRequest(new { error = "cancel action required" });
+    if (current.State == "cancelled" && request.State != "cancelled" && request.Action != "reactivate") return Results.BadRequest(new { error = "reactivate action required" });
     var at = DateTimeOffset.UtcNow.ToString("O");
-    Store.Sql(db, "UPDATE project_schedule_entries SET kind=$kind,name=$name,baseline_start=$baselineStart,baseline_end=$baselineEnd,forecast_start=$forecastStart,forecast_end=$forecastEnd,actual_start=$actualStart,actual_end=$actualEnd,version=version+1,updated_at=$at WHERE id=$id AND version=$version",
-        ("$kind", request.Kind!), ("$name", request.Name!.Trim()), ("$baselineStart", request.BaselineStart), ("$baselineEnd", request.BaselineEnd), ("$forecastStart", request.ForecastStart), ("$forecastEnd", request.ForecastEnd), ("$actualStart", request.ActualStart), ("$actualEnd", request.ActualEnd), ("$at", at), ("$id", entryId), ("$version", current.Version)).ExecuteNonQuery();
-    if (baselineChanged)
-        Store.Sql(db, "INSERT INTO project_baseline_history(entry_id,actor,at,before_baseline_start,before_baseline_end,after_baseline_start,after_baseline_end,reason) VALUES($entry,$actor,$at,$beforeStart,$beforeEnd,$afterStart,$afterEnd,$reason)",
-            ("$entry", entryId), ("$actor", Current(ctx).EmpNo), ("$at", at), ("$beforeStart", current.BaselineStart), ("$beforeEnd", current.BaselineEnd), ("$afterStart", request.BaselineStart), ("$afterEnd", request.BaselineEnd), ("$reason", request.BaselineChangeReason!.Trim())).ExecuteNonQuery();
+    Store.Sql(db, "UPDATE project_schedule_entries SET name=$name,baseline_start=$baselineStart,baseline_end=$baselineEnd,forecast_start=$forecastStart,forecast_end=$forecastEnd,actual_start=$actualStart,actual_end=$actualEnd,state=$state,version=version+1,updated_at=$at WHERE id=$id AND version=$version",
+        ("$name", request.Name!.Trim()), ("$baselineStart", request.BaselineStart), ("$baselineEnd", request.BaselineEnd), ("$forecastStart", request.ForecastStart), ("$forecastEnd", request.ForecastEnd), ("$actualStart", request.ActualStart), ("$actualEnd", request.ActualEnd), ("$state", request.State), ("$at", at), ("$id", entryId), ("$version", current.Version)).ExecuteNonQuery();
+    SaveScheduleRevision(db, entryId, Current(ctx).EmpNo, at, request.Action ?? "update", request.Reason!.Trim(), current, ScheduleEntry(db, entryId)!);
+    AdvanceProjectVersion(db, item);
     tx.Commit();
-    return Results.Ok(new { version = current.Version + 1 });
+    return Results.Ok(new { version = current.Version + 1, projectVersion = item.Version + 1 });
 });
 app.MapGet("/api/items/{itemId}/schedule/{entryId}/baseline-history", (HttpContext ctx, Store store, string itemId, string entryId) =>
 {
@@ -434,6 +463,20 @@ app.MapGet("/api/items/{itemId}/schedule/{entryId}/baseline-history", (HttpConte
     using var rows = Store.Sql(db, "SELECT actor,at,before_baseline_start,before_baseline_end,after_baseline_start,after_baseline_end,reason FROM project_baseline_history WHERE entry_id=$entry ORDER BY id", ("$entry", entryId)).ExecuteReader();
     var history = new List<object>();
     while (rows.Read()) history.Add(new { actor = rows.GetString(0), at = rows.GetString(1), beforeBaselineStart = NullableString(rows, 2), beforeBaselineEnd = NullableString(rows, 3), afterBaselineStart = NullableString(rows, 4), afterBaselineEnd = NullableString(rows, 5), reason = rows.GetString(6) });
+    return Results.Ok(history);
+});
+app.MapGet("/api/items/{itemId}/schedule/{entryId}/history", (HttpContext ctx, Store store, string itemId, string entryId) =>
+{
+    using var db = store.Open();
+    var item = GetItem(db, itemId);
+    if (item is null) return Results.NotFound();
+    var user = Current(ctx);
+    if (item.Section != "projects" || !CanMaintainProject(user, item) && !IsProjectParticipant(db, itemId, user.Section)) return Results.StatusCode(403);
+    var entry = ScheduleEntry(db, entryId);
+    if (entry is null || entry.ProjectId != itemId) return Results.NotFound();
+    using var rows = Store.Sql(db, "SELECT actor,at,action,reason,before_state,after_state FROM project_schedule_revisions WHERE entry_id=$id ORDER BY id", ("$id", entryId)).ExecuteReader();
+    var history = new List<object>();
+    while (rows.Read()) history.Add(new { actor = rows.GetString(0), at = rows.GetString(1), action = rows.GetString(2), reason = NullableString(rows, 3), before = rows.IsDBNull(4) ? (System.Text.Json.JsonElement?)null : System.Text.Json.JsonSerializer.Deserialize<System.Text.Json.JsonElement>(rows.GetString(4)), after = System.Text.Json.JsonSerializer.Deserialize<System.Text.Json.JsonElement>(rows.GetString(5)) });
     return Results.Ok(history);
 });
 app.MapGet("/api/items/{itemId}", (HttpContext ctx, Store store, string itemId) =>
@@ -576,7 +619,38 @@ static bool IsProjectParticipant(SqliteConnection db, string itemId, string? sec
 static bool ValidSection(SqliteConnection db, string? section) => !string.IsNullOrWhiteSpace(section) && Store.Sql(db, "SELECT 1 FROM users WHERE role='Head' AND section=$section", ("$section", section.Trim())).ExecuteScalar() is not null;
 static bool Valid(string? title, string? content) => !string.IsNullOrWhiteSpace(title) && title.Length <= 200 && content is not null && content.Length <= 20000;
 static bool ValidProjectWork(string? work, string? scheduleProposal) => !string.IsNullOrWhiteSpace(work) && work.Length <= 20000 && (scheduleProposal is null || scheduleProposal.Length <= 2000);
-static bool ValidSchedule(ScheduleRequest request) => request.Kind is "phase" or "milestone" && !string.IsNullOrWhiteSpace(request.Name) && request.Name.Length <= 200 && (request.Kind == "phase" ? ValidDateRange(request.BaselineStart, request.BaselineEnd) && ValidDateRange(request.ForecastStart, request.ForecastEnd) && ValidDateRange(request.ActualStart, request.ActualEnd) : ValidMilestoneDates(request.BaselineStart, request.BaselineEnd) && ValidMilestoneDates(request.ForecastStart, request.ForecastEnd) && ValidMilestoneDates(request.ActualStart, request.ActualEnd));
+static bool ValidPhase(ScheduleRequest request) =>
+    !string.IsNullOrWhiteSpace(request.Name) && request.Name.Length <= 200 &&
+    request.BaselineStart is not null && ValidDateRange(request.BaselineStart, request.BaselineEnd) &&
+    request.ForecastStart is not null && ValidDateRange(request.ForecastStart, request.ForecastEnd) &&
+    (request.ActualStart is null || DateOnly.TryParseExact(request.ActualStart, "yyyy-MM-dd", out _)) &&
+    (request.ActualEnd is null || DateOnly.TryParseExact(request.ActualEnd, "yyyy-MM-dd", out _)) &&
+    (request.ActualStart is null || request.ActualEnd is null || string.CompareOrdinal(request.ActualStart, request.ActualEnd) <= 0) &&
+    (request.State switch
+    {
+        "open" => request.ActualStart is null && request.ActualEnd is null,
+        "in-progress" => request.ActualStart is not null && request.ActualEnd is null,
+        "completed" => request.ActualStart is not null && request.ActualEnd is not null,
+        "cancelled" => request.ActualEnd is null,
+        _ => false
+    });
+static IResult ScheduleConflict(SqliteConnection db, string itemId, int version, string error) =>
+    Results.Conflict(new { error, latest = new { projectVersion = version, schedule = ScheduleEntries(db, itemId) } });
+static IResult? ScheduleWriteConflict(SqliteConnection db, Item item, User user, ScheduleRequest request)
+{
+    var lease = GetLease(db, item.Id);
+    if (lease is null || lease.Holder != user.EmpNo || lease.ExpiresAt <= DateTimeOffset.UtcNow || !Matches(request.Token ?? "", lease.TokenHash) || request.BaseProjectVersion != item.Version || lease.BaseVersion != item.Version)
+        return ScheduleConflict(db, item.Id, item.Version, "stale lease or project version");
+    return null;
+}
+static void AdvanceProjectVersion(SqliteConnection db, Item item)
+{
+    Store.Sql(db, "UPDATE items SET version=version+1 WHERE id=$id AND version=$version", ("$id", item.Id), ("$version", item.Version)).ExecuteNonQuery();
+    Store.Sql(db, "UPDATE leases SET base_version=$next WHERE item_id=$id", ("$next", item.Version + 1), ("$id", item.Id)).ExecuteNonQuery();
+}
+static void SaveScheduleRevision(SqliteConnection db, string entryId, string actor, string at, string action, string? reason, ScheduleEntry? before, ScheduleEntry after) =>
+    Store.Sql(db, "INSERT INTO project_schedule_revisions(entry_id,actor,at,action,reason,before_state,after_state) VALUES($entry,$actor,$at,$action,$reason,$before,$after)",
+        ("$entry", entryId), ("$actor", actor), ("$at", at), ("$action", action), ("$reason", reason), ("$before", before is null ? null : System.Text.Json.JsonSerializer.Serialize(before, new System.Text.Json.JsonSerializerOptions(System.Text.Json.JsonSerializerDefaults.Web))), ("$after", System.Text.Json.JsonSerializer.Serialize(after, new System.Text.Json.JsonSerializerOptions(System.Text.Json.JsonSerializerDefaults.Web)))).ExecuteNonQuery();
 static (string Type, string Reason) CandidateClassification(string payload)
 {
     using var document = System.Text.Json.JsonDocument.Parse(payload);
@@ -591,13 +665,6 @@ static bool ValidDateRange(string? start, string? end)
     if (start is null && end is null) return true;
     if (start is null || end is null || !DateOnly.TryParseExact(start, "yyyy-MM-dd", out var startDate) || !DateOnly.TryParseExact(end, "yyyy-MM-dd", out var endDate)) return false;
     return startDate <= endDate;
-}
-static bool ValidMilestoneDates(string? start, string? end)
-{
-    if (start is null && end is null) return true;
-    if (start is not null && !DateOnly.TryParseExact(start, "yyyy-MM-dd", out _)) return false;
-    if (end is not null && !DateOnly.TryParseExact(end, "yyyy-MM-dd", out _)) return false;
-    return start is null || end is null || string.CompareOrdinal(start, end) <= 0;
 }
 static bool ValidStatus(string status, string content, string section) => status is "open" or "closed" && (status != "closed" || section == "personnel" || !string.IsNullOrWhiteSpace(content));
 static bool ValidDetails(string section, string content, string details, string status)
@@ -677,15 +744,15 @@ static void UpsertFieldOrigin(SqliteConnection db, string itemId, string? lastSo
         ("$item", itemId), ("$last", lastSourceValue), ("$latest", latestSourceValue), ("$report", reportValue), ("$override", humanOverride ? 1 : 0), ("$at", DateTimeOffset.UtcNow.ToString("O"))).ExecuteNonQuery();
 static List<ScheduleEntry> ScheduleEntries(SqliteConnection db, string itemId)
 {
-    using var rows = Store.Sql(db, "SELECT id,project_id,kind,name,baseline_start,baseline_end,forecast_start,forecast_end,actual_start,actual_end,version FROM project_schedule_entries WHERE project_id=$project ORDER BY rowid", ("$project", itemId)).ExecuteReader();
+    using var rows = Store.Sql(db, "SELECT id,project_id,kind,name,baseline_start,baseline_end,forecast_start,forecast_end,actual_start,actual_end,version,state FROM project_schedule_entries WHERE project_id=$project ORDER BY rowid", ("$project", itemId)).ExecuteReader();
     var entries = new List<ScheduleEntry>();
-    while (rows.Read()) entries.Add(new ScheduleEntry(rows.GetString(0), rows.GetString(1), rows.GetString(2), rows.GetString(3), NullableString(rows, 4), NullableString(rows, 5), NullableString(rows, 6), NullableString(rows, 7), NullableString(rows, 8), NullableString(rows, 9), rows.GetInt32(10)));
+    while (rows.Read()) entries.Add(new ScheduleEntry(rows.GetString(0), rows.GetString(1), rows.GetString(2), rows.GetString(3), NullableString(rows, 4), NullableString(rows, 5), NullableString(rows, 6), NullableString(rows, 7), NullableString(rows, 8), NullableString(rows, 9), rows.GetInt32(10), rows.GetString(11)));
     return entries;
 }
 static ScheduleEntry? ScheduleEntry(SqliteConnection db, string entryId)
 {
-    using var rows = Store.Sql(db, "SELECT id,project_id,kind,name,baseline_start,baseline_end,forecast_start,forecast_end,actual_start,actual_end,version FROM project_schedule_entries WHERE id=$id", ("$id", entryId)).ExecuteReader();
-    return rows.Read() ? new ScheduleEntry(rows.GetString(0), rows.GetString(1), rows.GetString(2), rows.GetString(3), NullableString(rows, 4), NullableString(rows, 5), NullableString(rows, 6), NullableString(rows, 7), NullableString(rows, 8), NullableString(rows, 9), rows.GetInt32(10)) : null;
+    using var rows = Store.Sql(db, "SELECT id,project_id,kind,name,baseline_start,baseline_end,forecast_start,forecast_end,actual_start,actual_end,version,state FROM project_schedule_entries WHERE id=$id", ("$id", entryId)).ExecuteReader();
+    return rows.Read() ? new ScheduleEntry(rows.GetString(0), rows.GetString(1), rows.GetString(2), rows.GetString(3), NullableString(rows, 4), NullableString(rows, 5), NullableString(rows, 6), NullableString(rows, 7), NullableString(rows, 8), NullableString(rows, 9), rows.GetInt32(10), rows.GetString(11)) : null;
 }
 static ReportSnapshot Snapshot(SqliteConnection db, string reportId, IConfiguration config)
 {
@@ -747,10 +814,10 @@ record CreateItem(string Section, string Title, string? OwnerSection);
 record ProjectParticipantRequest(string? Section);
 record ProjectWorkRequest(string? Section, string? Work, string? ScheduleProposal, int BaseVersion);
 record SyncMemberResult(string UserId, string Status, int WorkCount, string? LastSuccessAt, string? Error);
-record ScheduleRequest(string? Kind, string? Name, string? BaselineStart, string? BaselineEnd, string? ForecastStart, string? ForecastEnd, string? ActualStart, string? ActualEnd, string? BaselineChangeReason, int? BaseVersion);
+record ScheduleRequest(string? Kind, string? Name, string? BaselineStart, string? BaselineEnd, string? ForecastStart, string? ForecastEnd, string? ActualStart, string? ActualEnd, string? BaselineChangeReason, int? BaseVersion, string? State, string? Reason, string? Action, string? Token, int? BaseProjectVersion);
 record AccessUserRequest(string EmpNo, string Name, string Role, string? Section, bool? ReaderAccess);
 record PublicationRequest(string? RequestId);
-record ScheduleEntry(string Id, string ProjectId, string Kind, string Name, string? BaselineStart, string? BaselineEnd, string? ForecastStart, string? ForecastEnd, string? ActualStart, string? ActualEnd, int Version);
+record ScheduleEntry(string Id, string ProjectId, string Kind, string Name, string? BaselineStart, string? BaselineEnd, string? ForecastStart, string? ForecastEnd, string? ActualStart, string? ActualEnd, int Version, string State = "open");
 record PublishedItem(string Id, string ContinuityId, string Section, string OwnerSection, string Title, string Content, string Status, int Version, string Details = "{}", List<ScheduleEntry>? Schedule = null);
 record SourceStatus(string Section, string Status, string? PeriodFrom, string? PeriodTo, string? FinishedAt);
 record FieldOrigin(string? LastSourceValue, string LatestSourceValue, string ReportValue, bool HumanOverride);
@@ -764,4 +831,3 @@ static class ReportSections
 {
     public static readonly string[] All = ["summary", "projects", "operations", "personnel", "technology", "appendix"];
 }
-

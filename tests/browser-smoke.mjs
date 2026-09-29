@@ -18,7 +18,7 @@ const jwks = createServer((_req, res) => { res.setHeader('content-type', 'applic
 await new Promise(resolve => jwks.listen(0, '127.0.0.1', resolve));
 const port = await new Promise(resolve => { const s = createTcpServer(); s.listen(0, '127.0.0.1', () => { const p = s.address().port; s.close(() => resolve(p)); }); });
 const base = `http://127.0.0.1:${port}`;
-const api = spawn('dotnet', [join(root, 'apps/api/bin/Debug/net9.0/WeeklyReport.Api.dll'), '--urls', base], {
+const api = spawn('dotnet', [process.env.WEEKLY_REPORT_API_DLL ?? join(root, 'apps/api/bin/Debug/net9.0/WeeklyReport.Api.dll'), '--urls', base], {
   cwd: join(root, 'apps/api'),
   env: { ...process.env, DatabasePath: join(temporary, 'report.db'), JwksUrl: `http://127.0.0.1:${jwks.address().port}/jwks`,
     Access__Users__0__EmpNo: 'G', Access__Users__0__Name: 'Guy', Access__Users__0__Role: 'Guy',
@@ -30,7 +30,7 @@ let logs = '';
 api.stdout.on('data', chunk => logs = (logs + chunk).slice(-10000));
 api.stderr.on('data', chunk => logs = (logs + chunk).slice(-10000));
 const b64 = value => Buffer.from(JSON.stringify(value)).toString('base64url');
-const parts = `${b64({ alg: 'RS256', kid: 'browser' })}.${b64({ empNo: 'G', exp: Math.floor(Date.now() / 1000) + 3600 })}`;
+const parts = `${b64({ alg: 'RS256' })}.${b64({ empNo: 'G', exp: Math.floor(Date.now() / 1000) + 3600 })}`;
 const token = `${parts}.${sign('RSA-SHA256', Buffer.from(parts), privateKey).toString('base64url')}`;
 async function apiCall(path, method = 'GET', body) {
   const response = await fetch(base + path, { method, headers: { Authorization: `Bearer ${token}`, ...(body ? { 'Content-Type': 'application/json' } : {}) }, body: body ? JSON.stringify(body) : undefined });
@@ -98,6 +98,22 @@ try {
   await page.getByLabel('下一步').fill('完成簽收');
   await page.getByRole('button', { name: '儲存完成' }).click();
   await page.getByText('完成簽收').waitFor({ timeout: 15000 });
+  await page.getByRole('button', { name: '專案摘要', exact: true }).click();
+  await page.getByRole('button', { name: '開始編輯' }).click();
+  const schedulePanel = page.locator('.project-schedule');
+  await schedulePanel.getByLabel('名稱').fill('驗收階段');
+  await schedulePanel.getByLabel('原始計畫開始').fill('2026-10-01');
+  await schedulePanel.getByLabel('原始計畫結束').fill('2026-10-07');
+  await schedulePanel.getByRole('button', { name: '新增時程' }).click();
+  await schedulePanel.getByText('階段：驗收階段').waitFor({ timeout: 15000 });
+  await page.getByText('已儲存結構化時程。').waitFor({ timeout: 15000 });
+  await schedulePanel.getByRole('button', { name: '編輯' }).click();
+  await schedulePanel.getByLabel('目前計畫結束').fill('2026-10-10');
+  await schedulePanel.getByLabel('修改原因').fill('整合測試延長');
+  await schedulePanel.getByRole('button', { name: '儲存時程' }).click();
+  await schedulePanel.getByText('完成偏差 +3 天').waitFor({ timeout: 15000 });
+  await schedulePanel.getByRole('button', { name: '修訂紀錄' }).click();
+  await schedulePanel.getByText('整合測試延長').waitFor({ timeout: 15000 });
   await page.getByRole('button', { name: '發布正式版' }).click();
   const publication = page.getByRole('link', { name: '查看剛發布的固定版本' });
   await publication.waitFor({ timeout: 15000 });

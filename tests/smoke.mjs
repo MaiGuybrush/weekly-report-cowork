@@ -12,7 +12,15 @@ const root = resolve(import.meta.dirname, '..');
 const temporary = await mkdtemp(join(tmpdir(), 'weekly-report-smoke-'));
 const { privateKey, publicKey } = generateKeyPairSync('rsa', { modulusLength: 2048 });
 const jwk = publicKey.export({ format: 'jwk' });
-const jwks = createServer((_req, res) => { res.setHeader('content-type', 'application/json'); res.end(JSON.stringify({ keys: [{ ...jwk, kid: 'test', alg: 'RS256' }] })); });
+let jwksKeys = [];
+let jwksUnavailable = false;
+let jwksRequests = 0;
+const jwks = createServer((_req, res) => {
+  jwksRequests++;
+  if (jwksUnavailable) { res.statusCode = 503; res.end(); return; }
+  res.setHeader('content-type', 'application/json');
+  res.end(JSON.stringify({ keys: jwksKeys }));
+});
 await new Promise(resolve => jwks.listen(0, '127.0.0.1', resolve));
 const jwksPort = jwks.address().port;
 const failedEcimUsers = new Set(['ecim-fail']);
@@ -26,7 +34,7 @@ const ecim = createServer((request, response) => {
 await new Promise(resolve => ecim.listen(0, '127.0.0.1', resolve));
 const ecimPort = ecim.address().port;
 const port = await new Promise(resolve => { const s = createTcpServer(); s.listen(0, '127.0.0.1', () => { const p = s.address().port; s.close(() => resolve(p)); }); });
-const api = spawn('dotnet', [join(root, 'apps/api/bin/Debug/net9.0/WeeklyReport.Api.dll'), '--urls', `http://127.0.0.1:${port}`], {
+const api = spawn('dotnet', [process.env.WEEKLY_REPORT_API_DLL ?? join(root, 'apps/api/bin/Debug/net9.0/WeeklyReport.Api.dll'), '--urls', `http://127.0.0.1:${port}`], {
   cwd: join(root, 'apps/api'),
   env: { ...process.env, DatabasePath: join(temporary, 'report.db'), JwksUrl: `http://127.0.0.1:${jwksPort}/jwks`, LeaseDurationSeconds: '4',
     Access__Users__0__EmpNo: 'G', Access__Users__0__Name: 'Guy', Access__Users__0__Role: 'Guy',
@@ -42,8 +50,8 @@ api.stdout.on('data', chunk => logs = (logs + chunk).slice(-10000));
 api.stderr.on('data', chunk => logs = (logs + chunk).slice(-10000));
 const base = `http://127.0.0.1:${port}`;
 const b64 = value => Buffer.from(JSON.stringify(value)).toString('base64url');
-function token(empNo, expires = Math.floor(Date.now() / 1000) + 3600) {
-  const parts = `${b64({ alg: 'RS256', kid: 'test' })}.${b64({ empNo, exp: expires })}`;
+function token(empNo, expires = Math.floor(Date.now() / 1000) + 3600, header = { alg: 'RS256' }) {
+  const parts = `${b64(header)}.${b64({ empNo, exp: expires })}`;
   return `${parts}.${sign('RSA-SHA256', Buffer.from(parts), privateKey).toString('base64url')}`;
 }
 async function call(path, user, method = 'GET', body) {
@@ -57,6 +65,36 @@ try {
     try { await fetch(base); ready = true; break; } catch { await new Promise(resolve => setTimeout(resolve, 100)); }
   }
   assert.ok(ready, `API did not start: ${logs}`);
+  const preflight = await fetch(base + '/api/me', {
+    method: 'OPTIONS',
+    headers: {
+      Origin: 'http://localhost:4200',
+      'Access-Control-Request-Method': 'GET',
+      'Access-Control-Request-Headers': 'authorization'
+    }
+  });
+  assert.equal(preflight.status, 204);
+  assert.equal(preflight.headers.get('access-control-allow-origin'), 'http://localhost:4200');
+  assert.match(preflight.headers.get('access-control-allow-headers') ?? '', /authorization/i);
+  const authenticate = jwt => fetch(base + '/api/me', { headers: { Authorization: `Bearer ${jwt}` } });
+  assert.equal((await authenticate(token('G', undefined, { alg: 'RS256', kid: 'test' }))).status, 401);
+  assert.equal(jwksRequests, 0);
+  assert.equal((await authenticate(token('G'))).status, 401);
+  jwksKeys = [{ ...jwk, alg: 'RS256' }, { ...jwk, alg: 'RS256' }];
+  assert.equal((await authenticate(token('G'))).status, 401);
+  jwksUnavailable = true;
+  assert.equal((await authenticate(token('G'))).status, 401);
+  assert.match(logs, /UAC JWKS load failed/);
+  jwksUnavailable = false;
+  jwksKeys = [{ ...jwk, kid: 'test', alg: 'RS256' }];
+  assert.equal((await authenticate(token('G'))).status, 200);
+  assert.equal((await authenticate(token(undefined))).status, 401);
+  assert.equal((await authenticate(token('G', undefined, { alg: 'HS256' }))).status, 401);
+  assert.equal((await authenticate(token('G', undefined, { alg: 'RS256', kid: 'test' }))).status, 401);
+  const cachedRequests = jwksRequests;
+  jwksKeys = [];
+  assert.equal((await authenticate(token('G'))).status, 200);
+  assert.equal(jwksRequests, cachedRequests);
   assert.equal((await call('/api/me')).status, 401);
   assert.equal((await call('/api/me', 'missing')).status, 403);
   assert.equal((await call('/api/me', 'G')).body.role, 'Guy');
@@ -129,20 +167,47 @@ try {
   const created = await call(`/api/reports/${reportId}/items`, 'H1', 'POST', { section: 'projects', title: 'Project A' });
   assert.equal(created.status, 201);
   const id = created.body.id;
-  assert.equal((await call(`/api/items/${id}/schedule`, 'H2', 'POST', { kind: 'phase', name: 'Build', baselineStart: '2026-10-01', baselineEnd: '2026-10-07', forecastStart: '2026-10-01', forecastEnd: '2026-10-08' })).status, 403);
-  const phase = await call(`/api/items/${id}/schedule`, 'H1', 'POST', { kind: 'phase', name: 'Build', baselineStart: '2026-10-01', baselineEnd: '2026-10-07', forecastStart: '2026-10-01', forecastEnd: '2026-10-08' });
+  const scheduleProject = await call(`/api/reports/${reportId}/items`, 'H1', 'POST', { section: 'projects', title: 'Schedule Project' });
+  const scheduleId = scheduleProject.body.id;
+  assert.equal((await call(`/api/items/${scheduleId}/schedule`, 'H2', 'POST', { kind: 'phase', name: 'Build', baselineStart: '2026-10-01', baselineEnd: '2026-10-07', forecastStart: '2026-10-01', forecastEnd: '2026-10-08' })).status, 403);
+  const initialScheduleLease = await call(`/api/items/${scheduleId}/lease`, 'H1', 'POST', {});
+  assert.equal((await call(`/api/items/${scheduleId}/private-draft`, 'H1', 'PUT', { title: 'Schedule Project', content: 'Project delivery' })).status, 204);
+  assert.equal((await call(`/api/items/${scheduleId}/commit`, 'H1', 'POST', { token: initialScheduleLease.body.token, baseVersion: 0 })).status, 200);
+  const scheduleLease = await call(`/api/items/${scheduleId}/lease`, 'H1', 'POST', {});
+  const phaseDraft = { kind: 'phase', name: 'Build', baselineStart: '2026-10-01', baselineEnd: '2026-10-07', forecastStart: '2026-10-01', forecastEnd: '2026-10-07', actualStart: null, actualEnd: null, state: 'open' };
+  assert.equal((await call(`/api/items/${scheduleId}/schedule`, 'H1', 'POST', phaseDraft)).status, 409);
+  const phase = await call(`/api/items/${scheduleId}/schedule`, 'H1', 'POST', { ...phaseDraft, token: scheduleLease.body.token, baseProjectVersion: scheduleLease.body.baseVersion });
   assert.equal(phase.status, 201);
-  const milestone = await call(`/api/items/${id}/schedule`, 'H1', 'POST', { kind: 'milestone', name: 'Release', baselineEnd: '2026-10-08', forecastEnd: '2026-10-09' });
-  assert.equal(milestone.status, 201);
-  assert.equal((await call(`/api/items/${id}/schedule/${phase.body.id}`, 'H1', 'PUT', { kind: 'phase', name: 'Build', baselineStart: '2026-10-01', baselineEnd: '2026-10-10', forecastStart: '2026-10-01', forecastEnd: '2026-10-10', baseVersion: 1 })).status, 400);
-  const updatedPhase = await call(`/api/items/${id}/schedule/${phase.body.id}`, 'H1', 'PUT', { kind: 'phase', name: 'Build', baselineStart: '2026-10-01', baselineEnd: '2026-10-10', forecastStart: '2026-10-01', forecastEnd: '2026-10-10', baselineChangeReason: 'Integration scope increased', baseVersion: 1 });
+  const phaseWrite = { ...phaseDraft, forecastEnd: '2026-10-10', token: scheduleLease.body.token, baseProjectVersion: phase.body.projectVersion, baseVersion: 1 };
+  assert.equal((await call(`/api/items/${scheduleId}/schedule/${phase.body.id}`, 'H1', 'PUT', phaseWrite)).status, 400);
+  assert.equal((await call(`/api/items/${scheduleId}/schedule/${phase.body.id}`, 'H1', 'PUT', { ...phaseWrite, reason: 'Replan integration', baseProjectVersion: 0 })).status, 409);
+  const updatedPhase = await call(`/api/items/${scheduleId}/schedule/${phase.body.id}`, 'H1', 'PUT', { ...phaseWrite, reason: 'Replan integration' });
   assert.equal(updatedPhase.status, 200);
   assert.equal(updatedPhase.body.version, 2);
-  const schedule = await call(`/api/items/${id}/schedule`, 'H1');
-  assert.equal(schedule.body.length, 2);
-  assert.equal(schedule.body.find(entry => entry.id === phase.body.id).baselineEnd, '2026-10-10');
-  const baselineHistory = await call(`/api/items/${id}/schedule/${phase.body.id}/baseline-history`, 'H1');
-  assert.equal(baselineHistory.body[0].reason, 'Integration scope increased');
+  const corrected = await call(`/api/items/${scheduleId}/schedule/${phase.body.id}`, 'H1', 'PUT', { ...phaseWrite, baselineEnd: '2026-10-08', reason: 'Correct original entry', action: 'correct-original', baseVersion: 2, baseProjectVersion: updatedPhase.body.projectVersion });
+  assert.equal(corrected.status, 200);
+  const started = await call(`/api/items/${scheduleId}/schedule/${phase.body.id}`, 'H1', 'PUT', { ...phaseWrite, baselineEnd: '2026-10-08', state: 'in-progress', actualStart: '2026-10-03', reason: 'Work began', baseVersion: 3, baseProjectVersion: corrected.body.projectVersion });
+  assert.equal(started.status, 200);
+  const completed = await call(`/api/items/${scheduleId}/schedule/${phase.body.id}`, 'H1', 'PUT', { ...phaseWrite, baselineEnd: '2026-10-08', state: 'completed', actualStart: '2026-10-03', actualEnd: '2026-10-11', reason: 'Deliverable accepted', baseVersion: 4, baseProjectVersion: started.body.projectVersion });
+  assert.equal(completed.status, 200);
+  const reopened = await call(`/api/items/${scheduleId}/schedule/${phase.body.id}`, 'H1', 'PUT', { ...phaseWrite, baselineEnd: '2026-10-08', state: 'in-progress', actualStart: '2026-10-03', action: 'reopen', reason: 'Acceptance reversed', baseVersion: 5, baseProjectVersion: completed.body.projectVersion });
+  assert.equal(reopened.status, 200);
+  const cancelled = await call(`/api/items/${scheduleId}/schedule/${phase.body.id}`, 'H1', 'PUT', { ...phaseWrite, baselineEnd: '2026-10-08', state: 'cancelled', actualStart: '2026-10-03', action: 'cancel', reason: 'Scope withdrawn', baseVersion: 6, baseProjectVersion: reopened.body.projectVersion });
+  assert.equal(cancelled.status, 200);
+  const reactivated = await call(`/api/items/${scheduleId}/schedule/${phase.body.id}`, 'H1', 'PUT', { ...phaseWrite, baselineEnd: '2026-10-08', state: 'in-progress', actualStart: '2026-10-03', action: 'reactivate', reason: 'Scope restored', baseVersion: 7, baseProjectVersion: cancelled.body.projectVersion });
+  assert.equal(reactivated.status, 200);
+  const schedule = await call(`/api/items/${scheduleId}/schedule`, 'H1');
+  assert.equal(schedule.body.length, 1);
+  assert.equal(schedule.body[0].baselineEnd, '2026-10-08');
+  assert.equal(schedule.body[0].forecastEnd, '2026-10-10');
+  assert.equal(schedule.body[0].state, 'in-progress');
+  assert.equal(schedule.body[0].actualEnd, null);
+  const revisions = await call(`/api/items/${scheduleId}/schedule/${phase.body.id}/history`, 'H1');
+  assert.deepEqual(revisions.body.map(revision => revision.action), ['create', 'update', 'correct-original', 'update', 'update', 'reopen', 'cancel', 'reactivate']);
+  assert.equal(revisions.body[0].after.baselineEnd, '2026-10-07');
+  assert.equal(revisions.body[2].before.baselineEnd, '2026-10-07');
+  assert.equal(revisions.body[2].after.baselineEnd, '2026-10-08');
+  assert.equal(revisions.body[5].before.actualEnd, '2026-10-11');
   assert.equal((await call(`/api/items/${id}/project-participants`, 'H2', 'POST', { section: 's2' })).status, 403);
   assert.equal((await call(`/api/items/${id}/project-participants`, 'H1', 'POST', { section: 's2' })).status, 204);
   assert.equal((await call(`/api/items/${id}/project-work`, 'H3')).status, 403);
@@ -281,7 +346,8 @@ try {
   assert.equal(carried.title, 'Project A revised');
   assert.equal(carried.content, 'changed after publication');
   assert.equal(carried.version, 1);
-  assert.equal((await call(`/api/items/${carried.id}/schedule`, 'H1')).body.find(entry => entry.name === 'Build').baselineEnd, '2026-10-10');
+  const scheduleCarried = (await call(`/api/reports/${next.body.id}`, 'G')).body.items.find(item => item.title === 'Schedule Project');
+  assert.equal((await call(`/api/items/${scheduleCarried.id}/schedule`, 'H1')).body.find(entry => entry.name === 'Build').baselineEnd, '2026-10-08');
   const closing = await call(`/api/reports/${reportId}/items`, 'G', 'POST', { section: 'summary', title: 'Closing summary' });
   const closingLease = await call(`/api/items/${closing.body.id}/lease`, 'G', 'POST', {});
   assert.equal((await call(`/api/items/${closing.body.id}/private-draft`, 'G', 'PUT', { title: 'Closing summary', content: '', status: 'closed' })).status, 400);

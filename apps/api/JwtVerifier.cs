@@ -4,7 +4,7 @@ using System.Text.Json;
 
 public sealed class JwtVerifier(HttpClient client, IConfiguration config, ILogger<JwtVerifier> log)
 {
-    readonly Dictionary<string, RSAParameters> keys = new();
+    RSAParameters? key;
     readonly SemaphoreSlim gate = new(1, 1);
 
     public async Task<string?> Verify(string? bearer)
@@ -17,12 +17,11 @@ public sealed class JwtVerifier(HttpClient client, IConfiguration config, ILogge
             using var header = JsonDocument.Parse(Decode(token[0]));
             using var payload = JsonDocument.Parse(Decode(token[1]));
             if (header.RootElement.GetProperty("alg").GetString() != "RS256") return null;
-            var kid = header.RootElement.GetProperty("kid").GetString();
-            if (string.IsNullOrEmpty(kid)) return null;
-            var key = await GetKey(kid);
-            if (key is null) return null;
+            if (header.RootElement.TryGetProperty("kid", out _)) return null;
+            var signingKey = await GetKey();
+            if (signingKey is null) return null;
             using var rsa = RSA.Create();
-            rsa.ImportParameters(key.Value);
+            rsa.ImportParameters(signingKey.Value);
             if (!rsa.VerifyData(Encoding.ASCII.GetBytes(token[0] + "." + token[1]), Decode(token[2]), HashAlgorithmName.SHA256, RSASignaturePadding.Pkcs1)) return null;
             var claims = payload.RootElement;
             if (!claims.TryGetProperty("exp", out var exp) || exp.ValueKind != JsonValueKind.Number || exp.GetInt64() <= DateTimeOffset.UtcNow.ToUnixTimeSeconds()) return null;
@@ -35,32 +34,31 @@ public sealed class JwtVerifier(HttpClient client, IConfiguration config, ILogge
         }
     }
 
-    async Task<RSAParameters?> GetKey(string kid)
+    async Task<RSAParameters?> GetKey()
     {
         await gate.WaitAsync();
         try
         {
-            if (keys.TryGetValue(kid, out var cached)) return cached;
+            if (key is not null) return key;
             var url = config["JwksUrl"] ?? throw new InvalidOperationException("JwksUrl is required");
             using var response = await client.GetAsync(url);
             response.EnsureSuccessStatusCode();
             using var document = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
-            var next = new Dictionary<string, RSAParameters>();
+            RSAParameters? candidate = null;
             foreach (var jwk in document.RootElement.GetProperty("keys").EnumerateArray())
             {
                 if (jwk.GetProperty("kty").GetString() != "RSA") continue;
-                if (jwk.TryGetProperty("alg", out var alg) && alg.GetString() != "RS256") continue;
-                var id = jwk.GetProperty("kid").GetString();
-                if (id is null) continue;
-                next[id] = new RSAParameters { Modulus = Decode(jwk.GetProperty("n").GetString()!), Exponent = Decode(jwk.GetProperty("e").GetString()!) };
+                if (!jwk.TryGetProperty("alg", out var alg) || alg.GetString() != "RS256") continue;
+                if (candidate is not null) throw new InvalidDataException("UAC JWKS contains multiple RS256 RSA keys");
+                candidate = new RSAParameters { Modulus = Decode(jwk.GetProperty("n").GetString()!), Exponent = Decode(jwk.GetProperty("e").GetString()!) };
             }
-            keys.Clear();
-            foreach (var entry in next) keys[entry.Key] = entry.Value;
-            return keys.TryGetValue(kid, out var found) ? found : null;
+            if (candidate is null) throw new InvalidDataException("UAC JWKS contains no RS256 RSA key");
+            key = candidate;
+            return key;
         }
         catch (Exception ex)
         {
-            log.LogWarning(ex, "UAC JWKS refresh failed");
+            log.LogWarning(ex, "UAC JWKS load failed");
             return null;
         }
         finally { gate.Release(); }

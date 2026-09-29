@@ -22,7 +22,7 @@
 | --- | --- | --- |
 | Angular 範本 | `ums-app` 的 `template` 分支已在 `src/app/core/auth` 實作 SSO 流程；`app.routes.ts` 目前是空路由，未設後端 proxy。 | 複用登入流程時需補上應用路由保護及同源 API 設定。 |
 | UAC JWT | 範例 claim 有 `empNo`、`empID`、`empName`、`authMethod`、`expire`、`exp`；未見 `sub`、`iss`、`aud`。 | 驗證簽章與 `exp`，再用 `empNo` 查本地角色；不可把缺少的 issuer/audience 當作必填。 |
-| JWKS | `http://tncimweb1.cminl.oa/uacapi/.well-known/jwks.json` 已確認回傳帶 `kid` 的 RSA／RS256 簽章公鑰；同主機 HTTPS 443 目前拒絕連線。 | 依決策使用內網 HTTP 擷取，後端依 `kid` 選金鑰，只接受 RS256。 |
+| JWKS | `http://tncimweb1.cminl.oa/uacapi/.well-known/jwks.json` 已確認回傳帶 `kid` 的 RSA／RS256 簽章公鑰；JWT header 不帶 `kid`；同主機 HTTPS 443 目前拒絕連線。 | 依決策使用內網 HTTP 擷取，要求剛好一把 RSA／RS256 公鑰，拒絕帶 `kid` 的 JWT。 |
 | UacApi 參考 | `ServicesConfigurator.cs` 使用 RSA 簽章驗證，關閉 issuer/audience 驗證，正式環境驗證期限，`ClockSkew=0`。 | 新後端沿用可互通的 token 契約；部署後仍驗證期限。 |
 | eCIM REST | 內網 Swagger 有 `GET /Work/ReviewWork`，查詢欄位包括 `updateDateFrom`、`updateDateTo`、`userId`、`timeFrom`、`timeTo`、`division`、`dept`、`section`、`teamId`；回傳 `WorkReviewResult`。 | 第二階段建立伺服器端 eCIM client，以課別成員及期間批次讀取。 |
 | 本機建置工具 | 目前可執行 .NET SDK 9.0.310 與 Node.js 24.19.0；`npm` 未出現在目前命令路徑。 | 開始 Angular 建置前需備妥 npm 或團隊指定的套件管理器。 |
@@ -40,7 +40,7 @@
 
 Angular 範本目前的路由為空，且 interceptor 對所有請求附加 JWT。實作時須設定編輯／正式頁路由與 guard，讓週報 API 使用同源 `/api`；JWT 只送往本系統 API，不隨外部連結或 eCIM 來源 URL 送出。SSO 返回編輯頁時須保留 hash route 或改用可完整往返的路由方式。後端所有授權以驗證過的 `empNo` 查本地名單，前端顯示控制不作授權依據。
 
-JWT 公鑰由固定 UAC 主機的 HTTP JWKS 取得並快取；收到未知 `kid` 時刷新一次。只接受 RS256、驗證簽章與 `exp`，拒絕缺少 `empNo` 的 token。取不到 JWKS 時不得接受未知金鑰簽發的 token，並顯示認證服務暫時不可用；記錄刷新失敗以利維運查找。由於此連線使用 HTTP，部署網段與 UAC 主機之間的網路信任是本決策的前提。
+JWT 公鑰由固定 UAC 主機的 HTTP JWKS 取得，必須剛好有一把 RSA／RS256 公鑰，並於 API 執行期間快取；UAC 更換公鑰後重新啟動 API。只接受不帶 `kid` 的 RS256 JWT，驗證簽章與 `exp`，拒絕缺少 `empNo` 的 token。取不到 JWKS、零把或多把合格公鑰時拒絕 token 並記錄錯誤；已快取的公鑰在 API 執行期間繼續使用。由於此連線使用 HTTP，部署網段與 UAC 主機之間的網路信任是本決策的前提。
 
 單一服務實例持有 SQLite。資料庫放於非靜態檔目錄，使用交易、唯一索引、外鍵與 WAL；寫入衝突有明確回應，不以最後寫入者覆蓋。備份包含 SQLite 一致快照及還原演練。角色／讀者名單由部署設定首次匯入；後續由受控的管理指令更新 SQLite 並留稽核，不把名單綁死在程式碼。
 
@@ -53,7 +53,7 @@ JWT 公鑰由固定 UAC 主機的 HTTP JWKS 取得並快取；收到未知 `kid`
 | `ReportItem` | 穩定 `continuityId`、本週版本、章節、課別、維護人、狀態、排序與版本號；各章節使用對應欄位，不把六種項目壓成自由文字。 |
 | `Project`, `Phase`, `Milestone`, `ProjectRecord` | 第一階段保存健康度、階段與里程碑的基準／預估／實際日期，以及風險、問題、相依、待決策事項；基準調整需填原因。 |
 | `EditLease`, `PrivateDraft` | 同項目一個有效租約，30 分鐘到期且可續期；私有草稿僅編輯者可讀，提交前不進共用內容。 |
-| `ItemRevision`, `AuditEvent` | 每次提交保留操作者、時間、項目版本與變更；時程基準調整另存前後值及原因。 |
+| `ItemRevision`, `AuditEvent`, `ScheduleRevision` | 每次提交保留操作者、時間、項目版本與變更；階段建立保存首次原始計畫，建立後每次修改保留原因及完整前後狀態。 |
 | `Publication` | 報告內唯一遞增版號、建立時間、發布者與不可變快照；固定連結指向指定版號。 |
 | `SourceRef` | 第一階段允許人工連結既有來源；eCIM 尚未同步時顯示「尚未連接來源」，不把它解讀為零工作。 |
 
@@ -65,7 +65,7 @@ JWT 公鑰由固定 UAC 主機的 HTTP JWKS 取得並快取；收到未知 `kid`
 | --- | --- | --- | --- |
 | A. 登入與授權 | JWT 驗證、`GET /api/me`、角色與讀者名單查詢 | SSO 回跳、路由保護、無權限頁 | 有效且列名者進入對應頁；無效 token 為 401，無權限為 403。 |
 | B. 週報與章節 | `POST /api/reports`、`GET /api/reports/{id}`、項目 CRUD | 六段章節、項目卡、可收合側欄與預覽 | Guy 建立唯一週報；課長只能改所屬項目；人事草稿只對相關人員可見。 |
-| C. 專案時程 | 專案、階段、里程碑與管理紀錄的項目內更新 | 日期表單與清單、基準與預估對照 | 修改基準須記原因；可查看歷史；甘特圖留待第二階段。 |
+| C. 專案時程 | 專案、階段、里程碑與管理紀錄的項目內更新 | 日期與狀態表單、原始與目前計畫對照 | 階段寫入須有專案租約與版本；修改須記原因、完整歷史；原始資料更正獨立於一般改期。 |
 | D. 協作 | `POST /api/items/{id}/lease`、續期／釋放、`PUT /api/items/{id}/private-draft`、`POST /api/items/{id}/commit` | 鎖定持有人與倒數、私有草稿狀態、衝突比較 | 同項目只有一人可提交；租約與版本雙重檢查，衝突保留私有草稿。 |
 | E. 延續與發布 | `POST /api/reports/{id}/publications`、`GET /api/publications/{id}` | 上週承諾對照、Guy 發布、正式唯讀頁、投影與列印 | 版號與快照不可改；舊版可查；僅 Guy 能發布。 |
 
