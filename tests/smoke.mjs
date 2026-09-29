@@ -732,6 +732,136 @@ try {
   assert.equal(dep1View.status, 'delivered');
   assert.ok(dep1View.history.some(h => h.action === 'link' && h.scheduleEntryName === 'Build accepted'));
 
+  // Issue #7: Participant Progress & Schedule Proposals
+  const proposalPath = `/api/items/${scheduleId}/proposals`;
+
+  // 首先確保 s2 為 scheduleId 專案的參與課別
+  await call(`/api/items/${scheduleId}/project-participants`, 'H1', 'POST', { section: 's2' });
+
+  // 建立一個由無帳號負責人擁有的關鍵任務
+  const unassignedOwnerTask = await call(taskPath, 'H1', 'POST', {
+    kind: 'task', name: 'Vendor Integration', baselineStart: '2026-10-10', baselineEnd: '2026-10-20',
+    forecastStart: '2026-10-10', forecastEnd: '2026-10-20', state: 'open', owner: '廠商駐點團隊（無帳號）',
+    token: scheduleLease.body.token, baseProjectVersion: milestoneProjectVersion
+  });
+  assert.equal(unassignedOwnerTask.status, 201);
+  milestoneProjectVersion = unassignedOwnerTask.body.projectVersion;
+
+  // 1. 任務負責身分本身不給予時程編輯權：H2 嘗試直接修改時程 -> 被拒絕 403
+  assert.equal((await call(`${taskPath}/${unassignedOwnerTask.body.id}`, 'H2', 'PUT', {
+    kind: 'task', name: 'Vendor Integration Hack', baselineStart: '2026-10-10', baselineEnd: '2026-10-20',
+    forecastStart: '2026-10-12', forecastEnd: '2026-10-25', owner: 'H2', token: 'fake', baseVersion: 1, baseProjectVersion: milestoneProjectVersion
+  })).status, 403);
+
+  // 2. 授權與越權拒絕：無關使用者 H3 及讀者 R 嘗試提交提案 -> 被拒絕 403
+  assert.equal((await call(proposalPath, 'H3', 'POST', {
+    scheduleEntryId: unassignedOwnerTask.body.id, workDescription: '無關人員提交提案', progressPercent: 50
+  })).status, 403);
+
+  assert.equal((await call(proposalPath, 'R', 'POST', {
+    scheduleEntryId: unassignedOwnerTask.body.id, workDescription: '讀者提交提案', progressPercent: 50
+  })).status, 403);
+
+  // 3. 有權帳號（參與課課長 H2）提交進度和提案，能辨識對應關鍵任務
+  const h2Proposal = await call(proposalPath, 'H2', 'POST', {
+    scheduleEntryId: unassignedOwnerTask.body.id,
+    workDescription: '協助完成接口介接初步測試，進度達 60%，建議預計完成日順延 3 天',
+    progressPercent: 60,
+    proposedStart: '2026-10-10',
+    proposedEnd: '2026-10-23'
+  });
+  assert.equal(h2Proposal.status, 201);
+  assert.equal(h2Proposal.body.status, 'pending');
+
+  // 4. 提案不直接變更關鍵任務的目前計畫、實際日期或完成狀態
+  const taskAfterH2Proposal = (await call(taskPath, 'H1')).body.find(e => e.id === unassignedOwnerTask.body.id);
+  assert.equal(taskAfterH2Proposal.forecastStart, '2026-10-10');
+  assert.equal(taskAfterH2Proposal.forecastEnd, '2026-10-20');
+  assert.equal(taskAfterH2Proposal.state, 'open');
+
+  // 5. 無帳號負責人的資訊由維護人記錄，並標明原始來源
+  const maintainerProxyProposal = await call(proposalPath, 'H1', 'POST', {
+    scheduleEntryId: unassignedOwnerTask.body.id,
+    workDescription: '廠商回報硬體到貨延誤，預計調整起訖日期',
+    progressPercent: 30,
+    proposedStart: '2026-10-12',
+    proposedEnd: '2026-10-25',
+    sourceOrigin: '廠商窗口 Email 週報（無帳號外部負責人）'
+  });
+  assert.equal(maintainerProxyProposal.status, 201);
+  assert.equal(maintainerProxyProposal.body.sourceOrigin, '廠商窗口 Email 週報（無帳號外部負責人）');
+
+  // 6. 提案可見性與讀取權限檢查：
+  // 維護人與參與課長皆可讀取提案列表
+  const proposalsViewH1 = await call(proposalPath, 'H1');
+  assert.equal(proposalsViewH1.status, 200);
+  assert.ok(proposalsViewH1.body.some(p => p.id === h2Proposal.body.id));
+  assert.ok(proposalsViewH1.body.some(p => p.id === maintainerProxyProposal.body.id && p.sourceOrigin.includes('廠商窗口 Email')));
+
+  const proposalsViewH2 = await call(proposalPath, 'H2');
+  assert.equal(proposalsViewH2.status, 200);
+  assert.ok(proposalsViewH2.body.some(p => p.id === h2Proposal.body.id));
+
+  // 無關使用者 H3 讀取提案列表 -> 403
+  assert.equal((await call(proposalPath, 'H3')).status, 403);
+
+  // 7. 維護人採納提案（走租約、版本、原因和修訂流程）：
+  // 非維護人嘗試採納 -> 403
+  assert.equal((await call(`${proposalPath}/${maintainerProxyProposal.body.id}/accept`, 'H2', 'POST', {
+    reason: '非維護人採納', token: 'invalid', baseProjectVersion: milestoneProjectVersion
+  })).status, 403);
+
+  // 缺少原因 -> 400
+  assert.equal((await call(`${proposalPath}/${maintainerProxyProposal.body.id}/accept`, 'H1', 'POST', {
+    reason: '', token: scheduleLease.body.token, baseProjectVersion: milestoneProjectVersion
+  })).status, 400);
+
+  // 版本過期或租約錯誤 -> 409
+  assert.equal((await call(`${proposalPath}/${maintainerProxyProposal.body.id}/accept`, 'H1', 'POST', {
+    reason: '採納測試', token: 'wrong-token', baseProjectVersion: milestoneProjectVersion
+  })).status, 409);
+
+  // 正確採納
+  const acceptResult = await call(`${proposalPath}/${maintainerProxyProposal.body.id}/accept`, 'H1', 'POST', {
+    reason: '經確認廠商供貨情況，同意順延時程',
+    token: scheduleLease.body.token,
+    baseProjectVersion: milestoneProjectVersion
+  });
+  assert.equal(acceptResult.status, 200);
+  milestoneProjectVersion = acceptResult.body.projectVersion;
+
+  // 驗證關鍵任務的目前計畫已依提案更新
+  const taskAfterAccept = (await call(taskPath, 'H1')).body.find(e => e.id === unassignedOwnerTask.body.id);
+  assert.equal(taskAfterAccept.forecastStart, '2026-10-12');
+  assert.equal(taskAfterAccept.forecastEnd, '2026-10-25');
+
+  // 驗證關鍵任務留下了修訂紀錄
+  const taskRevisions = await call(`${taskPath}/${unassignedOwnerTask.body.id}/history`, 'H1');
+  const acceptRev = taskRevisions.body.find(r => r.action === 'accept-proposal');
+  assert.ok(acceptRev, 'should have accept-proposal revision');
+  assert.match(acceptRev.reason, /經確認廠商供貨情況/);
+  assert.match(acceptRev.reason, /廠商窗口 Email 週報/);
+
+  // 驗證提案狀態已變更為 accepted
+  const proposalAfterAccept = (await call(proposalPath, 'H1')).body.find(p => p.id === maintainerProxyProposal.body.id);
+  assert.equal(proposalAfterAccept.status, 'accepted');
+  assert.equal(proposalAfterAccept.decisionReason, '經確認廠商供貨情況，同意順延時程');
+
+  // 8. 維護人駁回/退回提案
+  const rejectResult = await call(`${proposalPath}/${h2Proposal.body.id}/reject`, 'H1', 'POST', {
+    reason: '下游關鍵模組不可延宕，維持現有時程'
+  });
+  assert.equal(rejectResult.status, 200);
+  const proposalAfterReject = (await call(proposalPath, 'H1')).body.find(p => p.id === h2Proposal.body.id);
+  assert.equal(proposalAfterReject.status, 'rejected');
+  assert.equal(proposalAfterReject.decisionReason, '下游關鍵模組不可延宕，維持現有時程');
+
+  // 9. 提案歷史查詢
+  const propHist = await call(`${proposalPath}/${maintainerProxyProposal.body.id}/history`, 'H1');
+  assert.equal(propHist.status, 200);
+  assert.ok(propHist.body.some(h => h.action === 'submit'));
+  assert.ok(propHist.body.some(h => h.action === 'accept'));
+
   assert.equal((await call(`/api/items/${id}/project-participants`, 'H2', 'POST', { section: 's2' })).status, 403);
   assert.equal((await call(`/api/items/${id}/project-participants`, 'H1', 'POST', { section: 's2' })).status, 204);
   assert.equal((await call(`/api/items/${id}/project-work`, 'H3')).status, 403);

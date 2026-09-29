@@ -57,6 +57,36 @@ type ProjectWork = {
   updatedBy: string;
   updatedAt: string;
 };
+type ProjectProposal = {
+  id: string;
+  projectId: string;
+  scheduleEntryId: string;
+  scheduleEntryName: string;
+  scheduleEntryKind: string;
+  scheduleEntryOwner: string | null;
+  progressPercent: number | null;
+  workDescription: string;
+  proposedStart: string | null;
+  proposedEnd: string | null;
+  proposedDate: string | null;
+  proposedState: string | null;
+  sourceOrigin: string | null;
+  status: "pending" | "accepted" | "rejected";
+  createdBy: string;
+  createdByName: string;
+  createdAt: string;
+  decidedBy: string | null;
+  decidedByName: string | null;
+  decidedAt: string | null;
+  decisionReason: string | null;
+  currentBaselineStart: string | null;
+  currentBaselineEnd: string | null;
+  currentForecastStart: string | null;
+  currentForecastEnd: string | null;
+  currentBaselineDate: string | null;
+  currentForecastDate: string | null;
+  currentState: string | null;
+};
 type DependencyRef = { id: string; name: string; kind: string };
 type DependencyWarning = { type: string; message: string; predecessorId: string; predecessorName: string };
 type ExternalDeliveryNotice = {
@@ -565,35 +595,301 @@ export class Home implements OnInit {
               </div>
             }
             @if (item.section === "projects") {
-              <section class="project-work">
-                <h3>參與課別工作與時程建議</h3>
-                @if (canMaintain(item)) {
-                  <button (click)="assignParticipant()">指定參與課別</button>
-                }
-                @if (projectWork.length) {
-                  <ul>
-                    @for (entry of projectWork; track entry) {
-                      <li>
-                        <strong>{{ entry.section }}</strong> · {{ entry.work }}
-                        @if (entry.scheduleProposal) {
-                          <span> · 時程建議：{{ entry.scheduleProposal }}</span>
-                        }
-                      </li>
+              <section class="project-proposals-section">
+                <div class="proposals-header">
+                  <div class="proposals-header-text">
+                    <div class="proposals-badge-row">
+                      <span class="proposals-eyebrow">PARTICIPANT COLLABORATION</span>
+                      <span class="proposals-count-badge">{{ proposals.length }} 則提案</span>
+                    </div>
+                    <h3>參與者進度與時程提案</h3>
+                    <p class="proposals-subtitle">
+                      有權課長與任務負責人可回報工作進度並提出預計日期調整建議；週報維護人評估後可審核採納或退回。
+                    </p>
+                  </div>
+                  <div class="proposals-actions-bar">
+                    @if (canMaintain(item)) {
+                      <button type="button" class="btn-assign-participant" (click)="assignParticipant()">
+                        指定參與課別
+                      </button>
+                      <button type="button" class="btn-proxy-proposal" (click)="openProposalForm(true)">
+                        📋 代為記錄外部進度
+                      </button>
                     }
-                  </ul>
+                    @if (canSubmitProposal(item)) {
+                      <button type="button" class="btn-new-proposal" (click)="openProposalForm(false)">
+                        + 回報進度與建議時程
+                      </button>
+                    }
+                  </div>
+                </div>
+
+                <div class="proposals-role-banner">
+                  <div class="role-icon">💡</div>
+                  <div class="role-desc">
+                    @if (canMaintain(item)) {
+                      <span><strong>維護人權限</strong>：您可審核並採納各課長與任務負責人之提案（走安全租約與修訂歷程），或代表無帳號的外部負責人記錄原始來源。</span>
+                    } @else if (canSubmitProposal(item)) {
+                      <span><strong>協作回報權限</strong>：您可在此提交您所承擔工作之最新進度與建議完成日期，提案不會直接覆蓋正式排程，將送交週報維護人審核。</span>
+                    } @else {
+                      <span><strong>檢視模式</strong>：您目前為讀取身分，可查看各項工作進度與提案歷程。</span>
+                    }
+                  </div>
+                </div>
+
+                @if (proposals.length === 0) {
+                  <div class="proposals-empty-state">
+                    <div class="empty-icon">📝</div>
+                    <div class="empty-title">目前尚無進度或時程提案</div>
+                    <div class="empty-desc">
+                      課長或任務負責人可透過「回報進度與建議時程」提出最新進展與建議；無帳號外部負責人亦可由維護人代為記錄。
+                    </div>
+                  </div>
+                } @else {
+                  <div class="proposals-grid">
+                    @for (prop of proposals; track prop.id) {
+                      <div class="proposal-card" [class.proposal-pending]="prop.status === 'pending'" [class.proposal-accepted]="prop.status === 'accepted'" [class.proposal-rejected]="prop.status === 'rejected'">
+                        <div class="proposal-card-header">
+                          <div class="proposal-task-pill">
+                            <span class="task-kind-tag">{{ prop.scheduleEntryKind === 'task' ? '關鍵任務' : '里程碑' }}</span>
+                            <strong class="task-name">{{ prop.scheduleEntryName }}</strong>
+                            @if (prop.scheduleEntryOwner) {
+                              <span class="task-owner-pill">負責人：{{ prop.scheduleEntryOwner }}</span>
+                            }
+                          </div>
+                          <div class="proposal-status-badge">
+                            @if (prop.status === 'pending') {
+                              <span class="status-badge status-pending">⏳ 待審核</span>
+                            } @else if (prop.status === 'accepted') {
+                              <span class="status-badge status-accepted">✓ 已採納</span>
+                            } @else {
+                              <span class="status-badge status-rejected">✕ 已退回</span>
+                            }
+                          </div>
+                        </div>
+
+                        <div class="proposal-card-body">
+                          <div class="proposal-progress-block">
+                            <div class="progress-label-row">
+                              <span class="progress-title">工作進度回報</span>
+                              <span class="progress-value">{{ prop.progressPercent ?? 0 }}%</span>
+                            </div>
+                            <div class="progress-bar-track">
+                              <div class="progress-bar-fill" [style.width.%]="prop.progressPercent ?? 0"></div>
+                            </div>
+                          </div>
+
+                          <div class="proposal-desc-text">
+                            {{ prop.workDescription }}
+                          </div>
+
+                          @if (prop.proposedStart || prop.proposedEnd) {
+                            <div class="proposal-dates-comparison">
+                              <div class="dates-col current-dates">
+                                <span class="dates-col-label">目前計畫</span>
+                                <span class="dates-col-val">{{ prop.currentForecastStart || '-' }} ~ {{ prop.currentForecastEnd || '-' }}</span>
+                              </div>
+                              <div class="dates-arrow">➔</div>
+                              <div class="dates-col proposed-dates">
+                                <span class="dates-col-label">建議調整日期</span>
+                                <span class="dates-col-val highlight-val">{{ prop.proposedStart || '-' }} ~ {{ prop.proposedEnd || '-' }}</span>
+                              </div>
+                            </div>
+                          }
+                        </div>
+
+                        <div class="proposal-card-footer">
+                          <div class="proposal-meta">
+                            <span class="meta-origin" [title]="prop.sourceOrigin || ''">
+                              @if (prop.sourceOrigin) {
+                                📋 來源：{{ prop.sourceOrigin }}
+                              } @else {
+                                👤 提報人：{{ prop.createdByName || prop.createdBy }}
+                              }
+                            </span>
+                            <span class="meta-time">{{ prop.createdAt.slice(0, 16).replace('T', ' ') }}</span>
+                          </div>
+
+                          @if (canMaintain(item) && prop.status === 'pending') {
+                            <div class="proposal-review-actions">
+                              <button type="button" class="btn-reject-proposal" (click)="openRejectProposal(prop)">
+                                退回
+                              </button>
+                              <button type="button" class="btn-accept-proposal" (click)="openAcceptProposal(prop)">
+                                採納提案
+                              </button>
+                            </div>
+                          }
+                        </div>
+
+                        @if (prop.status !== 'pending' && prop.decisionReason) {
+                          <div class="proposal-decision-note" [class.note-accepted]="prop.status === 'accepted'" [class.note-rejected]="prop.status === 'rejected'">
+                            <strong>{{ prop.status === 'accepted' ? '採納備註' : '退回理由' }}（{{ prop.decidedByName || prop.decidedBy }}）：</strong>
+                            <span>{{ prop.decisionReason }}</span>
+                          </div>
+                        }
+                      </div>
+                    }
+                  </div>
                 }
-                @if (isParticipant) {
-                  <div>
-                    <label
-                      >我承擔的工作
-                      <textarea rows="4" [(ngModel)]="myProjectWork"></textarea>
-                    </label>
-                    <label
-                      >時程變更建議（選填）
-                      <input [(ngModel)]="myScheduleProposal" /></label
-                    ><button (click)="saveProjectWork()">
-                      送出給週報維護人
-                    </button>
+
+                @if (isParticipant || projectWork.length) {
+                  <details class="legacy-project-work-details">
+                    <summary>課別整體工作備註（{{ projectWork.length }} 筆備忘）</summary>
+                    <div class="legacy-work-inner">
+                      @if (projectWork.length) {
+                        <ul class="legacy-work-list">
+                          @for (entry of projectWork; track entry) {
+                            <li>
+                              <strong class="legacy-section-tag">{{ entry.section }}</strong>：{{ entry.work }}
+                              @if (entry.scheduleProposal) {
+                                <span class="legacy-prop-tag">（建議：{{ entry.scheduleProposal }}）</span>
+                              }
+                            </li>
+                          }
+                        </ul>
+                      }
+                      @if (isParticipant) {
+                        <div class="legacy-work-form">
+                          <label>我承擔的工作說明
+                            <textarea rows="3" [(ngModel)]="myProjectWork" placeholder="填寫課別綜合工作..."></textarea>
+                          </label>
+                          <label>課別總體時程建議
+                            <input [(ngModel)]="myScheduleProposal" placeholder="例：整體進度如期" />
+                          </label>
+                          <button type="button" class="btn-secondary" (click)="saveProjectWork()">更新課別備註</button>
+                        </div>
+                      }
+                    </div>
+                  </details>
+                }
+
+                @if (showProposalForm) {
+                  <div class="proposal-modal-backdrop">
+                    <div class="proposal-modal">
+                      <div class="modal-header">
+                        <h4>{{ isProxyProposal ? '📋 代為記錄外部負責人進度與時程提案' : '📝 回報任務工作進度與建議時程' }}</h4>
+                        <button type="button" class="modal-close-btn" (click)="closeProposalForm()">✕</button>
+                      </div>
+                      <div class="modal-body">
+                        @if (isProxyProposal) {
+                          <div class="modal-proxy-alert">
+                            <strong>代填模式</strong>：無系統帳號之廠商或跨部門負責人，可由專案維護人代為輸入進度並明確註記原始通訊來源。
+                          </div>
+                        }
+
+                        <label class="form-field">
+                          <span class="field-label">對應關鍵任務 <span class="required">*</span></span>
+                          <select [ngModel]="proposalDraft.scheduleEntryId" (ngModelChange)="onProposalTaskSelected($event)">
+                            <option value="" disabled>請選擇關鍵任務</option>
+                            @for (task of candidateTasks(); track task.id) {
+                              <option [value]="task.id">
+                                {{ task.name }}（{{ task.owner ? '負責人: ' + task.owner : '無指定負責人' }}）
+                              </option>
+                            }
+                          </select>
+                        </label>
+
+                        @if (isProxyProposal) {
+                          <label class="form-field">
+                            <span class="field-label">原始資訊來源標記 <span class="required">*</span></span>
+                            <input [(ngModel)]="proposalDraft.sourceOrigin" placeholder="例如：廠商窗口王工程師 Email 週報 / 會議確認" />
+                          </label>
+                        }
+
+                        <div class="form-row">
+                          <label class="form-field form-field-half">
+                            <span class="field-label">工作完成度 (0-100%)</span>
+                            <input type="number" min="0" max="100" [(ngModel)]="proposalDraft.progressPercent" />
+                          </label>
+                          <div class="form-field form-field-half progress-preview-box">
+                            <span class="field-label">進度預覽</span>
+                            <div class="preview-track">
+                              <div class="preview-fill" [style.width.%]="proposalDraft.progressPercent || 0"></div>
+                            </div>
+                            <span class="preview-text">{{ proposalDraft.progressPercent || 0 }}% 完成</span>
+                          </div>
+                        </div>
+
+                        <label class="form-field">
+                          <span class="field-label">工作進度詳細說明 <span class="required">*</span></span>
+                          <textarea rows="3" [(ngModel)]="proposalDraft.workDescription" placeholder="說明本期具體完成項目、遇到的問題或預期規劃..."></textarea>
+                        </label>
+
+                        <div class="form-row">
+                          <label class="form-field form-field-half">
+                            <span class="field-label">建議開始日期（選填）</span>
+                            <input type="date" [(ngModel)]="proposalDraft.proposedStart" />
+                          </label>
+                          <label class="form-field form-field-half">
+                            <span class="field-label">建議完成日期（選填）</span>
+                            <input type="date" [(ngModel)]="proposalDraft.proposedEnd" />
+                          </label>
+                        </div>
+                      </div>
+                      <div class="modal-footer">
+                        <button type="button" class="btn-ghost" (click)="closeProposalForm()">取消</button>
+                        <button type="button" class="btn-primary" (click)="submitProposal()">確認送出提案</button>
+                      </div>
+                    </div>
+                  </div>
+                }
+
+                @if (acceptingProposal) {
+                  <div class="proposal-modal-backdrop">
+                    <div class="proposal-modal">
+                      <div class="modal-header">
+                        <h4>✓ 採納時程提案並更新專案排程</h4>
+                        <button type="button" class="modal-close-btn" (click)="closeAcceptProposal()">✕</button>
+                      </div>
+                      <div class="modal-body">
+                        <div class="modal-summary-box">
+                          <div><strong>受影響任務：</strong> {{ acceptingProposal.scheduleEntryName }}</div>
+                          <div><strong>提案來源：</strong> {{ acceptingProposal.sourceOrigin || acceptingProposal.createdByName }}</div>
+                          @if (acceptingProposal.proposedStart || acceptingProposal.proposedEnd) {
+                            <div class="summary-diff-row">
+                              <strong>時程異動：</strong>
+                              <span>{{ acceptingProposal.currentForecastStart || '-' }} ~ {{ acceptingProposal.currentForecastEnd || '-' }}</span>
+                              ➔
+                              <span class="highlight-date">{{ acceptingProposal.proposedStart || '-' }} ~ {{ acceptingProposal.proposedEnd || '-' }}</span>
+                            </div>
+                          }
+                        </div>
+                        <label class="form-field">
+                          <span class="field-label">採納修訂原因（必填，將記入專案版本修訂歷史） <span class="required">*</span></span>
+                          <textarea rows="3" [(ngModel)]="proposalAcceptReason" placeholder="例如：經評估外部供貨時程，同意調整排程以確保交付品質..."></textarea>
+                        </label>
+                      </div>
+                      <div class="modal-footer">
+                        <button type="button" class="btn-ghost" (click)="closeAcceptProposal()">取消</button>
+                        <button type="button" class="btn-success" (click)="confirmAcceptProposal()">確認採納並推進版本</button>
+                      </div>
+                    </div>
+                  </div>
+                }
+
+                @if (rejectingProposal) {
+                  <div class="proposal-modal-backdrop">
+                    <div class="proposal-modal">
+                      <div class="modal-header">
+                        <h4>✕ 退回時程提案</h4>
+                        <button type="button" class="modal-close-btn" (click)="closeRejectProposal()">✕</button>
+                      </div>
+                      <div class="modal-body">
+                        <div class="modal-summary-box">
+                          <div><strong>提案任務：</strong> {{ rejectingProposal.scheduleEntryName }}</div>
+                          <div><strong>提報人：</strong> {{ rejectingProposal.sourceOrigin || rejectingProposal.createdByName }}</div>
+                        </div>
+                        <label class="form-field">
+                          <span class="field-label">退回原因說明（必填） <span class="required">*</span></span>
+                          <textarea rows="3" [(ngModel)]="proposalRejectReason" placeholder="例如：下游關鍵交付節點已確定，請維持原計畫推進..."></textarea>
+                        </label>
+                      </div>
+                      <div class="modal-footer">
+                        <button type="button" class="btn-ghost" (click)="closeRejectProposal()">取消</button>
+                        <button type="button" class="btn-danger" (click)="confirmRejectProposal()">確認退回提案</button>
+                      </div>
+                    </div>
                   </div>
                 }
               </section>
@@ -1276,6 +1572,21 @@ export class ReportEditor implements OnInit, OnDestroy {
   ecimMessage = "";
   takeoverReason = "";
   publicationUrl = "";
+  proposals: ProjectProposal[] = [];
+  showProposalForm = false;
+  isProxyProposal = false;
+  proposalDraft = {
+    scheduleEntryId: "",
+    progressPercent: 0,
+    workDescription: "",
+    proposedStart: "",
+    proposedEnd: "",
+    sourceOrigin: "",
+  };
+  acceptingProposal: ProjectProposal | null = null;
+  proposalAcceptReason = "";
+  rejectingProposal: ProjectProposal | null = null;
+  proposalRejectReason = "";
   private pendingPublicationRequestId = "";
   private saveTimer?: ReturnType<typeof setTimeout>;
   private renewTimer?: ReturnType<typeof setInterval>;
@@ -1451,6 +1762,170 @@ export class ReportEditor implements OnInit, OnDestroy {
       await this.loadProjectWork();
       await this.loadSchedule();
       await this.loadExternalDependencies();
+      await this.loadProposals();
+    }
+    this.changes.detectChanges();
+  }
+  isTaskOwner(): boolean {
+    if (!this.me) return false;
+    return this.scheduleEntries.some((e) => {
+      if (!e.owner) return false;
+      const owner = e.owner.trim();
+      return (
+        owner === this.me!.empNo ||
+        owner === this.me!.name ||
+        owner.includes(this.me!.empNo) ||
+        owner.includes(this.me!.name)
+      );
+    });
+  }
+  canSubmitProposal(item: Item): boolean {
+    return this.canMaintain(item) || this.isParticipant || this.isTaskOwner();
+  }
+  candidateTasks(): ScheduleEntry[] {
+    return this.scheduleEntries.filter((e) => e.kind === "task" || e.kind === "milestone");
+  }
+  async loadProposals() {
+    if (!this.selected) return;
+    try {
+      this.proposals = await firstValueFrom(
+        this.http.get<ProjectProposal[]>(`/api/items/${this.selected.id}/proposals`),
+      );
+    } catch {
+      this.proposals = [];
+    }
+    this.changes.detectChanges();
+  }
+  openProposalForm(isProxy: boolean = false, defaultEntryId?: string) {
+    this.isProxyProposal = isProxy;
+    this.showProposalForm = true;
+    const tasks = this.candidateTasks();
+    const candidate = defaultEntryId || (tasks.length > 0 ? tasks[0].id : "");
+    const entry = this.scheduleEntries.find((e) => e.id === candidate);
+    this.proposalDraft = {
+      scheduleEntryId: candidate,
+      progressPercent: 0,
+      workDescription: "",
+      proposedStart: entry?.forecastStart || "",
+      proposedEnd: entry?.forecastEnd || "",
+      sourceOrigin: isProxy ? (entry?.owner ? `代填（${entry.owner}）` : "維護人代填（無帳號外部負責人）") : "",
+    };
+    this.changes.detectChanges();
+  }
+  onProposalTaskSelected(entryId: string) {
+    this.proposalDraft.scheduleEntryId = entryId;
+    const entry = this.scheduleEntries.find((e) => e.id === entryId);
+    if (entry) {
+      this.proposalDraft.proposedStart = entry.forecastStart || "";
+      this.proposalDraft.proposedEnd = entry.forecastEnd || "";
+      if (this.isProxyProposal) {
+        this.proposalDraft.sourceOrigin = entry.owner ? `代填（${entry.owner}）` : "維護人代填（無帳號外部負責人）";
+      }
+    }
+  }
+  closeProposalForm() {
+    this.showProposalForm = false;
+    this.changes.detectChanges();
+  }
+  async submitProposal() {
+    if (!this.selected) return;
+    if (!this.proposalDraft.scheduleEntryId) {
+      this.message = "請選擇對應關鍵任務。";
+      return;
+    }
+    if (!this.proposalDraft.workDescription.trim()) {
+      this.message = "請填寫工作進度說明。";
+      return;
+    }
+    try {
+      await firstValueFrom(
+        this.http.post(`/api/items/${this.selected.id}/proposals`, {
+          scheduleEntryId: this.proposalDraft.scheduleEntryId,
+          workDescription: this.proposalDraft.workDescription.trim(),
+          progressPercent: Number(this.proposalDraft.progressPercent) || 0,
+          proposedStart: this.proposalDraft.proposedStart || null,
+          proposedEnd: this.proposalDraft.proposedEnd || null,
+          sourceOrigin: this.proposalDraft.sourceOrigin.trim() || null,
+        }),
+      );
+      this.showProposalForm = false;
+      this.message = "已送出工作進度與時程提案。";
+      await this.loadProposals();
+    } catch (error: any) {
+      this.message = error?.error?.error || "送出提案失敗。";
+    }
+    this.changes.detectChanges();
+  }
+  openAcceptProposal(p: ProjectProposal) {
+    this.acceptingProposal = p;
+    this.proposalAcceptReason = `採納時程提案：調整預計時程至 ${p.proposedStart || ""} ~ ${p.proposedEnd || ""}`;
+    this.changes.detectChanges();
+  }
+  closeAcceptProposal() {
+    this.acceptingProposal = null;
+    this.proposalAcceptReason = "";
+    this.changes.detectChanges();
+  }
+  async confirmAcceptProposal() {
+    if (!this.selected || !this.acceptingProposal) return;
+    if (!this.proposalAcceptReason.trim()) {
+      this.message = "請填寫採納修訂原因。";
+      return;
+    }
+    try {
+      if (!this.token) {
+        await this.acquire();
+      }
+      const result = (await firstValueFrom(
+        this.http.post(`/api/items/${this.selected.id}/proposals/${this.acceptingProposal.id}/accept`, {
+          reason: this.proposalAcceptReason.trim(),
+          token: this.token,
+          baseProjectVersion: this.baseVersion || this.selected.version,
+        }),
+      )) as { projectVersion: number };
+      this.baseVersion = result.projectVersion;
+      if (this.selected) this.selected.version = result.projectVersion;
+      this.acceptingProposal = null;
+      this.proposalAcceptReason = "";
+      this.message = "已採納提案並更新關鍵任務時程。";
+      await this.loadSchedule();
+      await this.loadProposals();
+    } catch (error: any) {
+      if (error?.status === 409 && error.error) {
+        this.conflict = error.error;
+      }
+      this.message = error?.error?.error || "採納提案失敗。";
+    }
+    this.changes.detectChanges();
+  }
+  openRejectProposal(p: ProjectProposal) {
+    this.rejectingProposal = p;
+    this.proposalRejectReason = "維持專案原定時程承諾，不作調整";
+    this.changes.detectChanges();
+  }
+  closeRejectProposal() {
+    this.rejectingProposal = null;
+    this.proposalRejectReason = "";
+    this.changes.detectChanges();
+  }
+  async confirmRejectProposal() {
+    if (!this.selected || !this.rejectingProposal) return;
+    if (!this.proposalRejectReason.trim()) {
+      this.message = "請填寫退回原因。";
+      return;
+    }
+    try {
+      await firstValueFrom(
+        this.http.post(`/api/items/${this.selected.id}/proposals/${this.rejectingProposal.id}/reject`, {
+          reason: this.proposalRejectReason.trim(),
+        }),
+      );
+      this.rejectingProposal = null;
+      this.proposalRejectReason = "";
+      this.message = "已退回該項提案。";
+      await this.loadProposals();
+    } catch (error: any) {
+      this.message = error?.error?.error || "退回提案失敗。";
     }
     this.changes.detectChanges();
   }

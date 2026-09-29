@@ -395,9 +395,249 @@ app.MapPut("/api/items/{itemId}/project-work", (HttpContext ctx, Store store, st
     else
         Store.Sql(db, "INSERT INTO project_work(project_id,section,work,schedule_proposal,version,updated_by,updated_at) VALUES($project,$section,$work,$proposal,1,$actor,$at)", ("$project", itemId), ("$section", section), ("$work", work), ("$proposal", proposal), ("$actor", user.EmpNo), ("$at", at)).ExecuteNonQuery();
     Store.Sql(db, "INSERT INTO project_work_revisions(project_id,section,actor,at,before_version,after_version,before_work,after_work,before_schedule_proposal,after_schedule_proposal) VALUES($project,$section,$actor,$at,$before,$after,$beforeWork,$afterWork,$beforeProposal,$afterProposal)", ("$project", itemId), ("$section", section), ("$actor", user.EmpNo), ("$at", at), ("$before", beforeVersion), ("$after", beforeVersion + 1), ("$beforeWork", beforeWork), ("$afterWork", work), ("$beforeProposal", beforeProposal), ("$afterProposal", proposal)).ExecuteNonQuery();
-    Store.Sql(db, "INSERT INTO audit(item_id,actor,at,action) VALUES($id,$actor,$at,'project-work')", ("$id", itemId), ("$actor", user.EmpNo), ("$at", at)).ExecuteNonQuery();
+    if (!string.IsNullOrWhiteSpace(request.ScheduleEntryId))
+    {
+        var targetEntry = ScheduleEntry(db, request.ScheduleEntryId);
+        if (targetEntry is not null && targetEntry.ProjectId == itemId && CanSubmitProposal(db, item, targetEntry, user))
+        {
+            var pId = Guid.NewGuid().ToString();
+            var origin = !string.IsNullOrWhiteSpace(request.SourceOrigin)
+                ? request.SourceOrigin.Trim()
+                : (CanMaintainProject(user, item) ? $"維護人代為記錄（負責人：{targetEntry.Owner ?? "未指定"}）" : $"{user.Name} ({user.EmpNo})");
+            Store.Sql(db, """
+                INSERT INTO project_proposals(id, project_id, schedule_entry_id, progress_percent, work_description, proposed_start, proposed_end, proposed_date, source_origin, status, created_by, created_at)
+                VALUES($id, $proj, $entry, $prog, $work, $pstart, $pend, null, $origin, 'pending', $creator, $at)
+                """,
+                ("$id", pId), ("$proj", itemId), ("$entry", targetEntry.Id),
+                ("$prog", request.ProgressPercent), ("$work", work),
+                ("$pstart", request.ProposedStart), ("$pend", request.ProposedEnd),
+                ("$origin", origin), ("$creator", user.EmpNo), ("$at", at)).ExecuteNonQuery();
+            Store.Sql(db, "INSERT INTO project_proposal_history(proposal_id, actor, at, action, reason, details) VALUES($pid, $actor, $at, 'submit', '經由協作路徑提交提案', $details)",
+                ("$pid", pId), ("$actor", user.EmpNo), ("$at", at), ("$details", work)).ExecuteNonQuery();
+        }
+    }
     tx.Commit();
     return Results.Ok(new { version = beforeVersion + 1 });
+});
+app.MapGet("/api/items/{itemId}/proposals", (HttpContext ctx, Store store, string itemId) =>
+{
+    using var db = store.Open();
+    var item = GetItem(db, itemId);
+    if (item is null) return Results.NotFound();
+    var user = Current(ctx);
+    if (item.Section != "projects" || !CanReadProject(db, item, user)) return Results.StatusCode(403);
+    return Results.Ok(GetProjectProposals(db, itemId));
+});
+app.MapGet("/api/items/{itemId}/proposals/{proposalId}/history", (HttpContext ctx, Store store, string itemId, string proposalId) =>
+{
+    using var db = store.Open();
+    var item = GetItem(db, itemId);
+    if (item is null) return Results.NotFound();
+    var user = Current(ctx);
+    if (item.Section != "projects" || !CanReadProject(db, item, user)) return Results.StatusCode(403);
+
+    using var rows = Store.Sql(db, "SELECT actor, at, action, reason, details FROM project_proposal_history WHERE proposal_id=$pid ORDER BY id DESC", ("$pid", proposalId)).ExecuteReader();
+    var history = new List<object>();
+    while (rows.Read())
+    {
+        var actor = rows.GetString(0);
+        history.Add(new {
+            actor,
+            actorName = GetUserName(db, actor),
+            at = rows.GetString(1),
+            action = rows.GetString(2),
+            reason = rows.IsDBNull(3) ? null : rows.GetString(3),
+            details = rows.IsDBNull(4) ? null : rows.GetString(4)
+        });
+    }
+    return Results.Ok(history);
+});
+app.MapPost("/api/items/{itemId}/proposals", (HttpContext ctx, Store store, string itemId, ProjectProposalRequest request) =>
+{
+    using var db = store.Open();
+    var item = GetItem(db, itemId);
+    if (item is null) return Results.NotFound();
+    if (item.Section != "projects") return Results.BadRequest();
+    var user = Current(ctx);
+
+    if (string.IsNullOrWhiteSpace(request.ScheduleEntryId))
+        return Results.BadRequest(new { error = "schedule entry required" });
+    if (string.IsNullOrWhiteSpace(request.WorkDescription))
+        return Results.BadRequest(new { error = "work description required" });
+
+    var entry = ScheduleEntry(db, request.ScheduleEntryId);
+    if (entry is null || entry.ProjectId != itemId) return Results.NotFound();
+
+    if (!CanSubmitProposal(db, item, entry, user))
+        return Results.StatusCode(403);
+
+    var isMaintainer = CanMaintainProject(user, item);
+    string sourceOrigin;
+    if (isMaintainer)
+    {
+        sourceOrigin = !string.IsNullOrWhiteSpace(request.SourceOrigin)
+            ? request.SourceOrigin.Trim()
+            : $"維護人代為記錄（負責人：{entry.Owner ?? "未指定"}）";
+    }
+    else
+    {
+        sourceOrigin = !string.IsNullOrWhiteSpace(request.SourceOrigin)
+            ? request.SourceOrigin.Trim()
+            : $"{user.Name} ({user.EmpNo})";
+    }
+
+    if (request.ProgressPercent is < 0 or > 100)
+        return Results.BadRequest(new { error = "invalid progress percent" });
+
+    if (request.ProposedStart is not null && !DateOnly.TryParseExact(request.ProposedStart, "yyyy-MM-dd", out _))
+        return Results.BadRequest(new { error = "invalid proposed start date" });
+    if (request.ProposedEnd is not null && !DateOnly.TryParseExact(request.ProposedEnd, "yyyy-MM-dd", out _))
+        return Results.BadRequest(new { error = "invalid proposed end date" });
+    if (request.ProposedStart is not null && request.ProposedEnd is not null && string.CompareOrdinal(request.ProposedStart, request.ProposedEnd) > 0)
+        return Results.BadRequest(new { error = "proposed start date must not be after end date" });
+
+    var proposalId = Guid.NewGuid().ToString();
+    var at = DateTimeOffset.UtcNow.ToString("O");
+
+    Store.Sql(db, """
+        INSERT INTO project_proposals(id, project_id, schedule_entry_id, progress_percent, work_description, proposed_start, proposed_end, proposed_date, proposed_state, source_origin, status, created_by, created_at)
+        VALUES($id, $proj, $entry, $prog, $work, $pstart, $pend, $pdate, $pstate, $origin, 'pending', $creator, $at)
+        """,
+        ("$id", proposalId), ("$proj", itemId), ("$entry", request.ScheduleEntryId),
+        ("$prog", request.ProgressPercent), ("$work", request.WorkDescription.Trim()),
+        ("$pstart", request.ProposedStart), ("$pend", request.ProposedEnd),
+        ("$pdate", request.ProposedDate), ("$pstate", request.ProposedState),
+        ("$origin", sourceOrigin), ("$creator", user.EmpNo), ("$at", at)).ExecuteNonQuery();
+
+    Store.Sql(db, "INSERT INTO project_proposal_history(proposal_id, actor, at, action, reason, details) VALUES($pid, $actor, $at, 'submit', '提交進度與時程提案', $details)",
+        ("$pid", proposalId), ("$actor", user.EmpNo), ("$at", at), ("$details", request.WorkDescription.Trim())).ExecuteNonQuery();
+
+    Store.Sql(db, "INSERT INTO audit(item_id, actor, at, action, reason) VALUES($id, $actor, $at, 'project-proposal', $reason)",
+        ("$id", itemId), ("$actor", user.EmpNo), ("$at", at), ("$reason", $"提交任務「{entry.Name}」時程提案：{request.WorkDescription.Trim()}")).ExecuteNonQuery();
+
+    return Results.Created($"/api/items/{itemId}/proposals/{proposalId}", new {
+        id = proposalId,
+        status = "pending",
+        sourceOrigin,
+        scheduleEntryId = entry.Id
+    });
+});
+app.MapPost("/api/items/{itemId}/proposals/{proposalId}/accept", (HttpContext ctx, Store store, string itemId, string proposalId, ProposalDecisionRequest request) =>
+{
+    using var db = store.Open();
+    using var tx = db.BeginTransaction();
+    var item = GetItem(db, itemId);
+    if (item is null) return Results.NotFound();
+    if (item.Section != "projects" || !CanMaintainProject(Current(ctx), item)) return Results.StatusCode(403);
+
+    if (string.IsNullOrWhiteSpace(request.Reason))
+        return Results.BadRequest(new { error = "reason required" });
+
+    var conflict = ScheduleWriteConflict(db, item, Current(ctx), new ScheduleRequest(null, null, null, null, null, null, null, null, null, null, null, null, null, request.Token, request.BaseProjectVersion, null, null, null));
+    if (conflict is not null) return conflict;
+
+    using var pRows = Store.Sql(db, """
+        SELECT id, schedule_entry_id, progress_percent, work_description, proposed_start, proposed_end, proposed_date, proposed_state, source_origin, status
+        FROM project_proposals WHERE id=$id AND project_id=$proj
+        """, ("$id", proposalId), ("$proj", itemId)).ExecuteReader();
+
+    if (!pRows.Read()) return Results.NotFound();
+    var entryId = pRows.GetString(1);
+    var progressPercent = pRows.IsDBNull(2) ? (int?)null : pRows.GetInt32(2);
+    var workDesc = pRows.GetString(3);
+    var propStart = pRows.IsDBNull(4) ? null : pRows.GetString(4);
+    var propEnd = pRows.IsDBNull(5) ? null : pRows.GetString(5);
+    var propDate = pRows.IsDBNull(6) ? null : pRows.GetString(6);
+    var propState = pRows.IsDBNull(7) ? null : pRows.GetString(7);
+    var sourceOrigin = pRows.IsDBNull(8) ? null : pRows.GetString(8);
+    var status = pRows.GetString(9);
+    pRows.Close();
+
+    if (status != "pending")
+        return Results.BadRequest(new { error = "proposal already decided" });
+
+    var entry = ScheduleEntry(db, entryId);
+    if (entry is null) return Results.NotFound();
+
+    var at = DateTimeOffset.UtcNow.ToString("O");
+    var user = Current(ctx);
+    var reason = request.Reason.Trim();
+
+    Store.Sql(db, "UPDATE project_proposals SET status='accepted', decided_by=$decided_by, decided_at=$decided_at, decision_reason=$reason WHERE id=$id",
+        ("$decided_by", user.EmpNo), ("$decided_at", at), ("$reason", reason), ("$id", proposalId)).ExecuteNonQuery();
+
+    Store.Sql(db, "INSERT INTO project_proposal_history(proposal_id, actor, at, action, reason, details) VALUES($pid, $actor, $at, 'accept', $reason, $details)",
+        ("$pid", proposalId), ("$actor", user.EmpNo), ("$at", at), ("$reason", reason), ("$details", $"採納時程提案（來源：{sourceOrigin}）")).ExecuteNonQuery();
+
+    var newForecastStart = propStart ?? entry.ForecastStart;
+    var newForecastEnd = propEnd ?? entry.ForecastEnd;
+    var newForecastDate = propDate ?? entry.ForecastDate;
+    var newState = propState ?? entry.State;
+
+    if (entry.Kind != "milestone" && newForecastStart is not null && newForecastEnd is not null)
+    {
+        if (!ValidDateRange(newForecastStart, newForecastEnd))
+            return Results.BadRequest(new { error = "invalid date range in proposal" });
+    }
+
+    Store.Sql(db, """
+        UPDATE project_schedule_entries
+        SET forecast_start=$fstart, forecast_end=$fend, forecast_date=$fdate, state=$state, version=version+1, updated_at=$at
+        WHERE id=$id
+        """,
+        ("$fstart", newForecastStart), ("$fend", newForecastEnd), ("$fdate", newForecastDate),
+        ("$state", newState), ("$at", at), ("$id", entryId)).ExecuteNonQuery();
+
+    var afterEntry = entry with {
+        ForecastStart = newForecastStart,
+        ForecastEnd = newForecastEnd,
+        ForecastDate = newForecastDate,
+        State = newState,
+        Version = entry.Version + 1
+    };
+
+    SaveScheduleRevision(db, entryId, user.EmpNo, at, "accept-proposal", $"採納時程提案（{sourceOrigin}）：{reason}", entry, afterEntry);
+    NotifySuccessorsOfPredecessorChange(db, itemId, entryId, user.EmpNo, at, reason);
+
+    Store.Sql(db, "INSERT INTO audit(item_id, actor, at, action, reason) VALUES($id, $actor, $at, 'accept-proposal', $reason)",
+        ("$id", itemId), ("$actor", user.EmpNo), ("$at", at), ("$reason", $"採納任務「{entry.Name}」提案：{reason}")).ExecuteNonQuery();
+
+    AdvanceProjectVersion(db, item);
+    tx.Commit();
+    return Results.Ok(new { projectVersion = item.Version + 1, entryVersion = entry.Version + 1 });
+});
+app.MapPost("/api/items/{itemId}/proposals/{proposalId}/reject", (HttpContext ctx, Store store, string itemId, string proposalId, ProposalDecisionRequest request) =>
+{
+    using var db = store.Open();
+    var item = GetItem(db, itemId);
+    if (item is null) return Results.NotFound();
+    if (item.Section != "projects" || !CanMaintainProject(Current(ctx), item)) return Results.StatusCode(403);
+
+    if (string.IsNullOrWhiteSpace(request.Reason))
+        return Results.BadRequest(new { error = "reason required" });
+
+    using var pRows = Store.Sql(db, "SELECT status FROM project_proposals WHERE id=$id AND project_id=$proj", ("$id", proposalId), ("$proj", itemId)).ExecuteReader();
+    if (!pRows.Read()) return Results.NotFound();
+    var status = pRows.GetString(0);
+    pRows.Close();
+
+    if (status != "pending")
+        return Results.BadRequest(new { error = "proposal already decided" });
+
+    var user = Current(ctx);
+    var at = DateTimeOffset.UtcNow.ToString("O");
+    var reason = request.Reason.Trim();
+
+    Store.Sql(db, "UPDATE project_proposals SET status='rejected', decided_by=$decided_by, decided_at=$decided_at, decision_reason=$reason WHERE id=$id",
+        ("$decided_by", user.EmpNo), ("$decided_at", at), ("$reason", reason), ("$id", proposalId)).ExecuteNonQuery();
+
+    Store.Sql(db, "INSERT INTO project_proposal_history(proposal_id, actor, at, action, reason, details) VALUES($pid, $actor, $at, 'reject', $reason, $details)",
+        ("$pid", proposalId), ("$actor", user.EmpNo), ("$at", at), ("$reason", reason), ("$details", "退回/駁回時程提案")).ExecuteNonQuery();
+
+    Store.Sql(db, "INSERT INTO audit(item_id, actor, at, action, reason) VALUES($id, $actor, $at, 'reject-proposal', $reason)",
+        ("$id", itemId), ("$actor", user.EmpNo), ("$at", at), ("$reason", $"退回提案：{reason}")).ExecuteNonQuery();
+
+    return Results.Ok(new { id = proposalId, status = "rejected" });
 });
 app.MapGet("/api/items/{itemId}/schedule", (HttpContext ctx, Store store, string itemId) =>
 {
@@ -405,7 +645,7 @@ app.MapGet("/api/items/{itemId}/schedule", (HttpContext ctx, Store store, string
     var item = GetItem(db, itemId);
     if (item is null) return Results.NotFound();
     var user = Current(ctx);
-    if (item.Section != "projects" || !CanMaintainProject(user, item) && !IsProjectParticipant(db, itemId, user.Section)) return Results.StatusCode(403);
+    if (item.Section != "projects" || !CanReadProject(db, item, user)) return Results.StatusCode(403);
     return Results.Ok(ScheduleEntries(db, itemId));
 });
 app.MapPost("/api/items/{itemId}/schedule", (HttpContext ctx, Store store, string itemId, ScheduleRequest request) =>
@@ -1076,6 +1316,106 @@ static List<EcimMember> EcimMembers(IConfiguration config) => config.GetSection(
 static bool CanReadPublication(User user) => user.Role == "Guy" || user.ReaderAccess;
 static bool CanEdit(User user, string ownerSection) => user.Role == "Guy" || user.Role == "Head" && user.Section == ownerSection;
 static bool CanMaintainProject(User user, Item item) => item.Section == "projects" && CanEdit(user, item.OwnerSection);
+static string GetUserName(SqliteConnection db, string? empNo)
+{
+    if (string.IsNullOrWhiteSpace(empNo)) return "";
+    return Store.Sql(db, "SELECT name FROM users WHERE emp_no=$emp", ("$emp", empNo)).ExecuteScalar() as string ?? empNo;
+}
+static bool IsTaskOwner(ScheduleEntry entry, User user)
+{
+    if (string.IsNullOrWhiteSpace(entry.Owner)) return false;
+    var owner = entry.Owner.Trim();
+    return owner.Equals(user.EmpNo, StringComparison.OrdinalIgnoreCase) ||
+           owner.Equals(user.Name, StringComparison.OrdinalIgnoreCase) ||
+           owner.Contains(user.EmpNo, StringComparison.OrdinalIgnoreCase) ||
+           owner.Contains(user.Name, StringComparison.OrdinalIgnoreCase);
+}
+static bool IsTaskOwnerInProject(SqliteConnection db, string projectId, User user)
+{
+    using var rows = Store.Sql(db, "SELECT owner FROM project_schedule_entries WHERE project_id=$p AND owner IS NOT NULL", ("$p", projectId)).ExecuteReader();
+    while (rows.Read())
+    {
+        var owner = rows.GetString(0);
+        if (owner.Equals(user.EmpNo, StringComparison.OrdinalIgnoreCase) ||
+            owner.Equals(user.Name, StringComparison.OrdinalIgnoreCase) ||
+            owner.Contains(user.EmpNo, StringComparison.OrdinalIgnoreCase) ||
+            owner.Contains(user.Name, StringComparison.OrdinalIgnoreCase))
+        {
+            return true;
+        }
+    }
+    return false;
+}
+static bool CanReadProject(SqliteConnection db, Item item, User user)
+{
+    if (user.Role == "Guy") return true;
+    if (CanMaintainProject(user, item)) return true;
+    if (IsProjectParticipant(db, item.Id, user.Section)) return true;
+    if (IsTaskOwnerInProject(db, item.Id, user)) return true;
+    if (item.Version > 0 && (user.Role == "Reader" || user.ReaderAccess)) return true;
+    return false;
+}
+static bool CanSubmitProposal(SqliteConnection db, Item item, ScheduleEntry entry, User user)
+{
+    if (user.Role == "Reader") return false;
+    if (CanMaintainProject(user, item)) return true;
+    if (user.Role == "Head" && IsProjectParticipant(db, item.Id, user.Section)) return true;
+    if (IsTaskOwner(entry, user)) return true;
+    return false;
+}
+static List<ProjectProposalView> GetProjectProposals(SqliteConnection db, string projectId)
+{
+    var list = new List<ProjectProposalView>();
+    using var rows = Store.Sql(db, """
+        SELECT p.id, p.project_id, p.schedule_entry_id, e.name, e.kind, e.owner,
+               p.progress_percent, p.work_description, p.proposed_start, p.proposed_end, p.proposed_date, p.proposed_state,
+               p.source_origin, p.status, p.created_by, p.created_at,
+               p.decided_by, p.decided_at, p.decision_reason,
+               e.baseline_start, e.baseline_end, e.forecast_start, e.forecast_end,
+               e.baseline_date, e.forecast_date, e.state
+        FROM project_proposals p
+        JOIN project_schedule_entries e ON e.id = p.schedule_entry_id
+        WHERE p.project_id = $project
+        ORDER BY p.rowid DESC
+        """, ("$project", projectId)).ExecuteReader();
+
+    while (rows.Read())
+    {
+        var createdBy = rows.GetString(14);
+        var decidedBy = rows.IsDBNull(16) ? null : rows.GetString(16);
+        list.Add(new ProjectProposalView(
+            rows.GetString(0),
+            rows.GetString(1),
+            rows.GetString(2),
+            rows.GetString(3),
+            rows.GetString(4),
+            rows.IsDBNull(5) ? null : rows.GetString(5),
+            rows.IsDBNull(6) ? null : rows.GetInt32(6),
+            rows.GetString(7),
+            rows.IsDBNull(8) ? null : rows.GetString(8),
+            rows.IsDBNull(9) ? null : rows.GetString(9),
+            rows.IsDBNull(10) ? null : rows.GetString(10),
+            rows.IsDBNull(11) ? null : rows.GetString(11),
+            rows.IsDBNull(12) ? null : rows.GetString(12),
+            rows.GetString(13),
+            createdBy,
+            GetUserName(db, createdBy),
+            rows.GetString(15),
+            decidedBy,
+            decidedBy is null ? null : GetUserName(db, decidedBy),
+            rows.IsDBNull(17) ? null : rows.GetString(17),
+            rows.IsDBNull(18) ? null : rows.GetString(18),
+            rows.IsDBNull(19) ? null : rows.GetString(19),
+            rows.IsDBNull(20) ? null : rows.GetString(20),
+            rows.IsDBNull(21) ? null : rows.GetString(21),
+            rows.IsDBNull(22) ? null : rows.GetString(22),
+            rows.IsDBNull(23) ? null : rows.GetString(23),
+            rows.IsDBNull(24) ? null : rows.GetString(24),
+            rows.GetString(25)
+        ));
+    }
+    return list;
+}
 static bool IsProjectParticipant(SqliteConnection db, string itemId, string? section) => !string.IsNullOrWhiteSpace(section) && Store.Sql(db, "SELECT 1 FROM project_participants WHERE project_id=$project AND section=$section", ("$project", itemId), ("$section", section)).ExecuteScalar() is not null;
 static bool ValidSection(SqliteConnection db, string? section) => !string.IsNullOrWhiteSpace(section) && Store.Sql(db, "SELECT 1 FROM users WHERE role='Head' AND section=$section", ("$section", section.Trim())).ExecuteScalar() is not null;
 static bool Valid(string? title, string? content) => !string.IsNullOrWhiteSpace(title) && title.Length <= 200 && content is not null && content.Length <= 20000;
@@ -1504,7 +1844,10 @@ record Lease(string Holder, string TokenHash, DateTimeOffset ExpiresAt, int Base
 record CreateReport(string MeetingDate);
 record CreateItem(string Section, string Title, string? OwnerSection);
 record ProjectParticipantRequest(string? Section);
-record ProjectWorkRequest(string? Section, string? Work, string? ScheduleProposal, int BaseVersion);
+record ProjectWorkRequest(string? Section, string? Work, string? ScheduleProposal, int BaseVersion, string? ScheduleEntryId = null, int? ProgressPercent = null, string? ProposedStart = null, string? ProposedEnd = null, string? SourceOrigin = null);
+record ProjectProposalRequest(string? ScheduleEntryId, string? WorkDescription, int? ProgressPercent = null, string? ProposedStart = null, string? ProposedEnd = null, string? ProposedDate = null, string? ProposedState = null, string? SourceOrigin = null);
+record ProposalDecisionRequest(string? Reason, string? Token, int? BaseProjectVersion);
+record ProjectProposalView(string Id, string ProjectId, string ScheduleEntryId, string ScheduleEntryName, string ScheduleEntryKind, string? ScheduleEntryOwner, int? ProgressPercent, string WorkDescription, string? ProposedStart, string? ProposedEnd, string? ProposedDate, string? ProposedState, string? SourceOrigin, string Status, string CreatedBy, string CreatedByName, string CreatedAt, string? DecidedBy, string? DecidedByName, string? DecidedAt, string? DecisionReason, string? CurrentBaselineStart, string? CurrentBaselineEnd, string? CurrentForecastStart, string? CurrentForecastEnd, string? CurrentBaselineDate, string? CurrentForecastDate, string? CurrentState);
 record SyncMemberResult(string UserId, string Status, int WorkCount, string? LastSuccessAt, string? Error);
 record ScheduleRequest(string? Kind, string? Name, string? BaselineStart, string? BaselineEnd, string? ForecastStart, string? ForecastEnd, string? ActualStart, string? ActualEnd, string? BaselineChangeReason, int? BaseVersion, string? State, string? Reason, string? Action, string? Token, int? BaseProjectVersion, string? Owner, string? PhaseId, bool? AcknowledgeIncompleteTasks, string? TargetDate = null, string? BaselineDate = null, string? ForecastDate = null, string? ActualDate = null);
 record DependencyRef(string Id, string Name, string Kind);

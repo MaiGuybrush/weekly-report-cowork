@@ -379,6 +379,43 @@ try {
   await page.getByText('跨部門相依事項已變更為「已交付」。').waitFor({ timeout: 15000 });
   assert.equal(await phaseItem.locator('.external-notice-pill').count(), 0, 'delivered external dependency should clear notice');
 
+  // Issue #7 畫面驗證：參與者進度與時程提案（Frontend-Design 驗收）
+  const proposalsSection = page.locator('.project-proposals-section');
+  await proposalsSection.waitFor({ timeout: 15000 });
+  assert.ok(await proposalsSection.getByText('參與者進度與時程提案').count() > 0, 'proposals section header should exist');
+  assert.ok(await proposalsSection.locator('.btn-proxy-proposal').count() > 0, 'proxy proposal button should exist for maintainer');
+
+  // 1. 維護人代為記錄無帳號外部負責人進度提案
+  await proposalsSection.locator('.btn-proxy-proposal').click();
+  const proposalModal = page.locator('.proposal-modal');
+  await proposalModal.waitFor({ timeout: 15000 });
+  assert.ok(await proposalModal.locator('.modal-proxy-alert').count() > 0, 'proxy alert should be displayed in proxy mode');
+
+  await proposalModal.locator('input[placeholder*="例如：廠商窗口"]').fill('廠商窗口 Email 週報（無帳號外部負責人）');
+  await proposalModal.locator('input[type="number"]').fill('75');
+  await proposalModal.locator('textarea').fill('完成 75% 介面串接，因硬體到貨順延 2 天');
+  await proposalModal.locator('input[type="date"]').last().fill('2026-10-22');
+  await proposalModal.getByRole('button', { name: '確認送出提案' }).click();
+
+  await page.getByText('已送出工作進度與時程提案。').waitFor({ timeout: 15000 });
+  const pendingCard = proposalsSection.locator('.proposal-card:has-text("廠商窗口 Email 週報")');
+  await pendingCard.waitFor({ timeout: 15000 });
+  assert.ok(await pendingCard.getByText('⏳ 待審核').count() > 0, 'new proposal should have pending badge');
+  assert.ok(await pendingCard.getByText('75%').count() > 0, 'proposal card should display progress percentage');
+  assert.ok(await pendingCard.getByText('完成 75% 介面串接').count() > 0, 'proposal card should display description');
+
+  // 2. 維護人採納提案（走租約、版本、原因流程）
+  await pendingCard.locator('.btn-accept-proposal').click();
+  const acceptModal = page.locator('.proposal-modal');
+  await acceptModal.waitFor({ timeout: 15000 });
+  assert.ok(await acceptModal.getByText('✓ 採納時程提案並更新專案排程').count() > 0);
+  await acceptModal.locator('textarea').fill('經評估硬體到貨狀況，同意順延交付日期');
+  await acceptModal.locator('.btn-success').click();
+
+  await page.getByText('已採納提案並更新關鍵任務時程。').waitFor({ timeout: 15000 });
+  assert.ok(await pendingCard.getByText('✓ 已採納').count() > 0, 'proposal badge should transition to accepted');
+  assert.ok(await pendingCard.getByText('經評估硬體到貨狀況').count() > 0, 'decision note should be displayed');
+
   // 再次取消前置測試任務以驗收正式發布頁面之已取消區塊
   await schedulePanel.locator('li.schedule-task:has(strong:has-text("關鍵任務：前置測試任務"))').getByRole('button', { name: '編輯' }).click();
   await schedulePanel.getByLabel('操作').selectOption('cancel');
