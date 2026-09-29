@@ -35,15 +35,14 @@ export class Auth {
     const pendingPath = sessionStorage.getItem('reportReturnPath') || (url.hash.startsWith('#/') ? url.hash.slice(1) : '/');
 
     try {
+      let result: { token: string; refreshToken: string };
       if (certificateKey) {
-        const result = await firstValueFrom(this.http.post<{ token: string; refreshToken: string }>(`${uac}/VerifyCert`, { CertificateKey: certificateKey }));
-        this.save(result);
-        this.restoreReturnPath(url);
+        result = await firstValueFrom(this.http.post<{ token: string; refreshToken: string }>(`${uac}/VerifyCert`, { CertificateKey: certificateKey }));
       } else {
-        const result = await firstValueFrom(this.http.post<{ token: string; refreshToken: string }>(`${uac}/RefreshToken`, { refreshToken: localStorage.getItem(refreshKey) }));
-        this.save(result);
-        this.restoreReturnPath(url);
+        result = await firstValueFrom(this.http.post<{ token: string; refreshToken: string }>(`${uac}/RefreshToken`, { refreshToken: localStorage.getItem(refreshKey) }));
       }
+      this.save(result);
+      this.restoreReturnPath(url);
     } catch (error) {
       console.error('UAC initialization failed', error);
       this.clear();
