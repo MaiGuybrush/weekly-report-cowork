@@ -307,6 +307,81 @@ app.MapPost("/api/reports", (HttpContext ctx, Store store, CreateReport request)
                         }
                     }
                 }
+
+                using (var evRows = Store.Sql(db, """
+                    SELECT schedule_entry_id, work_id, section, summary, period_from, period_to, initial_payload, latest_payload, created_by, created_at, reason
+                    FROM project_schedule_evidence_links
+                    WHERE project_id=$oldProject
+                    ORDER BY rowid
+                    """, ("$oldProject", item.Id)).ExecuteReader())
+                {
+                    var evList = new List<(string oldSchedId, string workId, string? sec, string sum, string? pFrom, string? pTo, string initP, string latestP, string actor, string at, string reason)>();
+                    while (evRows.Read())
+                    {
+                        var oldSched = evRows.GetString(0);
+                        if (carriedIds.ContainsKey(oldSched))
+                        {
+                            evList.Add((
+                                oldSched,
+                                evRows.GetString(1),
+                                NullableString(evRows, 2),
+                                evRows.GetString(3),
+                                NullableString(evRows, 4),
+                                NullableString(evRows, 5),
+                                evRows.GetString(6),
+                                evRows.GetString(7),
+                                evRows.GetString(8),
+                                evRows.GetString(9),
+                                evRows.GetString(10)
+                            ));
+                        }
+                    }
+                    evRows.Close();
+
+                    foreach (var ev in evList)
+                    {
+                        var newSchedId = carriedIds[ev.oldSchedId];
+                        Store.Sql(db, """
+                            INSERT INTO project_schedule_evidence_links(id,project_id,schedule_entry_id,work_id,source_id,section,summary,period_from,period_to,initial_payload,latest_payload,created_by,created_at,updated_at,reason)
+                            VALUES($id,$project,$sched,$work,NULL,$sec,$sum,$pFrom,$pTo,$init,$latest,$actor,$at,$updatedAt,$reason)
+                            ON CONFLICT(schedule_entry_id, work_id) DO NOTHING
+                            """,
+                            ("$id", Guid.NewGuid().ToString()), ("$project", carriedId),
+                            ("$sched", newSchedId), ("$work", ev.workId),
+                            ("$sec", ev.sec), ("$sum", ev.sum),
+                            ("$pFrom", ev.pFrom), ("$pTo", ev.pTo),
+                            ("$init", ev.initP), ("$latest", ev.latestP),
+                            ("$actor", ev.actor), ("$at", ev.at),
+                            ("$updatedAt", DateTimeOffset.UtcNow.ToString("O")),
+                            ("$reason", ev.reason)).ExecuteNonQuery();
+                    }
+                }
+
+                foreach (var entry in schedule)
+                {
+                    if (entry.EvidenceLinks is not null)
+                    {
+                        foreach (var ev in entry.EvidenceLinks)
+                        {
+                            if (carriedIds.TryGetValue(entry.Id, out var newSchedId))
+                            {
+                                Store.Sql(db, """
+                                    INSERT INTO project_schedule_evidence_links(id,project_id,schedule_entry_id,work_id,source_id,section,summary,period_from,period_to,initial_payload,latest_payload,created_by,created_at,updated_at,reason)
+                                    VALUES($id,$project,$sched,$work,NULL,$sec,$sum,$pFrom,$pTo,$init,$latest,$actor,$at,$updatedAt,$reason)
+                                    ON CONFLICT(schedule_entry_id, work_id) DO NOTHING
+                                    """,
+                                    ("$id", Guid.NewGuid().ToString()), ("$project", carriedId),
+                                    ("$sched", newSchedId), ("$work", ev.WorkId),
+                                    ("$sec", ev.Section), ("$sum", ev.Summary),
+                                    ("$pFrom", ev.PeriodFrom), ("$pTo", ev.PeriodTo),
+                                    ("$init", ev.InitialPayload), ("$latest", ev.LatestPayload),
+                                    ("$actor", ev.CreatedBy), ("$at", ev.CreatedAt),
+                                    ("$updatedAt", DateTimeOffset.UtcNow.ToString("O")),
+                                    ("$reason", ev.Reason)).ExecuteNonQuery();
+                            }
+                        }
+                    }
+                }
             }
         }
     }
@@ -360,6 +435,16 @@ app.MapPost("/api/reports/{reportId}/ecim-sync", async (HttpContext ctx, Store s
                         }
                     }
                 }
+                Store.Sql(db, """
+                    UPDATE project_schedule_evidence_links
+                    SET latest_payload=$payload, source_id=$sourceId, updated_at=$at
+                    WHERE work_id=$work AND project_id IN (SELECT id FROM items WHERE report_id=$report)
+                    """,
+                    ("$payload", entry.Payload),
+                    ("$sourceId", sourceId),
+                    ("$at", succeededAt),
+                    ("$work", entry.WorkId),
+                    ("$report", reportId)).ExecuteNonQuery();
             }
             Store.Sql(db, "INSERT INTO ecim_member_results(run_id,user_id,status,work_count,last_success_at) VALUES($run,$user,'succeeded',$count,$at)", ("$run", runId), ("$user", member.UserId), ("$count", work.Count), ("$at", succeededAt)).ExecuteNonQuery();
             Store.Sql(db, "INSERT INTO ecim_member_sync_state(section,user_id,last_success_at) VALUES($section,$user,$at) ON CONFLICT(section,user_id) DO UPDATE SET last_success_at=excluded.last_success_at", ("$section", user.Section), ("$user", member.UserId), ("$at", succeededAt)).ExecuteNonQuery();
@@ -523,6 +608,19 @@ app.MapGet("/api/publications/{publicationId}/items/{itemId}/schedule-entries/{e
     var entry = item.Schedule?.FirstOrDefault(e => e.Id == entryId);
     if (entry is null) return Results.NotFound();
     return Results.Ok(entry.History ?? []);
+});
+app.MapGet("/api/publications/{publicationId}/items/{itemId}/schedule-entries/{entryId}/evidence", (HttpContext ctx, Store store, string publicationId, string itemId, string entryId) =>
+{
+    if (!CanReadPublication(Current(ctx))) return Results.StatusCode(403);
+    using var db = store.Open();
+    using var rows = Store.Sql(db, "SELECT snapshot FROM publications WHERE id=$id", ("$id", publicationId)).ExecuteReader();
+    if (!rows.Read()) return Results.NotFound();
+    var snapshot = System.Text.Json.JsonSerializer.Deserialize<ReportSnapshot>(rows.GetString(0));
+    var item = snapshot?.Items.FirstOrDefault(i => i.Id == itemId);
+    if (item is null) return Results.NotFound();
+    var entry = item.Schedule?.FirstOrDefault(e => e.Id == entryId);
+    if (entry is null) return Results.NotFound();
+    return Results.Ok(entry.EvidenceLinks ?? []);
 });
 app.MapGet("/api/publications/{publicationId}/items/{itemId}/external-dependencies/{depId}/history", (HttpContext ctx, Store store, string publicationId, string itemId, string depId) =>
 {
@@ -1296,6 +1394,121 @@ app.MapDelete("/api/items/{itemId}/external-dependencies/{depId}/links/{schedule
 {
     return RemoveExternalLink(ctx, store, itemId, depId, scheduleEntryId, reason, token, baseProjectVersion);
 });
+app.MapGet("/api/reports/{reportId}/items/{itemId}/ecim-evidence-sources", (HttpContext ctx, Store store, string reportId, string itemId) =>
+{
+    var user = Current(ctx);
+    using var db = store.Open();
+    var item = GetItem(db, itemId);
+    if (item is null) return Results.NotFound();
+    if (!CanReadPublication(user) && !CanEdit(user, item.OwnerSection)) return Results.StatusCode(403);
+    using var rows = Store.Sql(db, "SELECT work_id, section, period_from, period_to, payload FROM ecim_sources WHERE report_id=$report ORDER BY rowid", ("$report", reportId)).ExecuteReader();
+    var list = new List<EcimEvidenceCandidateSource>();
+    while (rows.Read())
+    {
+        var workId = rows.GetString(0);
+        var sec = rows.GetString(1);
+        var pFrom = NullableString(rows, 2);
+        var pTo = NullableString(rows, 3);
+        var payload = rows.GetString(4);
+        var summary = ExtractEcimSummary(payload, workId);
+        list.Add(new EcimEvidenceCandidateSource(workId, sec, pFrom, pTo, summary, payload));
+    }
+    return Results.Ok(list);
+});
+app.MapGet("/api/items/{itemId}/schedule-entries/{entryId}/evidence-links", (HttpContext ctx, Store store, string itemId, string entryId) =>
+{
+    using var db = store.Open();
+    var item = GetItem(db, itemId);
+    if (item is null) return Results.NotFound();
+    var user = Current(ctx);
+    if (item.Section != "projects" || !CanMaintainProject(user, item) && !IsProjectParticipant(db, itemId, user.Section) && !CanReadPublication(user)) return Results.StatusCode(403);
+    var entry = ScheduleEntry(db, entryId);
+    if (entry is null || entry.ProjectId != itemId) return Results.NotFound();
+    return Results.Ok(GetScheduleEvidenceLinks(db, entryId));
+});
+app.MapPost("/api/items/{itemId}/schedule-entries/{entryId}/evidence-links", (HttpContext ctx, Store store, string itemId, string entryId, ScheduleEvidenceLinkRequest request) =>
+{
+    using var db = store.Open();
+    using var tx = db.BeginTransaction();
+    var item = GetItem(db, itemId);
+    if (item is null) return Results.NotFound();
+    if (item.Section != "projects" || !CanMaintainProject(Current(ctx), item)) return Results.StatusCode(403);
+    var entry = ScheduleEntry(db, entryId);
+    if (entry is null || entry.ProjectId != itemId) return Results.NotFound();
+    if (entry.Kind != "task") return Results.BadRequest(new { error = "eCIM evidence can only be linked to key tasks" });
+    if (entry.State == "cancelled") return Results.BadRequest(new { error = "cannot link evidence to cancelled task" });
+    if (string.IsNullOrWhiteSpace(request.WorkId)) return Results.BadRequest(new { error = "workId required" });
+    if (string.IsNullOrWhiteSpace(request.Reason)) return Results.BadRequest(new { error = "reason required" });
+
+    var conflict = ScheduleWriteConflict(db, item, Current(ctx), new ScheduleRequest(null, null, null, null, null, null, null, null, null, null, null, null, null, request.Token, request.BaseProjectVersion, null, null, null));
+    if (conflict is not null) return conflict;
+
+    var workId = request.WorkId.Trim();
+    var duplicate = Store.Sql(db, "SELECT 1 FROM project_schedule_evidence_links WHERE schedule_entry_id=$entry AND work_id=$work", ("$entry", entryId), ("$work", workId)).ExecuteScalar();
+    if (duplicate is not null) return Results.Conflict(new { error = "this eCIM work is already linked to this task" });
+
+    var reportId = Store.Sql(db, "SELECT report_id FROM items WHERE id=$id", ("$id", itemId)).ExecuteScalar() as string ?? "";
+
+    string? sourceId = null;
+    string? section = request.Section;
+    string? periodFrom = null;
+    string? periodTo = null;
+    string? payload = null;
+    string summary = request.Summary?.Trim() ?? "";
+
+    using (var srcRows = Store.Sql(db, "SELECT id, section, period_from, period_to, payload FROM ecim_sources WHERE report_id=$report AND work_id=$work ORDER BY rowid DESC LIMIT 1", ("$report", reportId), ("$work", workId)).ExecuteReader())
+    {
+        if (srcRows.Read())
+        {
+            sourceId = srcRows.GetString(0);
+            section = NullableString(srcRows, 1) ?? section;
+            periodFrom = NullableString(srcRows, 2);
+            periodTo = NullableString(srcRows, 3);
+            payload = srcRows.GetString(4);
+            if (string.IsNullOrWhiteSpace(summary)) summary = ExtractEcimSummary(payload, workId);
+        }
+    }
+
+    if (string.IsNullOrWhiteSpace(payload))
+    {
+        payload = System.Text.Json.JsonSerializer.Serialize(new { workId, summary = string.IsNullOrWhiteSpace(summary) ? workId : summary, section });
+        if (string.IsNullOrWhiteSpace(summary)) summary = workId;
+    }
+
+    var linkId = Guid.NewGuid().ToString();
+    var at = DateTimeOffset.UtcNow.ToString("O");
+    var actor = Current(ctx).EmpNo;
+    var beforeEntry = ScheduleEntry(db, entryId)!;
+
+    Store.Sql(db, """
+        INSERT INTO project_schedule_evidence_links(id,project_id,schedule_entry_id,work_id,source_id,section,summary,period_from,period_to,initial_payload,latest_payload,created_by,created_at,updated_at,reason)
+        VALUES($id,$project,$entry,$work,$source,$sec,$sum,$pFrom,$pTo,$init,$latest,$actor,$at,$at,$reason)
+        """,
+        ("$id", linkId), ("$project", itemId), ("$entry", entryId), ("$work", workId),
+        ("$source", sourceId), ("$sec", section), ("$sum", summary),
+        ("$pFrom", periodFrom), ("$pTo", periodTo),
+        ("$init", payload), ("$latest", payload),
+        ("$actor", actor), ("$at", at), ("$reason", request.Reason.Trim())).ExecuteNonQuery();
+
+    var afterEntry = ScheduleEntry(db, entryId)!;
+    SaveScheduleRevision(db, entryId, actor, at, "link-evidence", $"連結 eCIM 證據「{workId}（{summary}）」：{request.Reason.Trim()}", beforeEntry, afterEntry);
+    AdvanceProjectVersion(db, item);
+    tx.Commit();
+
+    var created = afterEntry.EvidenceLinks?.FirstOrDefault(l => l.Id == linkId);
+    return Results.Created($"/api/items/{itemId}/schedule-entries/{entryId}/evidence-links/{linkId}", new { link = created, projectVersion = item.Version + 1 });
+});
+app.MapPost("/api/items/{itemId}/schedule-entries/{entryId}/evidence-links/{linkId}/delete", (HttpContext ctx, Store store, string itemId, string entryId, string linkId, ScheduleEvidenceUnlinkRequest request) =>
+{
+    return RemoveEvidenceLink(ctx, store, itemId, entryId, linkId, request.Reason, request.Token, request.BaseProjectVersion);
+});
+app.MapDelete("/api/items/{itemId}/schedule-entries/{entryId}/evidence-links/{linkId}", (HttpContext ctx, Store store, string itemId, string entryId, string linkId, [Microsoft.AspNetCore.Mvc.FromBody] ScheduleEvidenceUnlinkRequest? body, [Microsoft.AspNetCore.Mvc.FromQuery] string? reason, [Microsoft.AspNetCore.Mvc.FromQuery] string? token, [Microsoft.AspNetCore.Mvc.FromQuery] int? baseProjectVersion) =>
+{
+    var r = body?.Reason ?? reason;
+    var t = body?.Token ?? token;
+    var v = body?.BaseProjectVersion ?? baseProjectVersion;
+    return RemoveEvidenceLink(ctx, store, itemId, entryId, linkId, r, t, v);
+});
 app.MapGet("/api/items/{itemId}/schedule/{entryId}/baseline-history", (HttpContext ctx, Store store, string itemId, string entryId) =>
 {
     using var db = store.Open();
@@ -1876,6 +2089,86 @@ static IResult RemoveExternalLink(HttpContext ctx, Store store, string itemId, s
     tx.Commit();
     return Results.Ok(new { projectVersion = item.Version + 1 });
 }
+static string ExtractEcimSummary(string payload, string fallbackWorkId)
+{
+    try
+    {
+        using var doc = System.Text.Json.JsonDocument.Parse(payload);
+        var root = doc.RootElement;
+        foreach (var prop in new[] { "summary", "title", "content", "description", "workName" })
+        {
+            if (root.TryGetProperty(prop, out var val) && !string.IsNullOrWhiteSpace(val.GetString()))
+                return val.GetString()!;
+        }
+    }
+    catch { }
+    return fallbackWorkId;
+}
+static List<ScheduleEvidenceView> GetScheduleEvidenceLinks(SqliteConnection db, string entryId)
+{
+    var list = new List<ScheduleEvidenceView>();
+    using var rows = Store.Sql(db, """
+        SELECT id, schedule_entry_id, work_id, section, summary, period_from, period_to, initial_payload, latest_payload, created_by, created_at, updated_at, reason
+        FROM project_schedule_evidence_links
+        WHERE schedule_entry_id=$entry
+        ORDER BY rowid
+        """, ("$entry", entryId)).ExecuteReader();
+    while (rows.Read())
+    {
+        var initPayload = rows.GetString(7);
+        var latestPayload = rows.GetString(8);
+        list.Add(new ScheduleEvidenceView(
+            rows.GetString(0),
+            rows.GetString(1),
+            rows.GetString(2),
+            NullableString(rows, 3),
+            rows.GetString(4),
+            NullableString(rows, 5),
+            NullableString(rows, 6),
+            initPayload,
+            latestPayload,
+            initPayload != latestPayload,
+            rows.GetString(9),
+            rows.GetString(10),
+            rows.GetString(11),
+            rows.GetString(12)
+        ));
+    }
+    return list;
+}
+static IResult RemoveEvidenceLink(HttpContext ctx, Store store, string itemId, string entryId, string linkId, string? reason, string? token, int? baseProjectVersion)
+{
+    using var db = store.Open();
+    using var tx = db.BeginTransaction();
+    var item = GetItem(db, itemId);
+    if (item is null) return Results.NotFound();
+    if (item.Section != "projects" || !CanMaintainProject(Current(ctx), item)) return Results.StatusCode(403);
+    var entry = ScheduleEntry(db, entryId);
+    if (entry is null || entry.ProjectId != itemId) return Results.NotFound();
+    if (string.IsNullOrWhiteSpace(reason)) return Results.BadRequest(new { error = "reason required" });
+
+    var conflict = ScheduleWriteConflict(db, item, Current(ctx), new ScheduleRequest(null, null, null, null, null, null, null, null, null, null, null, null, null, token, baseProjectVersion, null, null, null));
+    if (conflict is not null) return conflict;
+
+    using var existing = Store.Sql(db, "SELECT work_id, summary FROM project_schedule_evidence_links WHERE id=$id AND schedule_entry_id=$entry", ("$id", linkId), ("$entry", entryId)).ExecuteReader();
+    if (!existing.Read()) return Results.NotFound();
+    var unlinkedWorkId = existing.GetString(0);
+    var unlinkedSummary = existing.GetString(1);
+    existing.Close();
+
+    var beforeEntry = ScheduleEntry(db, entryId)!;
+    var at = DateTimeOffset.UtcNow.ToString("O");
+    var actor = Current(ctx).EmpNo;
+    var trimmedReason = reason.Trim();
+
+    Store.Sql(db, "DELETE FROM project_schedule_evidence_links WHERE id=$id", ("$id", linkId)).ExecuteNonQuery();
+    var afterEntry = ScheduleEntry(db, entryId)!;
+
+    SaveScheduleRevision(db, entryId, actor, at, "unlink-evidence", $"移除 eCIM 證據「{unlinkedWorkId}（{unlinkedSummary}）」：{trimmedReason}", beforeEntry, afterEntry);
+    AdvanceProjectVersion(db, item);
+    tx.Commit();
+    return Results.Ok(new { unlinkedId = linkId, projectVersion = item.Version + 1 });
+}
 static List<ScheduleRevisionView> GetScheduleRevisions(SqliteConnection db, string entryId)
 {
     using var rows = Store.Sql(db, "SELECT actor,at,action,reason,before_state,after_state FROM project_schedule_revisions WHERE entry_id=$id ORDER BY id", ("$id", entryId)).ExecuteReader();
@@ -2034,6 +2327,39 @@ static List<ScheduleEntry> ScheduleEntries(SqliteConnection db, string itemId, b
         }
     }
 
+    var evidenceMap = new Dictionary<string, List<ScheduleEvidenceView>>();
+    using (var evRows = Store.Sql(db, """
+        SELECT id, schedule_entry_id, work_id, section, summary, period_from, period_to, initial_payload, latest_payload, created_by, created_at, updated_at, reason
+        FROM project_schedule_evidence_links
+        WHERE project_id=$project
+        ORDER BY rowid
+        """, ("$project", itemId)).ExecuteReader())
+    {
+        while (evRows.Read())
+        {
+            var schedId = evRows.GetString(1);
+            if (!evidenceMap.TryGetValue(schedId, out var evList)) evidenceMap[schedId] = evList = [];
+            var initPayload = evRows.GetString(7);
+            var latestPayload = evRows.GetString(8);
+            evList.Add(new ScheduleEvidenceView(
+                evRows.GetString(0),
+                schedId,
+                evRows.GetString(2),
+                NullableString(evRows, 3),
+                evRows.GetString(4),
+                NullableString(evRows, 5),
+                NullableString(evRows, 6),
+                initPayload,
+                latestPayload,
+                initPayload != latestPayload,
+                evRows.GetString(9),
+                evRows.GetString(10),
+                evRows.GetString(11),
+                evRows.GetString(12)
+            ));
+        }
+    }
+
     return rawEntries.Select(entry => entry with {
         UnfinishedTasks = entry.Kind == "phase"
             ? rawEntries.Where(task => task.Kind == "task" && task.PhaseId == entry.Id && task.State != "completed" && task.State != "cancelled").Select(task => task.Name).ToList()
@@ -2042,13 +2368,17 @@ static List<ScheduleEntry> ScheduleEntries(SqliteConnection db, string itemId, b
         Successors = succMap.GetValueOrDefault(entry.Id) ?? [],
         Warnings = warningMap.GetValueOrDefault(entry.Id) ?? [],
         ExternalNotices = extNoticeMap.GetValueOrDefault(entry.Id) ?? [],
+        EvidenceLinks = evidenceMap.GetValueOrDefault(entry.Id) ?? [],
         History = includeHistory ? GetScheduleRevisions(db, entry.Id) : null
     }).ToList();
 }
 static ScheduleEntry? ScheduleEntry(SqliteConnection db, string entryId)
 {
     using var rows = Store.Sql(db, "SELECT id,project_id,kind,name,baseline_start,baseline_end,forecast_start,forecast_end,actual_start,actual_end,version,state,owner,phase_id,baseline_date,forecast_date,actual_date,continuity_id FROM project_schedule_entries WHERE id=$id", ("$id", entryId)).ExecuteReader();
-    return rows.Read() ? new ScheduleEntry(rows.GetString(0), rows.GetString(1), rows.GetString(2), rows.GetString(3), NullableString(rows, 4), NullableString(rows, 5), NullableString(rows, 6), NullableString(rows, 7), NullableString(rows, 8), NullableString(rows, 9), rows.GetInt32(10), rows.GetString(11), NullableString(rows, 12), NullableString(rows, 13), null, NullableString(rows, 14), NullableString(rows, 15), NullableString(rows, 16), null, null, null, null, null, NullableString(rows, 17) ?? rows.GetString(0)) : null;
+    if (!rows.Read()) return null;
+    var baseEntry = new ScheduleEntry(rows.GetString(0), rows.GetString(1), rows.GetString(2), rows.GetString(3), NullableString(rows, 4), NullableString(rows, 5), NullableString(rows, 6), NullableString(rows, 7), NullableString(rows, 8), NullableString(rows, 9), rows.GetInt32(10), rows.GetString(11), NullableString(rows, 12), NullableString(rows, 13), null, NullableString(rows, 14), NullableString(rows, 15), NullableString(rows, 16), null, null, null, null, null, NullableString(rows, 17) ?? rows.GetString(0));
+    rows.Close();
+    return baseEntry with { EvidenceLinks = GetScheduleEvidenceLinks(db, entryId) };
 }
 static ReportSnapshot Snapshot(SqliteConnection db, string reportId, IConfiguration config)
 {
@@ -2135,7 +2465,11 @@ record ExternalDependencyView(string Id, string ProjectId, string Description, s
 record ExternalDependencyRequest(string? Description, string? Supplier, string? DueDate, string? Status, string? Reason, string? Token, int? BaseProjectVersion);
 record ExternalDependencyLinkRequest(string? ScheduleEntryId, string? Reason, string? Token, int? BaseProjectVersion);
 record ScheduleRevisionView(string Actor, string At, string Action, string? Reason, System.Text.Json.JsonElement? Before, System.Text.Json.JsonElement? After);
-record ScheduleEntry(string Id, string ProjectId, string Kind, string Name, string? BaselineStart, string? BaselineEnd, string? ForecastStart, string? ForecastEnd, string? ActualStart, string? ActualEnd, int Version, string State = "open", string? Owner = null, string? PhaseId = null, List<string>? UnfinishedTasks = null, string? BaselineDate = null, string? ForecastDate = null, string? ActualDate = null, List<DependencyRef>? Predecessors = null, List<DependencyRef>? Successors = null, List<DependencyWarning>? Warnings = null, List<ExternalDeliveryNotice>? ExternalNotices = null, List<ScheduleRevisionView>? History = null, string? ContinuityId = null);
+record ScheduleEvidenceLinkRequest(string? WorkId, string? Reason, string? Token, int? BaseProjectVersion, string? Summary = null, string? Section = null);
+record ScheduleEvidenceUnlinkRequest(string? Reason, string? Token, int? BaseProjectVersion);
+record ScheduleEvidenceView(string Id, string ScheduleEntryId, string WorkId, string? Section, string Summary, string? PeriodFrom, string? PeriodTo, string InitialPayload, string LatestPayload, bool SourceChanged, string CreatedBy, string CreatedAt, string UpdatedAt, string Reason);
+record EcimEvidenceCandidateSource(string WorkId, string Section, string? PeriodFrom, string? PeriodTo, string Summary, string Payload);
+record ScheduleEntry(string Id, string ProjectId, string Kind, string Name, string? BaselineStart, string? BaselineEnd, string? ForecastStart, string? ForecastEnd, string? ActualStart, string? ActualEnd, int Version, string State = "open", string? Owner = null, string? PhaseId = null, List<string>? UnfinishedTasks = null, string? BaselineDate = null, string? ForecastDate = null, string? ActualDate = null, List<DependencyRef>? Predecessors = null, List<DependencyRef>? Successors = null, List<DependencyWarning>? Warnings = null, List<ExternalDeliveryNotice>? ExternalNotices = null, List<ScheduleRevisionView>? History = null, string? ContinuityId = null, List<ScheduleEvidenceView>? EvidenceLinks = null);
 record PublishedItem(string Id, string ContinuityId, string Section, string OwnerSection, string Title, string Content, string Status, int Version, string Details = "{}", List<ScheduleEntry>? Schedule = null, List<ExternalDependencyView>? ExternalDependencies = null);
 record SourceStatus(string Section, string Status, string? PeriodFrom, string? PeriodTo, string? FinishedAt);
 record FieldOrigin(string? LastSourceValue, string LatestSourceValue, string ReportValue, bool HumanOverride);

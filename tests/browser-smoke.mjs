@@ -455,6 +455,28 @@ try {
   assert.ok(await pendingCard.getByText('✓ 已採納').count() > 0, 'proposal badge should transition to accepted');
   assert.ok(await pendingCard.getByText('經評估硬體到貨狀況').count() > 0, 'decision note should be displayed');
 
+  // Issue #11 畫面驗證：手動連結 eCIM 工作證據（來源挑選、手動連結、比對展開、發布快照）
+  const taskToEvidence = schedulePanel.locator('li.schedule-task:has(strong:has-text("關鍵任務：交付檢核"))');
+  await taskToEvidence.getByRole('button', { name: '編輯' }).click();
+  const evPanel = schedulePanel.locator('.ecim-evidence-panel');
+  await evPanel.waitFor({ timeout: 15000 });
+  assert.ok(await evPanel.getByText('📎 eCIM 工作證據連結').count() > 0, 'evidence panel header should exist');
+
+  // 手動輸入或挑選候選 eCIM 來源
+  await evPanel.locator('.evidence-add-box input').first().fill('ecim-ok-work-1');
+  await evPanel.locator('.evidence-add-box input[placeholder="佐證工作摘要或說明"]').fill('課別工程師上線前檢測報告');
+  await evPanel.locator('.evidence-add-box input[placeholder*="為何此 eCIM 工作作為"]').fill('以工程師實際提交之 eCIM 工作單佐證檢核進展');
+  await evPanel.locator('.btn-add-evidence-link').click();
+
+  await page.getByText('已成功連結 eCIM 工作證據。').waitFor({ timeout: 15000 });
+  assert.ok(await evPanel.locator('.evidence-list-item:has-text("ecim-ok-work-1")').count() > 0, 'evidence item should appear in list');
+
+  // 取消編輯表單，驗證甘特圖與項目清單具備證據徽章
+  await schedulePanel.getByRole('button', { name: '取消' }).click();
+  await schedulePanel.locator('.btn-gantt-toggle-tasks').click();
+  assert.ok(await schedulePanel.locator('.gantt-evidence-chip').count() > 0, 'gantt evidence chip should be visible on task row');
+  await schedulePanel.locator('.btn-gantt-toggle-tasks').click();
+
   // 再次取消前置測試任務以驗收正式發布頁面之已取消區塊
   await schedulePanel.locator('li.schedule-task:has(strong:has-text("關鍵任務：前置測試任務"))').getByRole('button', { name: '編輯' }).click();
   await schedulePanel.getByLabel('操作').selectOption('cancel');
@@ -490,8 +512,18 @@ try {
   assert.equal(await page.locator('.gantt .gantt-row.gantt-row-task').count(), 0, 'publication gantt tasks collapsed by default');
   await page.locator('.gantt .btn-gantt-toggle-tasks').first().click();
   assert.ok(await page.locator('.gantt .gantt-row-task').count() > 0, 'publication gantt key tasks expanded on demand');
+  assert.ok(await page.locator('.gantt .gantt-row-task .gantt-evidence-chip').count() > 0, 'publication gantt should render evidence chip');
   await page.locator('.gantt .btn-gantt-toggle-cancelled').first().click();
   assert.ok(await page.locator('.gantt .gantt-row-cancelled').count() > 0, 'publication gantt cancelled items visible on demand');
+
+  // Issue #11 驗證：正式發布頁包含 eCIM 佐證快照，點擊可開啟佐證詳情快照彈窗
+  const pubEvPill = page.locator('.pub-evidence-pill:has-text("ecim-ok-work-1")').first();
+  await pubEvPill.waitFor({ timeout: 15000 });
+  await pubEvPill.click();
+  await page.locator('.history-modal').waitFor({ timeout: 15000 });
+  assert.ok(await page.getByText('eCIM 工作佐證快照').count() > 0, 'evidence modal should open and display title');
+  assert.ok(await page.getByText('ecim-ok-work-1').count() > 0, 'evidence modal should show workId');
+  await page.locator('.history-modal-footer .btn-ghost').click();
 
   // Verify Publication Revision History Inspector (Issue #8)
   const inspectBtn = page.locator('li.schedule-milestone .btn-history-inspect').first();

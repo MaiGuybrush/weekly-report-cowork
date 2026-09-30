@@ -891,6 +891,114 @@ try {
   const proposalsAfterPw = await call(proposalPath, 'H1');
   assert.ok(proposalsAfterPw.body.some(p => p.scheduleEntryId === unassignedOwnerTask.body.id && p.workDescription.includes('配合廠商端進度') && p.proposedEnd === '2026-10-28'));
 
+  // Issue #11: 手動連結 eCIM 工作證據（來源候選、手動連結、多來源、同步不改承諾、修訂歷程）
+  // 1. 候選來源查詢 API (GET /api/reports/{reportId}/items/{itemId}/ecim-evidence-sources)
+  const candidateSources = await call(`/api/reports/${reportId}/items/${scheduleId}/ecim-evidence-sources`, 'H1');
+  assert.equal(candidateSources.status, 200);
+  assert.ok(Array.isArray(candidateSources.body), 'Candidate sources should return an array');
+  assert.ok(candidateSources.body.some(c => c.workId === 'ecim-ok-work-1'), 'Should include ecim-ok-work-1 from eCIM sync');
+
+  // 2. 授權與角色驗證：非維護人 (H2) 不得連結證據 -> 403
+  const evidencePath = `/api/items/${scheduleId}/schedule-entries/${unassignedOwnerTask.body.id}/evidence-links`;
+  assert.equal((await call(evidencePath, 'H2', 'POST', {
+    workId: 'ecim-ok-work-1', section: 's1', summary: '非維護人嘗試連結', reason: '越權測試', token: 'invalid', baseProjectVersion: milestoneProjectVersion
+  })).status, 403);
+
+  // 3. 欄位驗證：未填寫 workId 或 reason -> 400
+  assert.equal((await call(evidencePath, 'H1', 'POST', {
+    workId: '', section: 's1', summary: '測試', reason: '缺 workId', token: scheduleLease.body.token, baseProjectVersion: milestoneProjectVersion
+  })).status, 400);
+  assert.equal((await call(evidencePath, 'H1', 'POST', {
+    workId: 'ecim-ok-work-1', section: 's1', summary: '測試', reason: '', token: scheduleLease.body.token, baseProjectVersion: milestoneProjectVersion
+  })).status, 400);
+
+  // 4. 僅 task 允許連結證據：嘗試對 phase 或 milestone 連結 -> 400
+  assert.equal((await call(`/api/items/${scheduleId}/schedule-entries/${phase.body.id}/evidence-links`, 'H1', 'POST', {
+    workId: 'ecim-ok-work-1', section: 's1', summary: '階段測試', reason: '對 phase 連結應被拒絕', token: scheduleLease.body.token, baseProjectVersion: milestoneProjectVersion
+  })).status, 400);
+  assert.equal((await call(`/api/items/${scheduleId}/schedule-entries/${milestone.body.id}/evidence-links`, 'H1', 'POST', {
+    workId: 'ecim-ok-work-1', section: 's1', summary: '里程碑測試', reason: '對 milestone 連結應被拒絕', token: scheduleLease.body.token, baseProjectVersion: milestoneProjectVersion
+  })).status, 400);
+
+  // 5. 維護人成功手動連結第一筆 eCIM 證據
+  const linkEv1 = await call(evidencePath, 'H1', 'POST', {
+    workId: 'ecim-ok-work-1', section: 's1', summary: '課別一工程師實作進展', reason: '以此 eCIM 工作佐證整合測試進度', token: scheduleLease.body.token, baseProjectVersion: milestoneProjectVersion
+  });
+  assert.equal(linkEv1.status, 201);
+  assert.equal(linkEv1.body.link.workId, 'ecim-ok-work-1');
+  assert.equal(linkEv1.body.link.sourceChanged, false);
+  assert.ok(linkEv1.body.link.initialPayload.includes('Source progress changed') || linkEv1.body.link.initialPayload.includes('Imported work'));
+  milestoneProjectVersion = linkEv1.body.projectVersion;
+
+  // 6. 支援單一關鍵任務連結多筆 eCIM 證據 (Multi-source)
+  const linkEv2 = await call(evidencePath, 'H1', 'POST', {
+    workId: 'ecim-extra-work-2', section: 's1', summary: '廠商對接第二項工作', reason: '佐證次要模組聯調', token: scheduleLease.body.token, baseProjectVersion: milestoneProjectVersion
+  });
+  assert.equal(linkEv2.status, 201);
+  assert.equal(linkEv2.body.link.workId, 'ecim-extra-work-2');
+  milestoneProjectVersion = linkEv2.body.projectVersion;
+
+  // 重複連結同一 workId 應被阻擋 -> 409
+  assert.equal((await call(evidencePath, 'H1', 'POST', {
+    workId: 'ecim-ok-work-1', section: 's1', summary: '重複連結', reason: '重複測試', token: scheduleLease.body.token, baseProjectVersion: milestoneProjectVersion
+  })).status, 409);
+
+  // 7. 驗證查詢證據清單與時程 entries 中的 evidenceLinks
+  const currentEvLinks = await call(evidencePath, 'H1');
+  assert.equal(currentEvLinks.status, 200);
+  assert.equal(currentEvLinks.body.length, 2);
+  const taskWithEv = (await call(taskPath, 'H1')).body.find(e => e.id === unassignedOwnerTask.body.id);
+  assert.ok(Array.isArray(taskWithEv.evidenceLinks));
+  assert.equal(taskWithEv.evidenceLinks.length, 2);
+
+  // 8. 驗證關鍵任務修訂歷程已記載 link-evidence
+  const taskEvHist = await call(`${taskPath}/${unassignedOwnerTask.body.id}/history`, 'H1');
+  assert.ok(taskEvHist.body.some(h => h.action === 'link-evidence' && h.reason?.includes('以此 eCIM 工作佐證整合測試進度')));
+
+  // 9. 驗證 eCIM 同步安全合約：
+  // eCIM 再次同步，更新來源內容；不得自行建立、改期、完成、取消任務，不得覆寫人工承諾
+  // 但 project_schedule_evidence_links 的 latest_payload 會更新，且 sourceChanged 標記為 true
+  const initialTaskForecast = { start: taskWithEv.forecastStart, end: taskWithEv.forecastEnd, state: taskWithEv.state };
+  ecimSummary = 'Updated progress from upstream engineer 2026-10-05';
+  const syncResponse = await call(`/api/reports/${reportId}/ecim-sync`, 'H1', 'POST');
+  assert.equal(syncResponse.status, 200);
+
+  // 驗證關鍵任務本身之目標日期與狀態完全未被擅自竄改！
+  const taskAfterSync = (await call(taskPath, 'H1')).body.find(e => e.id === unassignedOwnerTask.body.id);
+  assert.equal(taskAfterSync.forecastStart, initialTaskForecast.start, 'Sync must NOT change task forecastStart');
+  assert.equal(taskAfterSync.forecastEnd, initialTaskForecast.end, 'Sync must NOT change task forecastEnd');
+  assert.equal(taskAfterSync.state, initialTaskForecast.state, 'Sync must NOT change task state');
+
+  // 驗證證據連結正確追溯：initialPayload 保持當初引用內容，latestPayload 取得新內容，sourceChanged = true
+  const ev1AfterSync = taskAfterSync.evidenceLinks.find(ev => ev.workId === 'ecim-ok-work-1');
+  assert.ok(ev1AfterSync, 'ev1 must exist');
+  assert.equal(ev1AfterSync.sourceChanged, true, 'sourceChanged must be true when upstream eCIM changes');
+  assert.ok(ev1AfterSync.latestPayload.includes('Updated progress from upstream engineer'));
+  assert.notEqual(ev1AfterSync.initialPayload, ev1AfterSync.latestPayload, 'initialPayload must be preserved and distinct from latestPayload');
+
+  // 10. 測試移除其中一筆證據 (Unlink Evidence)
+  // 缺少原因 -> 400
+  assert.equal((await call(`${evidencePath}/${linkEv2.body.link.id}/delete`, 'H1', 'POST', {
+    reason: '', token: scheduleLease.body.token, baseProjectVersion: milestoneProjectVersion
+  })).status, 400);
+
+  // 成功移除 linkEv2
+  const unlinkEvResult = await call(`${evidencePath}/${linkEv2.body.link.id}/delete`, 'H1', 'POST', {
+    reason: '廠商工作範疇調整，移除此佐證', token: scheduleLease.body.token, baseProjectVersion: milestoneProjectVersion
+  });
+  assert.equal(unlinkEvResult.status, 200);
+  milestoneProjectVersion = unlinkEvResult.body.projectVersion;
+
+  // 驗證該證據已移除，剩下 1 筆
+  const evListAfterDelete = await call(evidencePath, 'H1');
+  assert.equal(evListAfterDelete.body.length, 1);
+  assert.equal(evListAfterDelete.body[0].workId, 'ecim-ok-work-1');
+
+  // 驗證修訂歷程記載 unlink-evidence
+  const taskAfterUnlinkHist = await call(`${taskPath}/${unassignedOwnerTask.body.id}/history`, 'H1');
+  assert.ok(taskAfterUnlinkHist.body.some(h => h.action === 'unlink-evidence' && h.reason?.includes('廠商工作範疇調整')));
+
+
   assert.equal((await call(`/api/items/${id}/project-participants`, 'H2', 'POST', { section: 's2' })).status, 403);
   assert.equal((await call(`/api/items/${id}/project-participants`, 'H1', 'POST', { section: 's2' })).status, 204);
   assert.equal((await call(`/api/items/${id}/project-work`, 'H3')).status, 403);
@@ -1025,6 +1133,23 @@ try {
   assert.equal(pubExtDepHist.status, 200);
   assert.deepEqual(pubExtDepHist.body, pubExtDep.history);
 
+  // 驗證正式版包含 eCIM 證據快照且已凍結隔離
+  const publishedTaskWithEv = publishedProject.schedule.find(entry => entry.id === unassignedOwnerTask.body.id);
+  assert.ok(publishedTaskWithEv, 'published task with evidence must exist');
+  assert.ok(Array.isArray(publishedTaskWithEv.evidenceLinks), 'published task must have evidenceLinks array');
+  assert.equal(publishedTaskWithEv.evidenceLinks.length, 1);
+  const pubEv = publishedTaskWithEv.evidenceLinks[0];
+  assert.equal(pubEv.workId, 'ecim-ok-work-1');
+  assert.equal(pubEv.sourceChanged, true);
+
+  // 驗證正式發布版之證據查詢端點
+  const pubEvDetail = await call(`/api/publications/${firstPublication.body.id}/items/${scheduleId}/schedule-entries/${unassignedOwnerTask.body.id}/evidence`, 'R');
+  assert.equal(pubEvDetail.status, 200);
+  assert.equal(pubEvDetail.body.length, 1);
+  assert.equal(pubEvDetail.body[0].workId, 'ecim-ok-work-1');
+  assert.equal((await call(`/api/publications/${firstPublication.body.id}/items/${scheduleId}/schedule-entries/${unassignedOwnerTask.body.id}/evidence`, 'missing')).status, 403);
+
+
   assert.equal((await call('/api/publications/latest', 'R2')).body.id, firstPublication.body.id);
   assert.equal((await call(`/api/publications/${firstPublication.body.id}`, 'missing')).status, 403);
   assert.equal((await call(`/api/publications/${firstPublication.body.id}`, 'H1')).status, 403);
@@ -1145,7 +1270,16 @@ try {
   assert.equal(carriedExt1.supplier, '廠務處');
   assert.notEqual(carriedExt1.id, extDep1.body.id, 'Carried external dep must have independent ID');
 
-  // 6. 驗證兩週工作版與正式版的隔離性：
+  // 6. Issue #11 跨週延續：驗證 eCIM 證據手動連結跨週延續且保有穩定 work_id
+  const carriedTaskWithEv = carriedSchedule.find(e => e.name === 'Vendor Integration');
+  assert.ok(carriedTaskWithEv, 'Carried task with evidence must exist');
+  assert.ok(Array.isArray(carriedTaskWithEv.evidenceLinks) && carriedTaskWithEv.evidenceLinks.length === 1, 'Carried task must have carried evidence link');
+  const carriedEv = carriedTaskWithEv.evidenceLinks[0];
+  assert.equal(carriedEv.workId, 'ecim-ok-work-1', 'Stable eCIM work_id must be preserved across weeks');
+  assert.notEqual(carriedEv.id, pubEv.id, 'Carried evidence must have new link ID in new week');
+  assert.equal(carriedEv.scheduleEntryId, carriedTaskWithEv.id, 'Carried evidence must point to carried schedule entry');
+
+  // 7. 驗證兩週工作版與正式版的隔離性：
   // 在第二週工作版本中修改時程（改期），驗證第一週正式版與第一週工作版不受影響
   const carriedSchedLease = await call(`/api/items/${scheduleCarried.id}/lease`, 'H1', 'POST', {});
   assert.equal(carriedSchedLease.status, 200);

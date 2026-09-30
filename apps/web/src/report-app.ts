@@ -156,7 +156,32 @@ type ScheduleEntry = {
   successors?: DependencyRef[];
   warnings?: DependencyWarning[];
   externalNotices?: ExternalDeliveryNotice[];
+  evidenceLinks?: ScheduleEvidenceView[];
   history?: ScheduleRevisionView[];
+};
+type ScheduleEvidenceView = {
+  id: string;
+  scheduleEntryId: string;
+  workId: string;
+  section: string | null;
+  summary: string;
+  periodFrom: string | null;
+  periodTo: string | null;
+  initialPayload: string;
+  latestPayload: string;
+  sourceChanged: boolean;
+  createdBy: string;
+  createdAt: string;
+  updatedAt: string;
+  reason: string;
+};
+type EcimEvidenceCandidate = {
+  workId: string;
+  section: string;
+  periodFrom: string | null;
+  periodTo: string | null;
+  summary: string;
+  payload: string;
 };
 type EcimMember = {
   userId: string;
@@ -1005,6 +1030,9 @@ export class Home implements OnInit {
                             @if (entry.externalNotices?.length) {
                               <small class="gantt-ext-icon" [title]="entry.externalNotices![0].message">🌐</small>
                             }
+                            @if (entry.kind === 'task' && entry.evidenceLinks?.length) {
+                              <span class="gantt-evidence-chip" [title]="'已連結 ' + entry.evidenceLinks!.length + ' 筆 eCIM 工作證據'">📎 {{ entry.evidenceLinks!.length }}</span>
+                            }
                           </div>
 
                           <div class="gantt-track">
@@ -1456,6 +1484,112 @@ export class Home implements OnInit {
                           </div>
                         }
                       </div>
+
+                      @if (editingSchedule.kind === 'task') {
+                        <div class="dependency-panel ecim-evidence-panel">
+                          <div class="evidence-panel-header">
+                            <h5>📎 eCIM 工作證據連結（進度佐證）</h5>
+                            <span class="evidence-count-badge">{{ editingSchedule.evidenceLinks?.length || 0 }} 筆證據</span>
+                          </div>
+
+                          @if (editingSchedule.evidenceLinks?.length) {
+                            <ul class="dep-list evidence-list">
+                              @for (ev of editingSchedule.evidenceLinks; track ev.id) {
+                                <li class="dep-list-item evidence-list-item" [class.source-changed]="ev.sourceChanged">
+                                  <div class="evidence-item-main">
+                                    <div class="evidence-item-header">
+                                      <span class="evidence-work-id" [title]="'跨週穩定工作身分: ' + ev.workId">🔗 {{ ev.workId }}</span>
+                                      @if (ev.section) {
+                                        <span class="evidence-sec-tag">課別: {{ ev.section }}</span>
+                                      }
+                                      @if (ev.periodFrom || ev.periodTo) {
+                                        <span class="evidence-period-tag">週期: {{ ev.periodFrom || '—' }} ~ {{ ev.periodTo || '—' }}</span>
+                                      }
+                                      @if (ev.sourceChanged) {
+                                        <span class="evidence-changed-badge" title="eCIM 來源在引用後已有更新，可比對先前引用內容與最新內容">⚠️ eCIM 來源已更新</span>
+                                      } @else {
+                                        <span class="evidence-synced-badge">✓ 內容一致</span>
+                                      }
+                                    </div>
+                                    <div class="evidence-summary-text"><strong>{{ ev.summary }}</strong></div>
+                                    <div class="evidence-reason-text">引用佐證原因：{{ ev.reason }}</div>
+
+                                    @if (ev.sourceChanged) {
+                                      <div class="evidence-diff-panel">
+                                        <div class="evidence-diff-header">
+                                          <span>來源異動比對</span>
+                                          <button type="button" class="btn-diff-toggle" (click)="toggleEvidenceDiff(ev.id)">
+                                            {{ isEvidenceDiffOpen(ev.id) ? '收合比對' : '展開比對' }}
+                                          </button>
+                                        </div>
+                                        @if (isEvidenceDiffOpen(ev.id)) {
+                                          <div class="evidence-diff-body">
+                                            <div class="diff-block diff-initial">
+                                              <div class="diff-label">引用時保存內容（可追溯）：</div>
+                                              <pre class="diff-payload">{{ ev.initialPayload }}</pre>
+                                            </div>
+                                            <div class="diff-block diff-latest">
+                                              <div class="diff-label">eCIM 最新同步內容：</div>
+                                              <pre class="diff-payload">{{ ev.latestPayload }}</pre>
+                                            </div>
+                                          </div>
+                                        }
+                                      </div>
+                                    }
+                                  </div>
+
+                                  @if (unlinkingEvidenceId === ev.id) {
+                                    <div class="evidence-unlink-confirm-box">
+                                      <input [(ngModel)]="unlinkEvidenceReason" placeholder="請填寫移除此證據連結之原因..." />
+                                      <div class="evidence-unlink-actions">
+                                        <button type="button" class="btn-unlink-confirm" (click)="confirmUnlinkEvidence(ev.id)" [disabled]="!unlinkEvidenceReason.trim()">確認移除</button>
+                                        <button type="button" class="btn-unlink-cancel" (click)="cancelUnlinkEvidence()">取消</button>
+                                      </div>
+                                    </div>
+                                  } @else {
+                                    <button type="button" class="btn-remove-link btn-remove-evidence" (click)="startUnlinkEvidence(ev.id)" title="移除此項 eCIM 證據連結">移除證據</button>
+                                  }
+                                </li>
+                              }
+                            </ul>
+                          } @else {
+                            <p class="dep-empty">目前未連結任何 eCIM 工作證據（維護人可挑選課別工程師工作以佐證此任務之進展）。</p>
+                          }
+
+                          @if (editingSchedule.state !== 'cancelled') {
+                            <div class="dep-add-box evidence-add-box">
+                              <h6>新增 eCIM 工作證據連結</h6>
+                              <div class="evidence-source-picker">
+                                <label>挑選本週報已同步之 eCIM 工作
+                                  <select [ngModel]="selectedEcimCandidateWorkId" (ngModelChange)="onEcimCandidateSelected($event)">
+                                    <option value="">-- 手動輸入工作編號 或 選擇下列 eCIM 來源 --</option>
+                                    @for (c of reportEcimCandidateSources; track c.workId) {
+                                      <option [value]="c.workId">[{{ c.section }}] {{ c.workId }} · {{ c.summary }} ({{ c.periodFrom }}~{{ c.periodTo }})</option>
+                                    }
+                                  </select>
+                                </label>
+                              </div>
+                              <div class="form-row">
+                                <label class="form-field form-field-half">eCIM 工作代號 <span class="required">*</span>
+                                  <input [(ngModel)]="evidenceDraft.workId" placeholder="例如：ecim-ok-work-1" required />
+                                </label>
+                                <label class="form-field form-field-half">課別
+                                  <input [(ngModel)]="evidenceDraft.section" placeholder="例如：s1" />
+                                </label>
+                              </div>
+                              <label>工作摘要／標題
+                                <input [(ngModel)]="evidenceDraft.summary" placeholder="佐證工作摘要或說明" />
+                              </label>
+                              <label>引用佐證原因 <span class="required">*</span>
+                                <input [(ngModel)]="evidenceDraft.reason" placeholder="請說明為何此 eCIM 工作作為此關鍵任務之進度佐證" required />
+                              </label>
+                              <button type="button" class="btn-add-link btn-add-evidence-link" (click)="addEvidenceLink()" [disabled]="!evidenceDraft.workId.trim() || !evidenceDraft.reason.trim()">
+                                ＋ 確認連結 eCIM 證據
+                              </button>
+                            </div>
+                          }
+                        </div>
+                      }
                     }
                     @if (scheduleSaveDisabledReason(); as reason) {
                       <div class="schedule-disabled-hint">
@@ -1708,6 +1842,17 @@ export class ReportEditor implements OnInit, OnDestroy {
   baselineHistory: any[] = [];
   ecimMembers: EcimMember[] = [];
   ecimCandidates: EcimCandidate[] = [];
+  reportEcimCandidateSources: EcimEvidenceCandidate[] = [];
+  selectedEcimCandidateWorkId = "";
+  evidenceDraft = {
+    workId: "",
+    section: "",
+    summary: "",
+    reason: "",
+  };
+  unlinkingEvidenceId = "";
+  unlinkEvidenceReason = "";
+  expandedEvidenceDiffs: Set<string> = new Set();
   ecimMessage = "";
   takeoverReason = "";
   publicationUrl = "";
@@ -2551,6 +2696,13 @@ export class ReportEditor implements OnInit, OnDestroy {
     this.linkReason = "";
     this.selectedExternalDepId = "";
     this.externalLinkReason = "";
+    this.selectedEcimCandidateWorkId = "";
+    this.evidenceDraft = { workId: "", section: "", summary: "", reason: "" };
+    this.unlinkingEvidenceId = "";
+    this.unlinkEvidenceReason = "";
+    if (entry.kind === "task") {
+      this.loadEcimCandidateSources();
+    }
     this.scheduleDraft = {
       kind: entry.kind,
       name: entry.name,
@@ -2625,6 +2777,10 @@ export class ReportEditor implements OnInit, OnDestroy {
     this.linkReason = "";
     this.selectedExternalDepId = "";
     this.externalLinkReason = "";
+    this.selectedEcimCandidateWorkId = "";
+    this.evidenceDraft = { workId: "", section: "", summary: "", reason: "" };
+    this.unlinkingEvidenceId = "";
+    this.unlinkEvidenceReason = "";
     this.changes.detectChanges();
   }
   candidatePredecessors(entry: ScheduleEntry) {
@@ -2835,6 +2991,113 @@ export class ReportEditor implements OnInit, OnDestroy {
       this.message = error.error?.error || "無法解除跨部門相依關聯。";
     }
     this.changes.detectChanges();
+  }
+  async loadEcimCandidateSources() {
+    if (!this.selected) return;
+    try {
+      this.reportEcimCandidateSources = await firstValueFrom(
+        this.http.get<EcimEvidenceCandidate[]>(`/api/reports/${this.reportId}/items/${this.selected.id}/ecim-evidence-sources`),
+      );
+    } catch {
+      this.reportEcimCandidateSources = [];
+    }
+    this.changes.detectChanges();
+  }
+  onEcimCandidateSelected(workId: string) {
+    this.selectedEcimCandidateWorkId = workId;
+    if (!workId) return;
+    const candidate = this.reportEcimCandidateSources.find((c) => c.workId === workId);
+    if (candidate) {
+      this.evidenceDraft.workId = candidate.workId;
+      this.evidenceDraft.section = candidate.section || "";
+      this.evidenceDraft.summary = candidate.summary || "";
+      if (!this.evidenceDraft.reason) {
+        this.evidenceDraft.reason = `引用 ${candidate.section || '課別'} 工作 (${candidate.workId}) 作為任務佐證`;
+      }
+    }
+    this.changes.detectChanges();
+  }
+  async addEvidenceLink() {
+    if (!this.selected || !this.editingSchedule || this.editingSchedule.kind !== "task") return;
+    if (!this.evidenceDraft.workId.trim() || !this.evidenceDraft.reason.trim()) {
+      this.message = "請填寫 eCIM 工作代號與佐證原因。";
+      return;
+    }
+    try {
+      const result = (await firstValueFrom(
+        this.http.post(`/api/items/${this.selected.id}/schedule-entries/${this.editingSchedule.id}/evidence-links`, {
+          workId: this.evidenceDraft.workId.trim(),
+          section: this.evidenceDraft.section.trim(),
+          summary: this.evidenceDraft.summary.trim(),
+          reason: this.evidenceDraft.reason.trim(),
+          token: this.token,
+          baseProjectVersion: this.baseVersion,
+        }),
+      )) as { projectVersion: number; link: ScheduleEvidenceView };
+      this.baseVersion = result.projectVersion;
+      await this.loadSchedule();
+      this.editingSchedule = this.scheduleEntries.find((e) => e.id === this.editingSchedule?.id) ?? null;
+      this.evidenceDraft = { workId: "", section: "", summary: "", reason: "" };
+      this.selectedEcimCandidateWorkId = "";
+      this.message = "已成功連結 eCIM 工作證據。";
+    } catch (error: any) {
+      if (error.status === 409) {
+        this.conflict = error.error;
+        if (error.error?.latest?.schedule) this.scheduleEntries = error.error.latest.schedule;
+      }
+      this.message = error.error?.error || "無法連結 eCIM 工作證據。";
+    }
+    this.changes.detectChanges();
+  }
+  startUnlinkEvidence(linkId: string) {
+    this.unlinkingEvidenceId = linkId;
+    this.unlinkEvidenceReason = "解除關聯";
+    this.changes.detectChanges();
+  }
+  cancelUnlinkEvidence() {
+    this.unlinkingEvidenceId = "";
+    this.unlinkEvidenceReason = "";
+    this.changes.detectChanges();
+  }
+  async confirmUnlinkEvidence(linkId: string) {
+    if (!this.selected || !this.editingSchedule) return;
+    if (!this.unlinkEvidenceReason.trim()) {
+      this.message = "請填寫移除證據之原因。";
+      return;
+    }
+    try {
+      const result = (await firstValueFrom(
+        this.http.post(`/api/items/${this.selected.id}/schedule-entries/${this.editingSchedule.id}/evidence-links/${linkId}/delete`, {
+          reason: this.unlinkEvidenceReason.trim(),
+          token: this.token,
+          baseProjectVersion: this.baseVersion,
+        }),
+      )) as { projectVersion: number };
+      this.baseVersion = result.projectVersion;
+      await this.loadSchedule();
+      this.editingSchedule = this.scheduleEntries.find((e) => e.id === this.editingSchedule?.id) ?? null;
+      this.unlinkingEvidenceId = "";
+      this.unlinkEvidenceReason = "";
+      this.message = "已成功移除 eCIM 工作證據。";
+    } catch (error: any) {
+      if (error.status === 409) {
+        this.conflict = error.error;
+        if (error.error?.latest?.schedule) this.scheduleEntries = error.error.latest.schedule;
+      }
+      this.message = error.error?.error || "無法移除 eCIM 工作證據。";
+    }
+    this.changes.detectChanges();
+  }
+  toggleEvidenceDiff(linkId: string) {
+    if (this.expandedEvidenceDiffs.has(linkId)) {
+      this.expandedEvidenceDiffs.delete(linkId);
+    } else {
+      this.expandedEvidenceDiffs.add(linkId);
+    }
+    this.changes.detectChanges();
+  }
+  isEvidenceDiffOpen(linkId: string): boolean {
+    return this.expandedEvidenceDiffs.has(linkId);
   }
   async saveSchedule() {
     if (!this.selected) return;
@@ -3261,6 +3524,11 @@ export class ReportEditor implements OnInit, OnDestroy {
                             @if (entry.externalNotices?.length) {
                               <small class="gantt-ext-icon" [title]="entry.externalNotices![0].message">🌐</small>
                             }
+                            @if (entry.evidenceLinks?.length) {
+                              <span class="gantt-evidence-chip" [title]="'已手動連結 ' + entry.evidenceLinks!.length + ' 筆 eCIM 工作證據（發布快照）'">
+                                📎 {{ entry.evidenceLinks!.length }} 證據
+                              </span>
+                            }
                           </div>
 
                           <div class="gantt-track">
@@ -3413,6 +3681,28 @@ export class ReportEditor implements OnInit, OnDestroy {
                             }
                           </div>
                         }
+                        @if (entry.evidenceLinks?.length) {
+                          <div class="schedule-evidence-section">
+                            <div class="evidence-section-header">
+                              <span class="evidence-section-title">📎 eCIM 工作佐證（發布快照）</span>
+                              <span class="evidence-count-badge">{{ entry.evidenceLinks!.length }} 筆</span>
+                            </div>
+                            <div class="evidence-pill-grid">
+                              @for (ev of entry.evidenceLinks; track ev.id) {
+                                <div class="pub-evidence-pill" (click)="openPubEvidenceModal(ev)" [title]="'點擊檢視佐證詳情與引用時快照: ' + ev.workId">
+                                  <span class="pub-evidence-id">{{ ev.workId }}</span>
+                                  @if (ev.section) {
+                                    <span class="pub-evidence-sec">[{{ ev.section }}]</span>
+                                  }
+                                  <span class="pub-evidence-summary">{{ ev.summary }}</span>
+                                  @if (ev.sourceChanged) {
+                                    <span class="evidence-changed-badge" title="發布時此工作來源與引用時不同">變動</span>
+                                  }
+                                </div>
+                              }
+                            </div>
+                          </div>
+                        }
                       </li>
                     }
                   </ul>
@@ -3438,6 +3728,18 @@ export class ReportEditor implements OnInit, OnDestroy {
                               @if (entry.actualStart) {
                                 <span> · 保留實際開始日 {{ entry.actualStart }}</span>
                               }
+                            }
+                            @if (entry.evidenceLinks?.length) {
+                              <div class="schedule-evidence-section" style="margin-top: .4rem;">
+                                <div class="evidence-pill-grid">
+                                  @for (ev of entry.evidenceLinks; track ev.id) {
+                                    <div class="pub-evidence-pill" (click)="openPubEvidenceModal(ev)">
+                                      <span class="pub-evidence-id">{{ ev.workId }}</span>
+                                      <span class="pub-evidence-summary">{{ ev.summary }}</span>
+                                    </div>
+                                  }
+                                </div>
+                              </div>
                             }
                             <div class="schedule-header-actions">
                               <button
@@ -3546,6 +3848,49 @@ export class ReportEditor implements OnInit, OnDestroy {
             </div>
           </div>
         }
+        @if (selectedPubEvidence; as ev) {
+          <div class="history-modal-backdrop" (click)="closePubEvidenceModal()">
+            <div class="history-modal" (click)="$event.stopPropagation()">
+              <div class="history-modal-header">
+                <div>
+                  <h3 class="history-modal-title">
+                    <span>📎 eCIM 工作佐證快照</span>
+                    <span class="task-kind-tag">工作編號: {{ ev.workId }}</span>
+                  </h3>
+                  <p class="history-modal-subtitle">
+                    {{ ev.summary }} · 🔒 快照版本 {{ publication.version }}（發布時已固化）
+                  </p>
+                </div>
+                <button type="button" class="modal-close-btn" (click)="closePubEvidenceModal()">✕</button>
+              </div>
+              <div class="history-modal-body">
+                <div class="evidence-modal-meta">
+                  <div><strong>所屬課別：</strong>{{ ev.section || '—' }}</div>
+                  <div><strong>建立引用時間：</strong>{{ formatDateTime(ev.createdAt) }}</div>
+                  @if (ev.reason) {
+                    <div><strong>引用佐證原因：</strong>{{ ev.reason }}</div>
+                  }
+                  @if (ev.periodFrom || ev.periodTo) {
+                    <div><strong>工作期間：</strong>{{ ev.periodFrom || '—' }} ~ {{ ev.periodTo || '—' }}</div>
+                  }
+                </div>
+                <div class="diff-block diff-initial" style="margin-top: 1rem;">
+                  <div class="diff-label">引用時保存內容（發布快照）：</div>
+                  <pre class="diff-payload">{{ ev.initialPayload }}</pre>
+                </div>
+                @if (ev.latestPayload && ev.latestPayload !== ev.initialPayload) {
+                  <div class="diff-block diff-latest" style="margin-top: 1rem;">
+                    <div class="diff-label">發布當時 eCIM 最新狀態：</div>
+                    <pre class="diff-payload">{{ ev.latestPayload }}</pre>
+                  </div>
+                }
+              </div>
+              <div class="history-modal-footer">
+                <button type="button" class="btn-ghost" (click)="closePubEvidenceModal()">關閉</button>
+              </div>
+            </div>
+          </div>
+        }
       </main>
     }`,
 })
@@ -3562,6 +3907,7 @@ export class PublicationPage implements OnInit {
     | null = null;
   detailsOf = detailsOf;
   selectedHistoryEntry: ScheduleEntry | null = null;
+  selectedPubEvidence: ScheduleEvidenceView | null = null;
   private publicationId = this.route.snapshot.paramMap.get("id")!;
 
   openHistoryModal(entry: ScheduleEntry) {
@@ -3572,8 +3918,18 @@ export class PublicationPage implements OnInit {
     this.selectedHistoryEntry = null;
     this.changes.detectChanges();
   }
+  openPubEvidenceModal(ev: ScheduleEvidenceView) {
+    this.selectedPubEvidence = ev;
+    this.changes.detectChanges();
+  }
+  closePubEvidenceModal() {
+    this.selectedPubEvidence = null;
+    this.changes.detectChanges();
+  }
   @HostListener("document:keydown.escape") onEscape() {
-    if (this.selectedHistoryEntry) {
+    if (this.selectedPubEvidence) {
+      this.closePubEvidenceModal();
+    } else if (this.selectedHistoryEntry) {
       this.closeHistoryModal();
     }
   }
@@ -3597,6 +3953,8 @@ export class PublicationPage implements OnInit {
       "unlink-dependency": "解除前置相依",
       "link-external-dependency": "關聯外部相依",
       "unlink-external-dependency": "解除外部相依",
+      "link-evidence": "連結 eCIM 證據",
+      "unlink-evidence": "移除 eCIM 證據",
       "predecessor-updated": "前置變動連鎖修訂",
     };
     return map[action] ?? action;
