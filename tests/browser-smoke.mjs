@@ -189,6 +189,16 @@ try {
   await schedulePanel.getByRole('button', { name: '新增時程' }).click();
   await schedulePanel.getByText('關鍵任務：交付檢核').waitFor({ timeout: 15000 });
   await schedulePanel.getByText('尚有 1 項未完成任務').waitFor({ timeout: 15000 });
+
+  // Issue #10 驗證：甘特圖預設只呈現階段和里程碑，關鍵任務按需展開
+  assert.equal(await schedulePanel.locator('.gantt-row.gantt-row-task').count(), 0, 'key tasks must be collapsed by default in gantt');
+  await schedulePanel.locator('.btn-gantt-toggle-tasks').click();
+  await schedulePanel.locator('.gantt-row-task:has-text("交付檢核")').waitFor({ timeout: 15000 });
+  assert.ok(await schedulePanel.locator('.gantt-row-task').getByText('外部測試單位').count() > 0, 'task row in gantt must show owner');
+  assert.ok(await schedulePanel.locator('.gantt-row-task .baseline-bar').count() > 0, 'task row in gantt must have baseline period bar');
+  await schedulePanel.locator('.btn-gantt-toggle-tasks').click();
+  assert.equal(await schedulePanel.locator('.gantt-row.gantt-row-task').count(), 0, 'key tasks must be collapsed when toggled');
+
   await schedulePanel.getByRole('button', { name: '編輯' }).first().click();
   await schedulePanel.getByLabel('狀態').selectOption('completed');
   await schedulePanel.getByLabel('實際開始').fill('2026-10-01');
@@ -206,7 +216,7 @@ try {
   await schedulePanel.getByLabel('目標日期').fill('2026-10-15');
   await schedulePanel.getByRole('button', { name: '新增時程' }).click();
   await schedulePanel.getByText('重要里程碑：上線評估會議').waitFor({ timeout: 15000 });
-  await schedulePanel.getByText('待達成').waitFor({ timeout: 15000 });
+  await schedulePanel.locator('li.schedule-milestone').getByText('待達成').waitFor({ timeout: 15000 });
   await schedulePanel.getByText('最新目標 2026-10-15').waitFor({ timeout: 15000 });
   const initialMilestoneText = await schedulePanel.locator('li.schedule-milestone').textContent();
   assert.ok(!initialMilestoneText.includes('–'), 'milestone list must not display date range');
@@ -276,6 +286,15 @@ try {
   await schedulePanel.getByRole('heading', { name: '新增交付項目' }).waitFor({ timeout: 15000 });
   await schedulePanel.locator('li.schedule-milestone').getByText('已達成').waitFor({ timeout: 15000 });
 
+  // Issue #10 驗證：甘特圖里程碑永遠為單日點標記；達成以實際達成日為主要點，無期間條
+  const achievedMarker = schedulePanel.locator('.gantt-row:has-text("上線評估會議") .milestone-marker.achieved-marker');
+  assert.ok(await achievedMarker.count() > 0, 'achieved milestone must have diamond marker');
+  assert.equal(await schedulePanel.locator('.gantt-row:has-text("上線評估會議") .baseline-bar').count(), 0, 'milestone must never have period bars');
+  // 驗證點擊甘特圖列進入有原因與歷史的修訂表單（不以拖曳直接改動承諾）
+  await schedulePanel.locator('.gantt-row:has-text("上線評估會議")').click();
+  await schedulePanel.getByRole('heading', { name: '編輯交付項目' }).waitFor({ timeout: 15000 });
+  await schedulePanel.getByRole('button', { name: '取消' }).click();
+
   // Issue #5: 取消、前置阻礙、重新啟用與關係清理
   // 建立「前置測試任務」與「後續測試任務」
   await schedulePanel.getByLabel('類型').selectOption('task');
@@ -324,6 +343,15 @@ try {
 
   // 驗證主時程清單已不包含取消項目
   assert.equal(await schedulePanel.locator('ul > li.schedule-task:has(strong:has-text("關鍵任務：前置測試任務"))').count(), 0);
+
+  // Issue #10 驗證：甘特圖取消項目預設隱藏且有明確入口可檢視，不因實際日期推測完成狀態
+  assert.equal(await schedulePanel.locator('.gantt-row.gantt-row-cancelled').count(), 0, 'cancelled items must be hidden by default in gantt');
+  await schedulePanel.locator('.btn-gantt-toggle-cancelled').click();
+  const cancelledGanttRow = schedulePanel.locator('.gantt-row-cancelled:has-text("前置測試任務")');
+  await cancelledGanttRow.waitFor({ timeout: 15000 });
+  assert.ok(await cancelledGanttRow.getByText('取消').count() > 0, 'cancelled gantt row must display cancelled state pill');
+  await schedulePanel.locator('.btn-gantt-toggle-cancelled').click();
+  assert.equal(await schedulePanel.locator('.gantt-row.gantt-row-cancelled').count(), 0, 'cancelled items collapsed in gantt');
 
   // 展開已取消項目區塊並檢查
   await schedulePanel.locator('.cancelled-summary').click();
@@ -446,6 +474,13 @@ try {
   assert.equal(await page.getByText('完成簽收').waitFor({ timeout: 15000 }), undefined);
   assert.ok(await page.locator('.publication-cancelled-section').count() > 0, 'cancelled section should exist in publication');
   assert.ok(await page.locator('.publication-cancelled-list').getByText('前置測試任務').count() > 0, 'cancelled item should appear in publication cancelled list');
+
+  // Issue #10 驗證：正式發布頁甘特圖具備任務展開、取消項目檢視與修訂歷史入口
+  assert.equal(await page.locator('.gantt .gantt-row.gantt-row-task').count(), 0, 'publication gantt tasks collapsed by default');
+  await page.locator('.gantt .btn-gantt-toggle-tasks').first().click();
+  assert.ok(await page.locator('.gantt .gantt-row-task').count() > 0, 'publication gantt key tasks expanded on demand');
+  await page.locator('.gantt .btn-gantt-toggle-cancelled').first().click();
+  assert.ok(await page.locator('.gantt .gantt-row-cancelled').count() > 0, 'publication gantt cancelled items visible on demand');
 
   // Verify Publication Revision History Inspector (Issue #8)
   const inspectBtn = page.locator('li.schedule-milestone .btn-history-inspect').first();

@@ -928,124 +928,155 @@ export class Home implements OnInit {
                 <div class="schedule-heading"><div><span class="eyebrow">PROJECT DELIVERY</span><h3>交付時程</h3><p>階段呈現整體交付，關鍵任務標明負責人與確認進度。</p></div><span class="schedule-count">{{ scheduleEntries.length }} 個時程項目</span></div>
                 @if (scheduleEntries.length) {
                   <div class="gantt">
-                    <p>
-                      <strong>甘特圖</strong> · 報告日 {{ report.meetingDate }}
-                    </p>
-                    @for (entry of activeScheduleEntries(); track entry) {
-                      <div class="gantt-row" (click)="editSchedule(entry)">
-                        <span>{{ entry.name }}@if (entry.warnings?.length) { <small class="gantt-warn-icon" [title]="entry.warnings![0].message">⚠️</small> }</span>
-                        <div class="gantt-track">
-                          @if (entry.kind === 'milestone') {
-                            <i
-                              class="milestone-marker"
-                              [attr.data-state]="entry.state"
-                              [style.left.%]="
-                                schedulePosition(
-                                  entry.state === 'achieved'
-                                    ? entry.actualDate
-                                    : entry.forecastDate
-                                )
-                              "
-                            ></i>
-                          } @else {
-                            <i
-                              class="baseline"
-                              [style.left.%]="
-                                schedulePosition(entry.baselineStart)
-                              "
-                              [style.width.%]="
-                                scheduleWidth(
-                                  entry.baselineStart,
-                                  entry.baselineEnd
-                                )
-                              "
-                            ></i
-                            ><i
-                              class="forecast"
-                              [style.left.%]="
-                                schedulePosition(entry.forecastStart)
-                              "
-                              [style.width.%]="
-                                scheduleWidth(
-                                  entry.forecastStart,
-                                  entry.forecastEnd
-                                )
-                              "
-                            ></i>
-                            @if (entry.actualStart || entry.actualEnd) {
-                              <i
-                                class="actual"
-                                [style.left.%]="
-                                  schedulePosition(
-                                    entry.actualStart || entry.actualEnd
-                                  )
-                                "
-                                [style.width.%]="
-                                  scheduleWidth(
-                                    entry.actualStart || entry.actualEnd,
-                                    entry.actualEnd || entry.actualStart
-                                  )
-                                "
-                              ></i>
-                            }
-                          }
-                        </div>
-                        <small>{{ entry.kind === 'milestone' ? (entry.state === 'achieved' ? '實際達成' : '最新目標') : '基準／預估／實際' }}</small>
+                    <div class="gantt-header">
+                      <div class="gantt-header-title">
+                        <h4><strong>專案甘特圖</strong> · 處會摘要</h4>
+                        <span class="gantt-meeting-date">報告日：{{ report.meetingDate }}</span>
                       </div>
-                    }
-                    @if (completedScheduleEntries().length) {
-                      <details>
-                        <summary>
-                          已完成階段（{{ completedScheduleEntries().length }}）
-                        </summary>
-                        @for (
-                          entry of completedScheduleEntries();
-                          track entry
-                        ) {
-                          <div class="gantt-row">
-                            <span>{{ entry.name }}</span>
-                            <div class="gantt-track">
-                              <i
-                                class="baseline"
-                                [style.left.%]="
-                                  schedulePosition(entry.baselineStart)
-                                "
-                                [style.width.%]="
-                                  scheduleWidth(
-                                    entry.baselineStart,
-                                    entry.baselineEnd
-                                  )
-                                "
-                              ></i
-                              ><i
-                                class="forecast"
-                                [style.left.%]="
-                                  schedulePosition(entry.forecastStart)
-                                "
-                                [style.width.%]="
-                                  scheduleWidth(
-                                    entry.forecastStart,
-                                    entry.forecastEnd
-                                  )
-                                "
-                              ></i
-                              ><i
-                                class="actual"
-                                [style.left.%]="
-                                  schedulePosition(entry.actualStart)
-                                "
-                                [style.width.%]="
-                                  scheduleWidth(
-                                    entry.actualStart,
-                                    entry.actualEnd
-                                  )
-                                "
-                              ></i>
-                            </div>
-                          </div>
+                      <div class="gantt-toolbar">
+                        <button
+                          type="button"
+                          class="btn-gantt-toggle btn-gantt-toggle-tasks"
+                          (click)="toggleGanttExpandTasks()"
+                          [attr.aria-expanded]="ganttExpandTasks">
+                          {{ ganttExpandTasks ? '收合關鍵任務' : '展開關鍵任務' }}
+                        </button>
+                        @if (hasCancelledEntries()) {
+                          <button
+                            type="button"
+                            class="btn-gantt-toggle btn-gantt-toggle-cancelled"
+                            (click)="toggleGanttShowCancelled()"
+                            [attr.aria-expanded]="ganttShowCancelled">
+                            {{ ganttShowCancelled ? '隱藏已取消項目' : '顯示已取消項目 (' + cancelledEntriesCount() + ')' }}
+                          </button>
                         }
-                      </details>
-                    }
+                      </div>
+                    </div>
+
+                    <div class="gantt-legend">
+                      <span class="legend-item"><i class="legend-bar baseline-bar"></i> 原始計畫</span>
+                      <span class="legend-item"><i class="legend-bar forecast-bar"></i> 目前目標</span>
+                      <span class="legend-item"><i class="legend-bar actual-bar"></i> 實際結果</span>
+                      <span class="legend-item"><i class="legend-diamond pending-diamond"></i> 未達成節點</span>
+                      <span class="legend-item"><i class="legend-diamond achieved-diamond"></i> 已達成節點</span>
+                    </div>
+
+                    <div class="gantt-timeline-header">
+                      <div class="gantt-meta-spacer">項目名稱與層級</div>
+                      <div class="gantt-timeline-scale">
+                        @for (tick of ganttTimeline().ticks; track tick.percent) {
+                          <span class="gantt-tick" [style.left.%]="tick.percent">{{ tick.label }}</span>
+                        }
+                      </div>
+                      <div class="gantt-stats-spacer">狀態與總偏差</div>
+                    </div>
+
+                    <div class="gantt-body">
+                      @for (entry of ganttDisplayEntries(); track entry.id) {
+                        <div
+                          class="gantt-row"
+                          [class.gantt-row-task]="entry.kind === 'task'"
+                          [class.gantt-row-milestone]="entry.kind === 'milestone'"
+                          [class.gantt-row-phase]="entry.kind === 'phase'"
+                          [class.gantt-row-cancelled]="entry.state === 'cancelled'"
+                          (click)="editSchedule(entry)">
+                          <div class="gantt-meta">
+                            @if (entry.kind === 'phase' && hasChildTasks(entry.id)) {
+                              <button
+                                type="button"
+                                class="btn-phase-expand"
+                                (click)="$event.stopPropagation(); togglePhaseExpansion(entry.id)"
+                                [title]="isPhaseExpanded(entry.id) ? '收合此階段任務' : '展開此階段任務'">
+                                {{ isPhaseExpanded(entry.id) ? '▼' : '▶' }}
+                              </button>
+                            } @else if (entry.kind === 'task') {
+                              <span class="gantt-task-indent">↳</span>
+                            }
+                            <span class="gantt-kind-badge" [attr.data-kind]="entry.kind">
+                              {{ entry.kind === 'phase' ? '階段' : entry.kind === 'task' ? '任務' : '里程碑' }}
+                            </span>
+                            <span class="gantt-name" [title]="entry.name">{{ entry.name }}</span>
+                            @if (entry.kind === 'task' && entry.owner) {
+                              <span class="gantt-owner-chip" [title]="'負責人/單位: ' + entry.owner">👤 {{ entry.owner }}</span>
+                            }
+                            @if (entry.warnings?.length) {
+                              <small class="gantt-warn-icon" [title]="entry.warnings![0].message">⚠️</small>
+                            }
+                            @if (entry.externalNotices?.length) {
+                              <small class="gantt-ext-icon" [title]="entry.externalNotices![0].message">🌐</small>
+                            }
+                          </div>
+
+                          <div class="gantt-track">
+                            @if (meetingDatePosition(report.meetingDate); as mPos) {
+                              <div class="gantt-today-line" [style.left.%]="mPos" title="報告日基準線"></div>
+                            }
+
+                            @if (entry.kind === 'milestone') {
+                              @if (entry.state !== 'achieved') {
+                                @if (entry.baselineDate && entry.baselineDate !== (entry.forecastDate || entry.baselineDate)) {
+                                  <i
+                                    class="milestone-ghost-marker"
+                                    [style.left.%]="schedulePosition(entry.baselineDate)"
+                                    [title]="'原始目標：' + entry.baselineDate"></i>
+                                }
+                                <i
+                                  class="milestone-marker pending-marker"
+                                  [attr.data-state]="entry.state"
+                                  [style.left.%]="schedulePosition(entry.forecastDate || entry.baselineDate)"
+                                  [title]="'最新目標：' + (entry.forecastDate || entry.baselineDate)"></i>
+                              } @else {
+                                @if (entry.forecastDate && entry.forecastDate !== entry.actualDate) {
+                                  <i
+                                    class="milestone-target-marker"
+                                    [style.left.%]="schedulePosition(entry.forecastDate)"
+                                    [title]="'最新目標：' + entry.forecastDate"></i>
+                                }
+                                <i
+                                  class="milestone-marker achieved-marker"
+                                  [attr.data-state]="entry.state"
+                                  [style.left.%]="schedulePosition(entry.actualDate)"
+                                  [title]="'實際達成：' + entry.actualDate"></i>
+                              }
+                            } @else {
+                              @if (entry.baselineStart && entry.baselineEnd) {
+                                <i
+                                  class="baseline baseline-bar"
+                                  [style.left.%]="schedulePosition(entry.baselineStart)"
+                                  [style.width.%]="scheduleWidth(entry.baselineStart, entry.baselineEnd)"
+                                  [title]="'原始計畫：' + entry.baselineStart + ' ~ ' + entry.baselineEnd"></i>
+                              }
+                              @if (entry.forecastStart && entry.forecastEnd) {
+                                <i
+                                  class="forecast forecast-bar"
+                                  [style.left.%]="schedulePosition(entry.forecastStart)"
+                                  [style.width.%]="scheduleWidth(entry.forecastStart, entry.forecastEnd)"
+                                  [title]="'目前目標：' + entry.forecastStart + ' ~ ' + entry.forecastEnd"></i>
+                              }
+                              @if (entry.actualStart || entry.actualEnd) {
+                                <i
+                                  class="actual actual-bar"
+                                  [style.left.%]="schedulePosition(entry.actualStart || entry.actualEnd)"
+                                  [style.width.%]="scheduleWidth(entry.actualStart || entry.actualEnd, entry.actualEnd || entry.actualStart)"
+                                  [title]="'實際進展：' + (entry.actualStart || '—') + ' ~ ' + (entry.actualEnd || '進行中')"></i>
+                              }
+                            }
+                          </div>
+
+                          <div class="gantt-stats">
+                            <span class="gantt-state-pill" [attr.data-state]="entry.state">
+                              {{ scheduleStateLabel(entry.state) }}
+                            </span>
+                            <span [class]="'gantt-variance-badge ' + varianceBadgeClass(entry)">
+                              {{ varianceText(entry) }}
+                            </span>
+                            <span class="gantt-action-link" title="進入修訂表單（不以拖曳直接改動承諾）">
+                              ✏️
+                            </span>
+                          </div>
+                        </div>
+                      }
+                    </div>
                   </div>
                 }
                 @if (hasContinuedSchedule()) {
@@ -2223,6 +2254,144 @@ export class ReportEditor implements OnInit, OnDestroy {
           entry.kind === "milestone"),
     );
   }
+  ganttExpandTasks = false;
+  ganttShowCancelled = false;
+  expandedPhaseIds = new Set<string>();
+
+  toggleGanttExpandTasks() {
+    this.ganttExpandTasks = !this.ganttExpandTasks;
+    this.changes.detectChanges();
+  }
+
+  toggleGanttShowCancelled() {
+    this.ganttShowCancelled = !this.ganttShowCancelled;
+    this.changes.detectChanges();
+  }
+
+  togglePhaseExpansion(phaseId: string) {
+    if (this.expandedPhaseIds.has(phaseId)) {
+      this.expandedPhaseIds.delete(phaseId);
+    } else {
+      this.expandedPhaseIds.add(phaseId);
+    }
+    this.changes.detectChanges();
+  }
+
+  isPhaseExpanded(phaseId: string): boolean {
+    return this.ganttExpandTasks || this.expandedPhaseIds.has(phaseId);
+  }
+
+  hasChildTasks(phaseId: string): boolean {
+    return this.scheduleEntries.some(
+      (e) => e.kind === "task" && e.phaseId === phaseId && (this.ganttShowCancelled || e.state !== "cancelled"),
+    );
+  }
+
+  hasCancelledEntries(): boolean {
+    return this.scheduleEntries.some((e) => e.state === "cancelled");
+  }
+
+  cancelledEntriesCount(): number {
+    return this.scheduleEntries.filter((e) => e.state === "cancelled").length;
+  }
+
+  ganttDisplayEntries(): Array<ScheduleEntry & { isSubtask?: boolean; isDirectTask?: boolean }> {
+    const active = this.scheduleEntries.filter((entry) => entry.state !== "cancelled");
+    const cancelled = this.scheduleEntries.filter((entry) => entry.state === "cancelled");
+    const phases = active.filter((entry) => entry.kind === "phase");
+    const milestones = active.filter((entry) => entry.kind === "milestone");
+    const directTasks = active.filter((entry) => entry.kind === "task" && !entry.phaseId);
+
+    const result: Array<ScheduleEntry & { isSubtask?: boolean; isDirectTask?: boolean }> = [];
+
+    for (const phase of phases) {
+      result.push(phase);
+      if (this.isPhaseExpanded(phase.id)) {
+        const subtasks = active.filter((entry) => entry.kind === "task" && entry.phaseId === phase.id);
+        for (const t of subtasks) {
+          result.push({ ...t, isSubtask: true });
+        }
+      }
+    }
+
+    if (this.ganttExpandTasks) {
+      for (const t of directTasks) {
+        result.push({ ...t, isDirectTask: true });
+      }
+    }
+
+    for (const m of milestones) {
+      result.push(m);
+    }
+
+    if (this.ganttShowCancelled) {
+      for (const c of cancelled) {
+        result.push(c);
+      }
+    }
+
+    return result;
+  }
+
+  ganttTimeline() {
+    const dates = this.ganttDates();
+    if (!dates.length) return { min: 0, max: 0, ticks: [] };
+    let min = Math.min(...dates);
+    let max = Math.max(...dates);
+    if (min === max) {
+      min -= 86400000 * 3;
+      max += 86400000 * 3;
+    }
+    const ticks: { percent: number; label: string }[] = [];
+    const count = 4;
+    for (let i = 0; i <= count; i++) {
+      const time = min + ((max - min) * i) / count;
+      const d = new Date(time);
+      const label = `${String(d.getMonth() + 1).padStart(2, "0")}/${String(d.getDate()).padStart(2, "0")}`;
+      ticks.push({ percent: (i / count) * 100, label });
+    }
+    return { min, max, ticks };
+  }
+
+  meetingDatePosition(meetingDate?: string) {
+    if (!meetingDate) return null;
+    return this.schedulePosition(meetingDate);
+  }
+
+  varianceText(entry: ScheduleEntry): string {
+    if (entry.kind === "milestone") {
+      if (!entry.baselineDate) return "無基準";
+      const target = entry.state === "achieved" ? entry.actualDate : entry.forecastDate;
+      if (!target) return "—";
+      const days = Math.round((Date.parse(target) - Date.parse(entry.baselineDate)) / 86400000);
+      if (days === 0) return "如期達成";
+      return `${days > 0 ? "+" : ""}${days} 天`;
+    } else {
+      const end = entry.actualEnd || entry.forecastEnd;
+      if (!entry.baselineEnd || !end) return "無基準";
+      const days = Math.round((Date.parse(end) - Date.parse(entry.baselineEnd)) / 86400000);
+      if (days === 0) return "如期";
+      return `${days > 0 ? "+" : ""}${days} 天`;
+    }
+  }
+
+  varianceBadgeClass(entry: ScheduleEntry): string {
+    let days = 0;
+    if (entry.kind === "milestone") {
+      if (!entry.baselineDate) return "variance-neutral";
+      const target = entry.state === "achieved" ? entry.actualDate : entry.forecastDate;
+      if (!target) return "variance-neutral";
+      days = Math.round((Date.parse(target) - Date.parse(entry.baselineDate)) / 86400000);
+    } else {
+      const end = entry.actualEnd || entry.forecastEnd;
+      if (!entry.baselineEnd || !end) return "variance-neutral";
+      days = Math.round((Date.parse(end) - Date.parse(entry.baselineEnd)) / 86400000);
+    }
+    if (days > 0) return "variance-delayed";
+    if (days < 0) return "variance-ahead";
+    return "variance-ontime";
+  }
+
   schedulePhases() {
     return this.scheduleEntries.filter(entry => entry.kind === "phase" && entry.state !== "cancelled" && (entry.state !== "completed" || entry.id === this.scheduleDraft.phaseId || this.editingSchedule?.kind === "task" && this.scheduleDraft.state === "completed"));
   }
@@ -2859,80 +3028,159 @@ export class ReportEditor implements OnInit, OnDestroy {
                 }
                 @if (item.schedule?.length) {
                   <div class="gantt">
-                    <p><strong>專案甘特圖</strong>（基準／預估／實際）</p>
-                    @for (entry of publicationPhases(item.schedule || []); track entry.id) {
-                      <div class="gantt-row">
-                        <span>{{ entry.name }}@if (entry.warnings?.length) { <small class="gantt-warn-icon" [title]="entry.warnings![0].message">⚠️</small> }</span>
-                        <div class="gantt-track">
-                          @if (entry.kind === 'milestone') {
-                            <i
-                              class="milestone-marker"
-                              [attr.data-state]="entry.state"
-                              [style.left.%]="
-                                publicationPosition(
-                                  item.schedule || [],
-                                  entry.state === 'achieved'
-                                    ? entry.actualDate
-                                    : entry.forecastDate
-                                )
-                              "
-                            ></i>
-                          } @else {
-                            <i
-                              class="baseline"
-                              [style.left.%]="
-                                publicationPosition(
-                                  item.schedule || [],
-                                  entry.baselineStart
-                                )
-                              "
-                              [style.width.%]="
-                                publicationWidth(
-                                  item.schedule || [],
-                                  entry.baselineStart,
-                                  entry.baselineEnd
-                                )
-                              "
-                            ></i
-                            ><i
-                              class="forecast"
-                              [style.left.%]="
-                                publicationPosition(
-                                  item.schedule || [],
-                                  entry.forecastStart
-                                )
-                              "
-                              [style.width.%]="
-                                publicationWidth(
-                                  item.schedule || [],
-                                  entry.forecastStart,
-                                  entry.forecastEnd
-                                )
-                              "
-                            ></i>
-                            @if (entry.actualStart || entry.actualEnd) {
-                              <i
-                                class="actual"
-                                [style.left.%]="
-                                  publicationPosition(
-                                    item.schedule || [],
-                                    entry.actualStart || entry.actualEnd
-                                  )
-                                "
-                                [style.width.%]="
-                                  publicationWidth(
-                                    item.schedule || [],
-                                    entry.actualStart || entry.actualEnd,
-                                    entry.actualEnd || entry.actualStart
-                                  )
-                                "
-                              ></i>
-                            }
-                          }
-                        </div>
-                        <small>{{ entry.kind === 'milestone' ? (entry.state === 'achieved' ? '實際達成' : '最新目標') : '偏差：' + variance(entry) }}</small>
+                    <div class="gantt-header">
+                      <div class="gantt-header-title">
+                        <h4><strong>專案甘特圖</strong> · 處會摘要</h4>
+                        <span class="gantt-meeting-date">報告日：{{ publication.meetingDate }}</span>
                       </div>
-                    }
+                      <div class="gantt-toolbar">
+                        <button
+                          type="button"
+                          class="btn-gantt-toggle btn-gantt-toggle-tasks"
+                          (click)="togglePubGanttExpandTasks()"
+                          [attr.aria-expanded]="pubGanttExpandTasks">
+                          {{ pubGanttExpandTasks ? '收合關鍵任務' : '展開關鍵任務' }}
+                        </button>
+                        @if (hasPubCancelledEntries(item.schedule || [])) {
+                          <button
+                            type="button"
+                            class="btn-gantt-toggle btn-gantt-toggle-cancelled"
+                            (click)="togglePubGanttShowCancelled()"
+                            [attr.aria-expanded]="pubGanttShowCancelled">
+                            {{ pubGanttShowCancelled ? '隱藏已取消項目' : '顯示已取消項目 (' + pubCancelledEntriesCount(item.schedule || []) + ')' }}
+                          </button>
+                        }
+                      </div>
+                    </div>
+
+                    <div class="gantt-legend">
+                      <span class="legend-item"><i class="legend-bar baseline-bar"></i> 原始計畫</span>
+                      <span class="legend-item"><i class="legend-bar forecast-bar"></i> 目前目標</span>
+                      <span class="legend-item"><i class="legend-bar actual-bar"></i> 實際結果</span>
+                      <span class="legend-item"><i class="legend-diamond pending-diamond"></i> 未達成節點</span>
+                      <span class="legend-item"><i class="legend-diamond achieved-diamond"></i> 已達成節點</span>
+                    </div>
+
+                    <div class="gantt-timeline-header">
+                      <div class="gantt-meta-spacer">項目名稱與層級</div>
+                      <div class="gantt-timeline-scale">
+                        @for (tick of pubGanttTimeline(item.schedule || []).ticks; track tick.percent) {
+                          <span class="gantt-tick" [style.left.%]="tick.percent">{{ tick.label }}</span>
+                        }
+                      </div>
+                      <div class="gantt-stats-spacer">狀態與總偏差</div>
+                    </div>
+
+                    <div class="gantt-body">
+                      @for (entry of pubGanttDisplayEntries(item.schedule || []); track entry.id) {
+                        <div
+                          class="gantt-row"
+                          [class.gantt-row-task]="entry.kind === 'task'"
+                          [class.gantt-row-milestone]="entry.kind === 'milestone'"
+                          [class.gantt-row-phase]="entry.kind === 'phase'"
+                          [class.gantt-row-cancelled]="entry.state === 'cancelled'"
+                          (click)="openHistoryModal(entry)">
+                          <div class="gantt-meta">
+                            @if (entry.kind === 'phase' && hasPubChildTasks(item.schedule || [], entry.id)) {
+                              <button
+                                type="button"
+                                class="btn-phase-expand"
+                                (click)="$event.stopPropagation(); togglePubPhaseExpansion(entry.id)"
+                                [title]="isPubPhaseExpanded(entry.id) ? '收合此階段任務' : '展開此階段任務'">
+                                {{ isPubPhaseExpanded(entry.id) ? '▼' : '▶' }}
+                              </button>
+                            } @else if (entry.kind === 'task') {
+                              <span class="gantt-task-indent">↳</span>
+                            }
+                            <span class="gantt-kind-badge" [attr.data-kind]="entry.kind">
+                              {{ entry.kind === 'phase' ? '階段' : entry.kind === 'task' ? '任務' : '里程碑' }}
+                            </span>
+                            <span class="gantt-name" [title]="entry.name">{{ entry.name }}</span>
+                            @if (entry.kind === 'task' && entry.owner) {
+                              <span class="gantt-owner-chip" [title]="'負責人/單位: ' + entry.owner">👤 {{ entry.owner }}</span>
+                            }
+                            @if (entry.warnings?.length) {
+                              <small class="gantt-warn-icon" [title]="entry.warnings![0].message">⚠️</small>
+                            }
+                            @if (entry.externalNotices?.length) {
+                              <small class="gantt-ext-icon" [title]="entry.externalNotices![0].message">🌐</small>
+                            }
+                          </div>
+
+                          <div class="gantt-track">
+                            @if (pubMeetingDatePosition(item.schedule || [], publication.meetingDate); as mPos) {
+                              <div class="gantt-today-line" [style.left.%]="mPos" title="報告日基準線"></div>
+                            }
+
+                            @if (entry.kind === 'milestone') {
+                              @if (entry.state !== 'achieved') {
+                                @if (entry.baselineDate && entry.baselineDate !== (entry.forecastDate || entry.baselineDate)) {
+                                  <i
+                                    class="milestone-ghost-marker"
+                                    [style.left.%]="publicationPosition(item.schedule || [], entry.baselineDate)"
+                                    [title]="'原始目標：' + entry.baselineDate"></i>
+                                }
+                                <i
+                                  class="milestone-marker pending-marker"
+                                  [attr.data-state]="entry.state"
+                                  [style.left.%]="publicationPosition(item.schedule || [], entry.forecastDate || entry.baselineDate)"
+                                  [title]="'最新目標：' + (entry.forecastDate || entry.baselineDate)"></i>
+                              } @else {
+                                @if (entry.forecastDate && entry.forecastDate !== entry.actualDate) {
+                                  <i
+                                    class="milestone-target-marker"
+                                    [style.left.%]="publicationPosition(item.schedule || [], entry.forecastDate)"
+                                    [title]="'最新目標：' + entry.forecastDate"></i>
+                                }
+                                <i
+                                  class="milestone-marker achieved-marker"
+                                  [attr.data-state]="entry.state"
+                                  [style.left.%]="publicationPosition(item.schedule || [], entry.actualDate)"
+                                  [title]="'實際達成：' + entry.actualDate"></i>
+                              }
+                            } @else {
+                              @if (entry.baselineStart && entry.baselineEnd) {
+                                <i
+                                  class="baseline baseline-bar"
+                                  [style.left.%]="publicationPosition(item.schedule || [], entry.baselineStart)"
+                                  [style.width.%]="publicationWidth(item.schedule || [], entry.baselineStart, entry.baselineEnd)"
+                                  [title]="'原始計畫：' + entry.baselineStart + ' ~ ' + entry.baselineEnd"></i>
+                              }
+                              @if (entry.forecastStart && entry.forecastEnd) {
+                                <i
+                                  class="forecast forecast-bar"
+                                  [style.left.%]="publicationPosition(item.schedule || [], entry.forecastStart)"
+                                  [style.width.%]="publicationWidth(item.schedule || [], entry.forecastStart, entry.forecastEnd)"
+                                  [title]="'目前目標：' + entry.forecastStart + ' ~ ' + entry.forecastEnd"></i>
+                              }
+                              @if (entry.actualStart || entry.actualEnd) {
+                                <i
+                                  class="actual actual-bar"
+                                  [style.left.%]="publicationPosition(item.schedule || [], entry.actualStart || entry.actualEnd)"
+                                  [style.width.%]="publicationWidth(item.schedule || [], entry.actualStart || entry.actualEnd, entry.actualEnd || entry.actualStart)"
+                                  [title]="'實際進展：' + (entry.actualStart || '—') + ' ~ ' + (entry.actualEnd || '進行中')"></i>
+                              }
+                            }
+                          </div>
+
+                          <div class="gantt-stats">
+                            <span class="gantt-state-pill" [attr.data-state]="entry.state">
+                              {{ scheduleStateLabel(entry.state) }}
+                            </span>
+                            <span [class]="'gantt-variance-badge ' + pubVarianceBadgeClass(entry)">
+                              {{ pubVarianceText(entry) }}
+                            </span>
+                            <button
+                              type="button"
+                              class="btn-history-inspect"
+                              (click)="$event.stopPropagation(); openHistoryModal(entry)"
+                              [title]="'檢視發布時修訂歷史 (' + (entry.history?.length || 0) + ' 筆)'">
+                              📜
+                            </button>
+                          </div>
+                        </div>
+                      }
+                    </div>
                   </div>
                 }
                 @if (item.schedule?.length) {
@@ -3200,6 +3448,157 @@ export class PublicationPage implements OnInit {
   label(section: string) {
     return labels[section] ?? section;
   }
+  pubGanttExpandTasks = false;
+  pubGanttShowCancelled = false;
+  pubExpandedPhaseIds = new Set<string>();
+
+  togglePubGanttExpandTasks() {
+    this.pubGanttExpandTasks = !this.pubGanttExpandTasks;
+    this.changes.detectChanges();
+  }
+
+  togglePubGanttShowCancelled() {
+    this.pubGanttShowCancelled = !this.pubGanttShowCancelled;
+    this.changes.detectChanges();
+  }
+
+  togglePubPhaseExpansion(phaseId: string) {
+    if (this.pubExpandedPhaseIds.has(phaseId)) {
+      this.pubExpandedPhaseIds.delete(phaseId);
+    } else {
+      this.pubExpandedPhaseIds.add(phaseId);
+    }
+    this.changes.detectChanges();
+  }
+
+  isPubPhaseExpanded(phaseId: string): boolean {
+    return this.pubGanttExpandTasks || this.pubExpandedPhaseIds.has(phaseId);
+  }
+
+  hasPubChildTasks(entries: ScheduleEntry[], phaseId: string): boolean {
+    return entries.some(
+      (e) => e.kind === "task" && e.phaseId === phaseId && (this.pubGanttShowCancelled || e.state !== "cancelled"),
+    );
+  }
+
+  hasPubCancelledEntries(entries: ScheduleEntry[]): boolean {
+    return entries.some((e) => e.state === "cancelled");
+  }
+
+  pubCancelledEntriesCount(entries: ScheduleEntry[]): number {
+    return entries.filter((e) => e.state === "cancelled").length;
+  }
+
+  pubGanttDisplayEntries(entries: ScheduleEntry[]): Array<ScheduleEntry & { isSubtask?: boolean; isDirectTask?: boolean }> {
+    const active = entries.filter((entry) => entry.state !== "cancelled");
+    const cancelled = entries.filter((entry) => entry.state === "cancelled");
+    const phases = active.filter((entry) => entry.kind === "phase");
+    const milestones = active.filter((entry) => entry.kind === "milestone");
+    const directTasks = active.filter((entry) => entry.kind === "task" && !entry.phaseId);
+
+    const result: Array<ScheduleEntry & { isSubtask?: boolean; isDirectTask?: boolean }> = [];
+
+    for (const phase of phases) {
+      result.push(phase);
+      if (this.isPubPhaseExpanded(phase.id)) {
+        const subtasks = active.filter((entry) => entry.kind === "task" && entry.phaseId === phase.id);
+        for (const t of subtasks) {
+          result.push({ ...t, isSubtask: true });
+        }
+      }
+    }
+
+    if (this.pubGanttExpandTasks) {
+      for (const t of directTasks) {
+        result.push({ ...t, isDirectTask: true });
+      }
+    }
+
+    for (const m of milestones) {
+      result.push(m);
+    }
+
+    if (this.pubGanttShowCancelled) {
+      for (const c of cancelled) {
+        result.push(c);
+      }
+    }
+
+    return result;
+  }
+
+  pubGanttTimeline(entries: ScheduleEntry[]) {
+    const dates = this.publicationDates(entries);
+    if (!dates.length) return { min: 0, max: 0, ticks: [] };
+    let min = Math.min(...dates);
+    let max = Math.max(...dates);
+    if (min === max) {
+      min -= 86400000 * 3;
+      max += 86400000 * 3;
+    }
+    const ticks: { percent: number; label: string }[] = [];
+    const count = 4;
+    for (let i = 0; i <= count; i++) {
+      const time = min + ((max - min) * i) / count;
+      const d = new Date(time);
+      const label = `${String(d.getMonth() + 1).padStart(2, "0")}/${String(d.getDate()).padStart(2, "0")}`;
+      ticks.push({ percent: (i / count) * 100, label });
+    }
+    return { min, max, ticks };
+  }
+
+  pubMeetingDatePosition(entries: ScheduleEntry[], meetingDate?: string) {
+    if (!meetingDate) return null;
+    return this.publicationPosition(entries, meetingDate);
+  }
+
+  pubVarianceText(entry: ScheduleEntry): string {
+    if (entry.kind === "milestone") {
+      if (!entry.baselineDate) return "無基準";
+      const target = entry.state === "achieved" ? entry.actualDate : entry.forecastDate;
+      if (!target) return "—";
+      const days = Math.round((Date.parse(target) - Date.parse(entry.baselineDate)) / 86400000);
+      if (days === 0) return "如期達成";
+      return `${days > 0 ? "+" : ""}${days} 天`;
+    } else {
+      const end = entry.actualEnd || entry.forecastEnd;
+      if (!entry.baselineEnd || !end) return "無基準";
+      const days = Math.round((Date.parse(end) - Date.parse(entry.baselineEnd)) / 86400000);
+      if (days === 0) return "如期";
+      return `${days > 0 ? "+" : ""}${days} 天`;
+    }
+  }
+
+  pubVarianceBadgeClass(entry: ScheduleEntry): string {
+    let days = 0;
+    if (entry.kind === "milestone") {
+      if (!entry.baselineDate) return "variance-neutral";
+      const target = entry.state === "achieved" ? entry.actualDate : entry.forecastDate;
+      if (!target) return "variance-neutral";
+      days = Math.round((Date.parse(target) - Date.parse(entry.baselineDate)) / 86400000);
+    } else {
+      const end = entry.actualEnd || entry.forecastEnd;
+      if (!entry.baselineEnd || !end) return "variance-neutral";
+      days = Math.round((Date.parse(end) - Date.parse(entry.baselineEnd)) / 86400000);
+    }
+    if (days > 0) return "variance-delayed";
+    if (days < 0) return "variance-ahead";
+    return "variance-ontime";
+  }
+
+  scheduleStateLabel(state: ScheduleEntry["state"]) {
+    return (
+      {
+        open: "開放",
+        "in-progress": "進行中",
+        completed: "完成",
+        cancelled: "取消",
+        pending: "待達成",
+        achieved: "已達成",
+      }[state] ?? state
+    );
+  }
+
   publicationPhases(entries: ScheduleEntry[]) {
     return entries.filter(entry => entry.state !== "cancelled" && (entry.kind === "phase" || entry.kind === "milestone"));
   }
