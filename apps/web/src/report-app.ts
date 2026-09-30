@@ -1223,7 +1223,49 @@ export class Home implements OnInit {
                 }
                 @if (canMaintain(item)) {
                   <div class="schedule-form">
-                    <h4>{{ editingSchedule ? "編輯交付項目" : "新增交付項目" }}</h4>
+                    <div class="schedule-form-header">
+                      <div class="header-main">
+                        <h4>{{ editingSchedule ? "編輯交付項目" : "新增交付項目" }}</h4>
+                        @if (token) {
+                          <span class="lease-active-chip" title="目前鎖定編輯中，可連續新增多個時程項目">
+                            <span class="chip-dot"></span> 編輯租約有效中 · 可連續新增
+                          </span>
+                        } @else {
+                          <span class="lease-idle-chip">
+                            <span class="chip-lock">🔒</span> 檢視中（需租約以新增）
+                          </span>
+                        }
+                      </div>
+                      @if (!editingSchedule) {
+                        <label class="continuous-toggle" title="開啟後新增一筆時程會自動保留類型與階段，方便連續新增下一筆">
+                          <input type="checkbox" [(ngModel)]="continuousAdd" />
+                          <span class="toggle-text">⚡ 連續新增模式</span>
+                        </label>
+                      }
+                    </div>
+
+                    @if (lastAddedNotice) {
+                      <div class="schedule-added-toast" role="status">
+                        <span class="toast-icon">✓</span>
+                        <span class="toast-message">{{ lastAddedNotice }}</span>
+                        <button type="button" class="toast-close" (click)="lastAddedNotice = ''" aria-label="關閉通知">✕</button>
+                      </div>
+                    }
+
+                    @if (!editingSchedule) {
+                      <div class="schedule-kind-pills">
+                        <button type="button" class="kind-pill" [class.active]="scheduleDraft.kind === 'task'" (click)="setScheduleKind('task')">
+                          <span class="pill-icon">📋</span> 關鍵任務
+                        </button>
+                        <button type="button" class="kind-pill" [class.active]="scheduleDraft.kind === 'milestone'" (click)="setScheduleKind('milestone')">
+                          <span class="pill-icon">🚩</span> 重要里程碑
+                        </button>
+                        <button type="button" class="kind-pill" [class.active]="scheduleDraft.kind === 'phase'" (click)="setScheduleKind('phase')">
+                          <span class="pill-icon">📁</span> 專案階段
+                        </button>
+                      </div>
+                    }
+
                     <label
                       >類型
                       <select [(ngModel)]="scheduleDraft.kind" [disabled]="!!editingSchedule" (ngModelChange)="onScheduleKindChange()">
@@ -1233,7 +1275,7 @@ export class Home implements OnInit {
                       </select></label
                     >
                     <label
-                      >名稱 <input [(ngModel)]="scheduleDraft.name"
+                      >名稱 <input name="scheduleName" [(ngModel)]="scheduleDraft.name" (keydown.enter)="onScheduleEnterKey($event)" placeholder="請輸入交付項目名稱..."
                     /></label>
                     @if (scheduleDraft.kind === 'task') {
                       <label>負責人或單位 <input [(ngModel)]="scheduleDraft.owner" required /></label>
@@ -1424,14 +1466,21 @@ export class Home implements OnInit {
                         }
                       </div>
                     }
-                    <button (click)="saveSchedule()" [disabled]="!!scheduleSaveDisabledReason()" [title]="scheduleSaveDisabledReason() || ''">
-                      {{ editingSchedule ? "儲存時程" : "新增時程" }}
-                    </button>
-                    @if (editingSchedule) {
-                      <button (click)="resetScheduleDraft()">取消</button>
-                    } @else {
-                      <button type="button" class="schedule-secondary" (click)="resetScheduleDraft()">捨棄未提交草稿</button>
-                    }
+                    <div class="schedule-form-actions">
+                      <button (click)="saveSchedule()" [disabled]="!!scheduleSaveDisabledReason()" [title]="scheduleSaveDisabledReason() || ''">
+                        {{ editingSchedule ? "儲存時程" : "新增時程" }}
+                      </button>
+                      @if (!editingSchedule && token) {
+                        <button type="button" class="btn-finish-editing" (click)="finishScheduleEditing()" title="提交並釋放編輯租約，完成此專案所有時程的新增與維護">
+                          ✓ 結束排程維護（釋放租約）
+                        </button>
+                      }
+                      @if (editingSchedule) {
+                        <button (click)="resetScheduleDraft()">取消</button>
+                      } @else {
+                        <button type="button" class="schedule-secondary" (click)="resetScheduleDraft()">捨棄未提交草稿</button>
+                      }
+                    </div>
                   </div>
                 }
               </section>
@@ -1640,6 +1689,9 @@ export class ReportEditor implements OnInit, OnDestroy {
   scheduleEntries: ScheduleEntry[] = [];
   editingSchedule: ScheduleEntry | null = null;
   scheduleDraft = this.emptyScheduleDraft();
+  continuousAdd = true;
+  lastAddedNotice = "";
+  lastAddedTimer: any = null;
   selectedPredecessorId = "";
   linkReason = "";
   externalDependencies: ExternalDependency[] = [];
@@ -2420,6 +2472,22 @@ export class ReportEditor implements OnInit, OnDestroy {
       ...active.filter(entry => entry.kind !== "phase" && entry.kind !== "task" && entry.kind !== "milestone"),
     ];
   }
+  setScheduleKind(kind: ScheduleEntry["kind"]) {
+    if (this.editingSchedule) return;
+    this.scheduleDraft.kind = kind;
+    this.onScheduleKindChange();
+  }
+  onScheduleEnterKey(event: Event) {
+    if (this.scheduleSaveDisabledReason()) return;
+    event.preventDefault();
+    this.saveSchedule();
+  }
+  async finishScheduleEditing() {
+    if (this.scheduleDraft.name.trim()) {
+      if (!confirm("尚有未提交的交付項目草稿，確定要結束編輯並釋放租約嗎？")) return;
+    }
+    await this.commit();
+  }
   scheduleSaveDisabledReason(): string | null {
     if (!this.token) {
       return "尚未取得編輯租約，請點擊上方「開始編輯」鎖定編輯權限。";
@@ -2432,6 +2500,25 @@ export class ReportEditor implements OnInit, OnDestroy {
     }
     if (this.scheduleDraft.kind === "milestone" && !this.editingSchedule && !this.scheduleDraft.targetDate) {
       return "重要里程碑必須填寫「目標日期」。";
+    }
+    if (this.scheduleDraft.kind === "phase" || this.scheduleDraft.kind === "task") {
+      if (!this.scheduleDraft.baselineStart) {
+        return "請填寫「原始計畫開始」日期。";
+      }
+      if (!this.scheduleDraft.baselineEnd) {
+        return "請填寫「原始計畫結束」日期。";
+      }
+      if (this.scheduleDraft.baselineStart > this.scheduleDraft.baselineEnd) {
+        return "原始計畫開始日期不可晚於結束日期。";
+      }
+      if (this.editingSchedule) {
+        if (this.scheduleDraft.forecastStart && this.scheduleDraft.forecastEnd && this.scheduleDraft.forecastStart > this.scheduleDraft.forecastEnd) {
+          return "目前計畫開始日期不可晚於結束日期。";
+        }
+        if (this.scheduleDraft.actualStart && this.scheduleDraft.actualEnd && this.scheduleDraft.actualStart > this.scheduleDraft.actualEnd) {
+          return "實際開始日期不可晚於結束日期。";
+        }
+      }
     }
     if (this.editingSchedule) {
       if (!this.scheduleDraft.reason.trim()) {
@@ -2800,8 +2887,33 @@ export class ReportEditor implements OnInit, OnDestroy {
           this.http.post(`/api/items/${this.selected.id}/schedule`, { ...body, token: this.token, baseProjectVersion: this.baseVersion }),
         )) as { projectVersion: number };
       this.baseVersion = result.projectVersion;
+      if (this.selected) this.selected.version = result.projectVersion;
       await this.loadSchedule();
-      this.resetScheduleDraft();
+
+      const addedName = this.scheduleDraft.name.trim();
+      const wasAdding = !this.editingSchedule;
+      const prevKind = this.scheduleDraft.kind;
+      const prevPhaseId = this.scheduleDraft.phaseId;
+      const prevOwner = this.scheduleDraft.owner;
+
+      if (wasAdding && this.continuousAdd) {
+        this.resetScheduleDraft();
+        this.scheduleDraft.kind = prevKind;
+        this.scheduleDraft.phaseId = prevPhaseId;
+        this.scheduleDraft.owner = prevOwner;
+        this.lastAddedNotice = `已成功新增交付項目「${addedName}」，可繼續輸入下一項。`;
+        clearTimeout(this.lastAddedTimer);
+        this.lastAddedTimer = setTimeout(() => {
+          this.lastAddedNotice = "";
+          this.changes.detectChanges();
+        }, 6000);
+        setTimeout(() => {
+          const input = document.querySelector<HTMLInputElement>('.schedule-form input[name="scheduleName"]');
+          input?.focus();
+        }, 80);
+      } else {
+        this.resetScheduleDraft();
+      }
       this.message = "已儲存結構化時程。";
     } catch (error: any) {
       if (error.status === 409) {

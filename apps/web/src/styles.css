@@ -932,5 +932,223 @@ label { display: block; margin: 1rem 0; } input, textarea { display: block; box-
   background: #b45309;
 }
 
+/* 交付項目連貫新增與狀態列 - Frontend Design */
+.schedule-form-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: .75rem;
+  padding-bottom: .75rem;
+  margin-bottom: .85rem;
+  border-bottom: 1px solid #e2e8f0;
+}
+
+.schedule-form-header .header-main {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: .65rem;
+}
+
+.schedule-form-header h4 {
+  margin: 0;
+  font-size: 1.05rem;
+  font-weight: 700;
+  color: #1e293b;
+  letter-spacing: -0.01em;
+}
+
+.lease-active-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: .35rem;
+  padding: .2rem .55rem;
+  background: #ecfdf5;
+  border: 1px solid #a7f3d0;
+  border-radius: 9999px;
+  font-size: .75rem;
+  font-weight: 600;
+  color: #065f46;
+}
+
+.lease-active-chip .chip-dot {
+  width: 6px;
+  height: 6px;
+  background-color: #10b981;
+  border-radius: 50%;
+  box-shadow: 0 0 0 2px rgba(16, 185, 129, 0.25);
+  animation: pulse-dot 2s infinite ease-in-out;
+}
+
+@keyframes pulse-dot {
+  0%, 100% { transform: scale(1); opacity: 1; }
+  50% { transform: scale(1.3); opacity: 0.7; }
+}
+
+.lease-idle-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: .3rem;
+  padding: .2rem .55rem;
+  background: #f1f5f9;
+  border: 1px solid #cbd5e1;
+  border-radius: 9999px;
+  font-size: .75rem;
+  font-weight: 500;
+  color: #64748b;
+}
+
+.continuous-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: .35rem;
+  cursor: pointer;
+  padding: .25rem .55rem;
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+  border-radius: 6px;
+  font-size: .78rem;
+  font-weight: 600;
+  color: #334155;
+  user-select: none;
+  transition: all .15s ease;
+}
+
+.continuous-toggle:hover {
+  background: #f1f5f9;
+  border-color: #cbd5e1;
+}
+
+.continuous-toggle input[type="checkbox"] {
+  cursor: pointer;
+  accent-color: #0284c7;
+}
+
+.continuous-toggle .toggle-text {
+  letter-spacing: -0.01em;
+}
+
+/* 成功連續新增 Toast 通知 */
+.schedule-added-toast {
+  display: flex;
+  align-items: center;
+  gap: .6rem;
+  padding: .5rem .85rem;
+  margin-bottom: .85rem;
+  background: #f0fdf4;
+  border: 1px solid #bbf7d0;
+  border-left: 3px solid #16a34a;
+  border-radius: 6px;
+  font-size: .84rem;
+  color: #166534;
+  animation: toastSlideDown .25s ease-out;
+}
+
+@keyframes toastSlideDown {
+  from { opacity: 0; transform: translateY(-6px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.schedule-added-toast .toast-icon {
+  font-weight: 700;
+  color: #16a34a;
+  font-size: 1rem;
+}
+
+.schedule-added-toast .toast-message {
+  flex: 1;
+  font-weight: 500;
+}
+
+.schedule-added-toast .toast-close {
+  background: none;
+  border: none;
+  color: #86efac;
+  font-size: .85rem;
+  padding: .15rem .35rem;
+  cursor: pointer;
+  border-radius: 4px;
+}
+
+.schedule-added-toast .toast-close:hover {
+  color: #166534;
+  background: rgba(22, 163, 74, 0.1);
+}
+
+/* 類型選擇按鈕膠囊 */
+.schedule-kind-pills {
+  display: flex;
+  gap: .45rem;
+  margin-bottom: .65rem;
+  flex-wrap: wrap;
+}
+
+.kind-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: .35rem;
+  padding: .35rem .75rem;
+  border-radius: 9999px;
+  border: 1px solid #cbd5e1;
+  background: #ffffff;
+  color: #475569;
+  font-size: .8rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all .15s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.kind-pill:hover:not(:disabled) {
+  border-color: #94a3b8;
+  background: #f8fafc;
+  color: #0f172a;
+}
+
+.kind-pill.active {
+  background: #0f172a;
+  border-color: #0f172a;
+  color: #ffffff;
+  box-shadow: 0 1px 3px rgba(15, 23, 42, 0.18);
+}
+
+.kind-pill:disabled {
+  opacity: .5;
+  cursor: not-allowed;
+}
+
+/* 底部操作按鈕區 */
+.schedule-form-actions {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: .65rem;
+  margin-top: .75rem;
+  padding-top: .75rem;
+  border-top: 1px dashed #e2e8f0;
+}
+
+.btn-finish-editing {
+  display: inline-flex;
+  align-items: center;
+  gap: .35rem;
+  padding: .35rem .85rem;
+  background: #f0fdf4;
+  color: #15803d;
+  border: 1px solid #86efac;
+  border-radius: 5px;
+  font-size: .82rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all .15s ease;
+}
+
+.btn-finish-editing:hover {
+  background: #dcfce7;
+  border-color: #4ade80;
+  color: #166534;
+}
+
+
 
 

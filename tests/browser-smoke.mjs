@@ -190,6 +190,17 @@ try {
   await schedulePanel.getByText('關鍵任務：交付檢核').waitFor({ timeout: 15000 });
   await schedulePanel.getByText('尚有 1 項未完成任務').waitFor({ timeout: 15000 });
 
+  // 驗證連續新增交付項目能力（無需儲存草稿與重新取得租約）：
+  await schedulePanel.getByText('已成功新增交付項目「交付檢核」').waitFor({ timeout: 15000 });
+  assert.equal(await schedulePanel.getByLabel('類型').inputValue(), 'task');
+  assert.equal(await schedulePanel.getByLabel('負責人或單位').inputValue(), '外部測試單位');
+  await schedulePanel.getByLabel('名稱').fill('上線整備');
+  await schedulePanel.getByLabel('原始計畫開始').fill('2026-10-04');
+  await schedulePanel.getByLabel('原始計畫結束').fill('2026-10-09');
+  await schedulePanel.getByRole('button', { name: '新增時程' }).click();
+  await schedulePanel.getByText('關鍵任務：上線整備').waitFor({ timeout: 15000 });
+  await schedulePanel.getByText('尚有 2 項未完成任務').waitFor({ timeout: 15000 });
+
   // Issue #10 驗證：甘特圖預設只呈現階段和里程碑，關鍵任務按需展開
   assert.equal(await schedulePanel.locator('.gantt-row.gantt-row-task').count(), 0, 'key tasks must be collapsed by default in gantt');
   await schedulePanel.locator('.btn-gantt-toggle-tasks').click();
