@@ -891,5 +891,46 @@ label { display: block; margin: 1rem 0; } input, textarea { display: block; box-
   line-height: 1.45;
 }
 
+.schedule-disabled-hint {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: .55rem;
+  padding: .5rem .85rem;
+  margin: .65rem 0;
+  background: #fffbeb;
+  border: 1px solid #fde68a;
+  border-left: 3px solid #f59e0b;
+  border-radius: 6px;
+  font-size: .84rem;
+  color: #92400e;
+  line-height: 1.45;
+}
+
+.schedule-disabled-hint .hint-icon {
+  font-size: 1rem;
+}
+
+.schedule-disabled-hint .hint-text {
+  flex: 1;
+}
+
+.btn-inline-acquire {
+  background: #d97706;
+  color: #ffffff;
+  border: none;
+  padding: .24rem .65rem;
+  border-radius: 4px;
+  font-size: .78rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background-color .15s ease;
+  white-space: nowrap;
+}
+
+.btn-inline-acquire:hover {
+  background: #b45309;
+}
+
 
 

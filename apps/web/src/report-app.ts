@@ -1415,7 +1415,16 @@ export class Home implements OnInit {
                         }
                       </div>
                     }
-                    <button (click)="saveSchedule()" [disabled]="!token || !scheduleDraft.name.trim() || (scheduleDraft.kind === 'task' && !scheduleDraft.owner.trim()) || (scheduleDraft.kind === 'milestone' && !editingSchedule && !scheduleDraft.targetDate) || (scheduleDraft.kind === 'milestone' && editingSchedule && scheduleDraft.state === 'achieved' && !scheduleDraft.actualDate) || (editingSchedule && !scheduleDraft.reason.trim()) || (editingSchedule?.kind === 'phase' && editingSchedule?.state !== 'completed' && scheduleDraft.state === 'completed' && editingSchedule?.unfinishedTasks?.length && !scheduleDraft.acknowledgeIncompleteTasks) || (editingSchedule && scheduleDraft.action === 'cancel' && !!cancellationBlockerMessage(editingSchedule))">
+                    @if (scheduleSaveDisabledReason(); as reason) {
+                      <div class="schedule-disabled-hint">
+                        <span class="hint-icon">💡</span>
+                        <span class="hint-text">{{ reason }}</span>
+                        @if (!token) {
+                          <button type="button" class="btn-inline-acquire" (click)="acquire()">點此取得租約</button>
+                        }
+                      </div>
+                    }
+                    <button (click)="saveSchedule()" [disabled]="!!scheduleSaveDisabledReason()" [title]="scheduleSaveDisabledReason() || ''">
                       {{ editingSchedule ? "儲存時程" : "新增時程" }}
                     </button>
                     @if (editingSchedule) {
@@ -2410,6 +2419,41 @@ export class ReportEditor implements OnInit, OnDestroy {
       ...active.filter(entry => entry.kind === "milestone"),
       ...active.filter(entry => entry.kind !== "phase" && entry.kind !== "task" && entry.kind !== "milestone"),
     ];
+  }
+  scheduleSaveDisabledReason(): string | null {
+    if (!this.token) {
+      return "尚未取得編輯租約，請點擊上方「開始編輯」鎖定編輯權限。";
+    }
+    if (!this.scheduleDraft.name.trim()) {
+      return "請填寫交付項目「名稱」。";
+    }
+    if (this.scheduleDraft.kind === "task" && !this.scheduleDraft.owner.trim()) {
+      return "關鍵任務必須填寫「負責人或單位」。";
+    }
+    if (this.scheduleDraft.kind === "milestone" && !this.editingSchedule && !this.scheduleDraft.targetDate) {
+      return "重要里程碑必須填寫「目標日期」。";
+    }
+    if (this.editingSchedule) {
+      if (!this.scheduleDraft.reason.trim()) {
+        return "修訂項目必須填寫「修改原因」。";
+      }
+      if (this.scheduleDraft.kind === "milestone" && this.scheduleDraft.state === "achieved" && !this.scheduleDraft.actualDate) {
+        return "標記里程碑為已達成時，必須填寫「實際達成日」。";
+      }
+      if (
+        this.editingSchedule.kind === "phase" &&
+        this.editingSchedule.state !== "completed" &&
+        this.scheduleDraft.state === "completed" &&
+        this.editingSchedule.unfinishedTasks?.length &&
+        !this.scheduleDraft.acknowledgeIncompleteTasks
+      ) {
+        return "尚有未完成任務，請勾選檢視未完成任務之聲明。";
+      }
+      if (this.scheduleDraft.action === "cancel" && !!this.cancellationBlockerMessage(this.editingSchedule)) {
+        return this.cancellationBlockerMessage(this.editingSchedule);
+      }
+    }
+    return null;
   }
   cancelledScheduleEntries() {
     return this.scheduleEntries.filter(entry => entry.state === "cancelled");
