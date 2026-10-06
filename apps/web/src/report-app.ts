@@ -1597,6 +1597,8 @@ export class Home implements OnInit {
                         <span class="hint-text">{{ reason }}</span>
                         @if (!token) {
                           <button type="button" class="btn-inline-acquire" (click)="acquire()">點此取得租約</button>
+                        } @else if (selected.version === 0) {
+                          <button type="button" class="btn-inline-acquire" (click)="commitAndContinue()">儲存專案初版並繼續</button>
                         }
                       </div>
                     }
@@ -1638,6 +1640,15 @@ export class Home implements OnInit {
                 @if (showAddExternalDepForm) {
                   <div class="schedule-form" style="margin-bottom: 1rem;">
                     <h4>新增跨部門相依事項</h4>
+                    @if (selected.version === 0) {
+                      <div class="schedule-disabled-hint">
+                        <span class="hint-icon">💡</span>
+                        <span class="hint-text">專案尚未完成初次儲存，請先儲存專案以建立正式版本，才能新增外部相依事項。</span>
+                        @if (token) {
+                          <button type="button" class="btn-inline-acquire" (click)="commitAndContinue()">儲存專案初版並繼續</button>
+                        }
+                      </div>
+                    }
                     <label>承諾交付事項描述
                       <input [(ngModel)]="externalDepDraft.description" placeholder="例如：機房伺服器配電施工" required />
                     </label>
@@ -1657,7 +1668,7 @@ export class Home implements OnInit {
                       <input [(ngModel)]="externalDepDraft.reason" placeholder="例如：新系統上線基礎建設依賴" />
                     </label>
                     <div style="margin-top: .6rem;">
-                      <button type="button" (click)="saveExternalDependency()" [disabled]="!token || !externalDepDraft.description.trim() || !externalDepDraft.supplier.trim() || !externalDepDraft.dueDate">儲存外部相依事項</button>
+                      <button type="button" (click)="saveExternalDependency()" [disabled]="!token || selected.version === 0 || !externalDepDraft.description.trim() || !externalDepDraft.supplier.trim() || !externalDepDraft.dueDate">儲存外部相依事項</button>
                       <button type="button" class="schedule-secondary" (click)="toggleAddExternalDepForm()">取消</button>
                     </div>
                   </div>
@@ -2633,9 +2644,21 @@ export class ReportEditor implements OnInit, OnDestroy {
     }
     await this.commit();
   }
+  async commitAndContinue() {
+    if (!this.selected) return;
+    await this.commit();
+    if (this.selected && this.selected.version > 0) {
+      await this.acquire();
+      this.message = "專案初版已提交，編輯租約已就緒，可開始新增交付項目與時程。";
+      this.changes.detectChanges();
+    }
+  }
   scheduleSaveDisabledReason(): string | null {
     if (!this.token) {
       return "尚未取得編輯租約，請點擊上方「開始編輯」鎖定編輯權限。";
+    }
+    if (this.selected?.version === 0) {
+      return "專案尚未完成初次儲存，請先儲存專案以建立正式版本，才能新增交付項目與時程。";
     }
     if (!this.scheduleDraft.name.trim()) {
       return "請填寫交付項目「名稱」。";
@@ -2870,7 +2893,13 @@ export class ReportEditor implements OnInit, OnDestroy {
     return dep.dueDate < today;
   }
   async saveExternalDependency() {
-    if (!this.selected || !this.externalDepDraft.description.trim() || !this.externalDepDraft.supplier.trim() || !this.externalDepDraft.dueDate) return;
+    if (!this.selected || this.selected.version === 0 || !this.externalDepDraft.description.trim() || !this.externalDepDraft.supplier.trim() || !this.externalDepDraft.dueDate) {
+      if (this.selected?.version === 0) {
+        this.message = "專案尚未完成初次儲存，請先儲存專案以建立正式版本。";
+        this.changes.detectChanges();
+      }
+      return;
+    }
     try {
       const result = (await firstValueFrom(
         this.http.post(`/api/items/${this.selected.id}/external-dependencies`, {
@@ -3101,6 +3130,12 @@ export class ReportEditor implements OnInit, OnDestroy {
   }
   async saveSchedule() {
     if (!this.selected) return;
+    const disabledReason = this.scheduleSaveDisabledReason();
+    if (disabledReason) {
+      this.message = disabledReason;
+      this.changes.detectChanges();
+      return;
+    }
     const value = (date: string) => date || null;
     let body: any;
     const isCancel = this.scheduleDraft.action === "cancel";
