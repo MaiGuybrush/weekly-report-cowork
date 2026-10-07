@@ -49,6 +49,10 @@ async function createCommittedItem(reportId, section, title, content) {
     : { title, content })).status, 204);
   assert.equal((await apiCall(`/api/items/${created.body.id}/commit`, 'POST', { token: lease.body.token, baseVersion: lease.body.baseVersion })).status, 200);
 }
+async function eventually(check, message) {
+  for (let i = 0; i < 40; i++) { if (await check()) return; await new Promise(resolve => setTimeout(resolve, 50)); }
+  assert.fail(message);
+}
 let browser;
 let webServer;
 try {
@@ -206,7 +210,7 @@ try {
   assert.ok(await schedulePanel.locator('.gantt-row-task').getByText('外部測試單位').count() > 0, 'task row in gantt must show owner');
   assert.ok(await schedulePanel.locator('.gantt-row-task .baseline-bar').count() > 0, 'task row in gantt must have baseline period bar');
   await schedulePanel.locator('.btn-gantt-toggle-tasks').click();
-  assert.equal(await schedulePanel.locator('.gantt-row.gantt-row-task').count(), 0, 'key tasks must be collapsed when toggled');
+  await eventually(async () => await schedulePanel.locator('.gantt-row.gantt-row-task').count() === 0, 'key tasks must be collapsed when toggled');
 
   await schedulePanel.getByRole('button', { name: '編輯' }).first().click();
   await schedulePanel.getByLabel('狀態').selectOption('completed');
@@ -360,7 +364,7 @@ try {
   await cancelledGanttRow.waitFor({ timeout: 15000 });
   assert.ok(await cancelledGanttRow.getByText('取消').count() > 0, 'cancelled gantt row must display cancelled state pill');
   await schedulePanel.locator('.btn-gantt-toggle-cancelled').click();
-  assert.equal(await schedulePanel.locator('.gantt-row.gantt-row-cancelled').count(), 0, 'cancelled items collapsed in gantt');
+  await eventually(async () => await schedulePanel.locator('.gantt-row.gantt-row-cancelled').count() === 0, 'cancelled items collapsed in gantt');
 
   // 展開已取消項目區塊並檢查
   await schedulePanel.locator('.cancelled-summary').click();
@@ -472,7 +476,7 @@ try {
   // 取消編輯表單，驗證甘特圖與項目清單具備證據徽章
   await schedulePanel.getByRole('button', { name: '取消' }).click();
   await schedulePanel.locator('.btn-gantt-toggle-tasks').click();
-  assert.ok(await schedulePanel.locator('.gantt-evidence-chip').count() > 0, 'gantt evidence chip should be visible on task row');
+  await eventually(async () => await schedulePanel.locator('.gantt-evidence-chip').count() > 0, 'gantt evidence chip should be visible on task row');
   await schedulePanel.locator('.btn-gantt-toggle-tasks').click();
 
   // 再次取消前置測試任務以驗收正式發布頁面之已取消區塊
@@ -509,10 +513,10 @@ try {
   // Issue #10 驗證：正式發布頁甘特圖具備任務展開、取消項目檢視
   assert.equal(await page.locator('.gantt .gantt-row.gantt-row-task').count(), 0, 'publication gantt tasks collapsed by default');
   await page.locator('.gantt .btn-gantt-toggle-tasks').first().click();
-  assert.ok(await page.locator('.gantt .gantt-row-task').count() > 0, 'publication gantt key tasks expanded on demand');
+  await eventually(async () => await page.locator('.gantt .gantt-row-task').count() > 0, 'publication gantt key tasks expanded on demand');
   assert.ok(await page.locator('.gantt .gantt-row-task .gantt-evidence-chip').count() > 0, 'publication gantt should render evidence chip');
   await page.locator('.gantt .btn-gantt-toggle-cancelled').first().click();
-  assert.ok(await page.locator('.gantt .gantt-row-cancelled').count() > 0, 'publication gantt cancelled items visible on demand');
+  await eventually(async () => await page.locator('.gantt .gantt-row-cancelled').count() > 0, 'publication gantt cancelled items visible on demand');
 
   // Issue #11 驗證：正式發布頁包含 eCIM 佐證快照，點擊可開啟佐證詳情快照彈窗
   const pubEvPill = page.locator('.pub-evidence-pill:has-text("ecim-ok-work-1")').first();
