@@ -178,8 +178,6 @@ try {
   await schedulePanel.getByLabel('修改原因').fill('整合測試延長');
   await schedulePanel.getByRole('button', { name: '儲存時程' }).click();
   await schedulePanel.getByText('完成偏差 +3 天').waitFor({ timeout: 15000 });
-  await schedulePanel.getByRole('button', { name: '修訂紀錄' }).click();
-  await schedulePanel.getByText('整合測試延長').waitFor({ timeout: 15000 });
   await schedulePanel.getByLabel('類型').selectOption('task');
   await schedulePanel.getByLabel('名稱').fill('交付檢核');
   await schedulePanel.getByLabel('負責人或單位').fill('外部測試單位');
@@ -301,7 +299,7 @@ try {
   const achievedMarker = schedulePanel.locator('.gantt-row:has-text("上線評估會議") .milestone-marker.achieved-marker');
   assert.ok(await achievedMarker.count() > 0, 'achieved milestone must have diamond marker');
   assert.equal(await schedulePanel.locator('.gantt-row:has-text("上線評估會議") .baseline-bar').count(), 0, 'milestone must never have period bars');
-  // 驗證點擊甘特圖列進入有原因與歷史的修訂表單（不以拖曳直接改動承諾）
+  // 驗證點擊甘特圖列進入編輯表單（不以拖曳直接改動承諾）
   await schedulePanel.locator('.gantt-row:has-text("上線評估會議")').click();
   await schedulePanel.getByRole('heading', { name: '編輯交付項目' }).waitFor({ timeout: 15000 });
   await schedulePanel.getByRole('button', { name: '取消' }).click();
@@ -508,7 +506,7 @@ try {
   assert.ok(await page.locator('.publication-cancelled-section').count() > 0, 'cancelled section should exist in publication');
   assert.ok(await page.locator('.publication-cancelled-list').getByText('前置測試任務').count() > 0, 'cancelled item should appear in publication cancelled list');
 
-  // Issue #10 驗證：正式發布頁甘特圖具備任務展開、取消項目檢視與修訂歷史入口
+  // Issue #10 驗證：正式發布頁甘特圖具備任務展開、取消項目檢視
   assert.equal(await page.locator('.gantt .gantt-row.gantt-row-task').count(), 0, 'publication gantt tasks collapsed by default');
   await page.locator('.gantt .btn-gantt-toggle-tasks').first().click();
   assert.ok(await page.locator('.gantt .gantt-row-task').count() > 0, 'publication gantt key tasks expanded on demand');
@@ -525,20 +523,11 @@ try {
   assert.ok(await page.getByText('ecim-ok-work-1').count() > 0, 'evidence modal should show workId');
   await page.locator('.history-modal-footer .btn-ghost').click();
 
-  // Verify Publication Revision History Inspector (Issue #8)
-  const inspectBtn = page.locator('li.schedule-milestone .btn-history-inspect').first();
-  await inspectBtn.waitFor({ timeout: 15000 });
-  await inspectBtn.click();
-  await page.locator('.history-modal').waitFor({ timeout: 15000 });
-  assert.ok(await page.getByText('時程修訂歷程').count() > 0, 'history modal should open and display title');
-  assert.ok(await page.locator('.history-timeline-entry').count() > 0, 'history timeline should show entries');
-  await page.locator('.history-modal-footer .btn-ghost').click();
   await page.getByRole('link', { name: '來源' }).waitFor({ timeout: 15000 });
   await page.getByText('確認負責人', { exact: false }).waitFor({ timeout: 15000 });
   assert.match(page.url(), new RegExp(`#/publications/`));
   await page.emulateMedia({ media: 'print' });
   assert.equal(await page.locator('header a').evaluate(element => getComputedStyle(element).display), 'none');
-  assert.equal(await page.locator('.btn-history-inspect').first().evaluate(element => getComputedStyle(element).display), 'none');
   assert.equal(await page.locator('nav').count(), 0);
   assert.equal(await page.locator('.publication article').first().evaluate(element => getComputedStyle(element).breakInside), 'avoid');
   const pdf = await page.pdf({ format: 'A4', printBackground: true });
