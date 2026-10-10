@@ -16,13 +16,13 @@ public sealed partial class DataRepo(IConfiguration config)
     string Remote => config["DataRepo:Remote"] ?? "";
     public bool Configured => !string.IsNullOrWhiteSpace(Root);
 
-    [GeneratedRegex(@"^\d{4}-W\d{2}$")]
+    [GeneratedRegex(@"^[0-9]{4}-W[0-9]{2}\z")]
     private static partial Regex WeekPattern();
     public static bool ValidWeek(string week) => WeekPattern().IsMatch(week);
     public static bool ValidFile(string file) => Files.Contains(file);
 
     // Path is built only from a validated week and a whitelisted file name.
-    string PathOf(string week, string file) => Path.Combine(Root, "weeks", week, file + ".json");
+    string PathOf(string week, string file) => !ValidWeek(week) || !ValidFile(file) ? throw new ArgumentException("invalid week or file") : Path.Combine(Root, "weeks", week, file + ".json");
 
     public IEnumerable<string> Weeks()
     {

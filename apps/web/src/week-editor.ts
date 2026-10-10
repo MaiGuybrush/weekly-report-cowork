@@ -3,7 +3,7 @@ import { FormsModule } from "@angular/forms";
 import { HttpClient } from "@angular/common/http";
 import { ActivatedRoute } from "@angular/router";
 import { firstValueFrom } from "rxjs";
-import type { NonProjectSection, SectionFile, SectionItem } from "./report-types";
+import type { CrossFile, NonProjectSection, SectionFile, SectionItem } from "./report-types";
 
 const SECTION_LABELS: Record<NonProjectSection, string> = {
   incidents: "重大系統異常",
@@ -54,6 +54,10 @@ const FILE_LABELS: Record<string, string> = { s1: "第一課", s2: "第二課", 
           @if (canEdit(file)) { <p><button type="button" data-save (click)="save(file)">儲存</button></p> }
         </section>
       }
+      <section class="card" data-file="cross">
+        <h2>跨課 <small>（唯讀）</small></h2>
+        <p>{{ cross.managementSummary }}</p>
+      </section>
     </main>`,
 })
 export class WeekEditor implements OnInit {
@@ -66,13 +70,15 @@ export class WeekEditor implements OnInit {
   readonly files = ["s1", "s2", "s3"];
   week = "";
   me: { name: string; role: string; section: string | null } | null = null;
-  data: Record<string, Partial<SectionFile>> = {};
+  data: Record<string, Partial<SectionFile & CrossFile>> = {};
   message = "";
+  get cross() { return (this.data["cross"] ?? {}) as Partial<CrossFile>; }
 
   async ngOnInit() {
     this.week = this.route.snapshot.paramMap.get("week")!;
     this.me = await firstValueFrom(this.http.get<NonNullable<typeof this.me>>("/api/me"));
     this.data = await firstValueFrom(this.http.get<typeof this.data>(`/api/weeks/${this.week}`));
+    for (const items of Object.values(this.data).map((d) => d.items ?? [])) for (const i of items) i.details ??= {};
     this.changes.detectChanges();
   }
 
@@ -93,8 +99,8 @@ export class WeekEditor implements OnInit {
     try {
       await firstValueFrom(this.http.put(`/api/weeks/${this.week}/${file}`, body));
       this.message = "已儲存。";
-    } catch {
-      this.message = "儲存失敗。";
+    } catch (e: any) {
+      this.message = `儲存失敗：${e?.error?.error ?? ""}`;
     }
     this.changes.detectChanges();
   }
