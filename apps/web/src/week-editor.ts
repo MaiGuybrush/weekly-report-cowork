@@ -62,8 +62,25 @@ const FILE_LABELS: Record<string, string> = { s1: "第一課", s2: "第二課", 
         </section>
       }
       <section class="card" data-file="cross">
-        <h2>跨課 <small>（唯讀）</small></h2>
-        <p>{{ cross.managementSummary }}</p>
+        <h2>跨課@if (!canEditCross()) { <small>（唯讀）</small> }</h2>
+        <label>本週管理摘要
+          <textarea data-field="managementSummary" rows="4" [(ngModel)]="cross.managementSummary" [disabled]="!canEditCross()"></textarea></label>
+        <h3>待決策事項</h3>
+        @for (d of cross.pendingDecisions; track d.id) {
+          <div class="item">
+            <label>說明
+              <input data-field="decision-description" [(ngModel)]="d.description" [disabled]="!canEditCross()" /></label>
+            <label>結果
+              <input [(ngModel)]="d.result" [disabled]="!canEditCross()" /></label>
+            <label>新到期日
+              <input type="date" [(ngModel)]="d.newDueDate" [disabled]="!canEditCross()" /></label>
+            @if (canEditCross()) { <button type="button" (click)="removeDecision(d)">刪除</button> }
+          </div>
+        }
+        @if (canEditCross()) {
+          <button type="button" data-add-decision (click)="addDecision()">新增待決策事項</button>
+          <p><button type="button" data-save (click)="saveCross()">儲存</button></p>
+        }
       </section>
     </main>`,
 })
@@ -79,7 +96,11 @@ export class WeekEditor implements OnInit {
   me: { name: string; role: string; section: string | null } | null = null;
   data: Record<string, Partial<SectionFile & CrossFile>> = {};
   message = "";
-  get cross() { return (this.data["cross"] ?? {}) as Partial<CrossFile>; }
+  get cross(): CrossFile {
+    const c = (this.data["cross"] ??= {}) as Partial<CrossFile>;
+    c.managementSummary ??= "";
+    return (c.pendingDecisions ??= [], c) as CrossFile;
+  }
 
   async ngOnInit() {
     this.week = this.route.snapshot.paramMap.get("week")!;
@@ -90,6 +111,19 @@ export class WeekEditor implements OnInit {
   }
 
   canEdit = (file: string) => this.me?.role === "Head" && this.me.section === file;
+  canEditCross = () => this.me?.role === "Guy";
+  addDecision() {
+    this.cross.pendingDecisions.push({ id: crypto.randomUUID(), description: "" });
+    this.changes.detectChanges();
+  }
+  removeDecision(d: CrossFile["pendingDecisions"][number]) {
+    this.cross.pendingDecisions = this.cross.pendingDecisions.filter((x) => x !== d);
+    this.changes.detectChanges();
+  }
+  async saveCross() {
+    const { managementSummary, pendingDecisions } = this.cross;
+    await this.put("cross", { week: this.week, managementSummary, pendingDecisions });
+  }
   itemsOf = (file: string, section: string): SectionItem[] => (this.data[file]?.items ?? []).filter((i) => i.section === section);
 
   add(file: string, section: NonProjectSection) {
@@ -117,6 +151,10 @@ export class WeekEditor implements OnInit {
       return;
     }
     const body: SectionFile = { week: this.week, section: file, items };
+    await this.put(file, body);
+  }
+
+  private async put(file: string, body: SectionFile | CrossFile) {
     try {
       await firstValueFrom(this.http.put(`/api/weeks/${this.week}/${file}`, body));
       this.message = "已儲存。";

@@ -100,6 +100,29 @@ try {
   const saved = (await (await fetch(base + '/api/weeks/2026-W41', { headers: { Authorization: `Bearer ${jwt}` } })).json()).s1.items.find(i => i.title === '新平台');
   assert.deepEqual(saved.schedule.find(e => e.name === '上線').predecessors, [saved.schedule.find(e => e.name === '撰寫規格').id]);
   for (const k of ['successors', 'warnings', 'externalNotices', 'history', 'version', 'continuityId']) assert.ok(saved.schedule.every(e => !(k in e)), k);
+  // section head sees cross read-only
+  assert.equal(await page.locator('[data-file="cross"] [data-save]').count(), 0);
+  assert.equal(await page.locator('[data-file="cross"] [data-field="managementSummary"]').isDisabled(), true);
+
+  // division head edits cross and it persists
+  const guyJwt = token('G');
+  const guyContext = await browser.newContext();
+  await guyContext.route('**/assets/config.json', r => r.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ apiBaseUrl: '', uacBaseUrl: 'http://mock-uac.test/auth' }) }));
+  await guyContext.route('http://mock-uac.test/auth/**', r => r.fulfill({ status: 200, contentType: 'application/json', headers: { 'access-control-allow-origin': '*', 'access-control-allow-headers': '*' }, body: JSON.stringify({ token: guyJwt, refreshToken: 'r' }) }));
+  const guyPage = await guyContext.newPage();
+  await guyPage.addInitScript(([t]) => { localStorage.setItem('CIM_TK', t); localStorage.setItem('CIM_RTK', 'r'); }, [guyJwt]);
+  await guyPage.goto(url);
+  const cross = guyPage.locator('[data-file="cross"]');
+  await cross.locator('[data-field="managementSummary"]').fill('本週有一項風險。');
+  await cross.locator('[data-add-decision]').click();
+  await cross.locator('[data-field="decision-description"]').last().fill('是否延後上線');
+  await cross.locator('[data-save]').click();
+  await guyPage.getByText('已儲存。').waitFor({ timeout: 15000 });
+  assert.equal(await guyPage.locator('[data-file="s1"] [data-add-project]').count(), 0);
+  await guyPage.reload();
+  await guyPage.locator('[data-file="cross"] [data-field="managementSummary"]').waitFor({ timeout: 15000 });
+  assert.equal(await guyPage.locator('[data-file="cross"] [data-field="managementSummary"]').inputValue(), '本週有一項風險。');
+  assert.equal(await guyPage.locator('[data-file="cross"] [data-field="decision-description"]').last().inputValue(), '是否延後上線');
   console.log('weeks browser smoke passed');
 } catch (error) {
   console.error(logs);
