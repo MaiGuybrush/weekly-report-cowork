@@ -1,0 +1,8 @@
+{
+  "week": "2026-W41",
+  "section": "s3",
+  "items": [
+    { "id": "s3-ops-1", "section": "operations", "title": "s3 系統維護", "content": "本週完成例行備份檢查。", "details": {} },
+    { "id": "s3-hr-1", "section": "personnel", "title": "s3 人力異動", "content": "", "details": { "effectiveDate": "2026-10-05", "handover": "交接給同課同仁", "impact": "無", "nextStep": "補人" } }
+  ]
+}

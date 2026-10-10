@@ -8,6 +8,7 @@ var builder = WebApplication.CreateBuilder(args);
 builder.Logging.ClearProviders();
 builder.Logging.AddConsole();
 builder.Services.AddSingleton<Store>();
+builder.Services.AddSingleton<DataRepo>();
 builder.Services.AddHttpClient();
 builder.Services.AddSingleton<JwtVerifier>();
 builder.Services.AddHttpClient<EcimClient>();
@@ -1653,6 +1654,8 @@ app.MapGet("/api/items/{itemId}/history", (HttpContext ctx, Store store, string 
         while (rows.Read()) history.Add(new { action = "takeover", actor = rows.GetString(0), at = rows.GetString(1), reason = rows.GetString(2) });
     return Results.Ok(history);
 });
+
+app.MapWeekEndpoints();
 
 if (Directory.Exists(webRoot)) app.MapFallback(async context =>
 {

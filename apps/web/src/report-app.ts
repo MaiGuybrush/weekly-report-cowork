@@ -12,6 +12,7 @@ import { HttpClient } from "@angular/common/http";
 import { ActivatedRoute, Router, RouterOutlet, Routes } from "@angular/router";
 import { firstValueFrom } from "rxjs";
 import { Gantt } from "./gantt";
+import { WeekEditor } from "./week-editor";
 import { API_BASE_URL, apiUrl, Auth, editorGuard, entryGuard, readerGuard } from "./auth";
 
 type User = {
@@ -263,6 +264,12 @@ export class App {}
             </li>
           }
         </ul>
+        <h2>週次</h2>
+        <ul>
+          @for (week of weeks; track week) {
+            <li><a href="#/weeks/{{ week }}">{{ week }}</a></li>
+          }
+        </ul>
       </section>
     </main>`,
 })
@@ -272,6 +279,7 @@ export class Home implements OnInit {
   private changes = inject(ChangeDetectorRef);
   me: User | null = null;
   reports: { id: string; meetingDate: string }[] = [];
+  weeks: string[] = [];
   meetingDate = new Date().toISOString().slice(0, 10);
   message = "";
   async ngOnInit() {
@@ -279,6 +287,7 @@ export class Home implements OnInit {
     this.reports = await firstValueFrom(
       this.http.get<typeof this.reports>("/api/reports"),
     );
+    this.weeks = await firstValueFrom(this.http.get<string[]>("/api/weeks"));
     this.changes.detectChanges();
   }
   async create() {
@@ -3459,6 +3468,7 @@ export class Forbidden {}
 
 export const routes: Routes = [
   { path: "", component: Home, canActivate: [entryGuard] },
+  { path: "weeks/:week", component: WeekEditor, canActivate: [editorGuard] },
   { path: "reports/:id", component: ReportEditor, canActivate: [editorGuard] },
   {
     path: "publications/:id",
