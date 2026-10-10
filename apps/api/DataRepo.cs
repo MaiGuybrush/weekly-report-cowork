@@ -43,7 +43,7 @@ public sealed partial class DataRepo(IConfiguration config)
         try
         {
             EnsureReady();
-            if (HasRemoteHeads()) Git("pull", "--ff-only", "origin", Branch());
+            if (HasRemoteHeads()) Sync();
             var path = PathOf(week, file);
             Directory.CreateDirectory(Path.GetDirectoryName(path)!);
             var temp = path + ".tmp";
@@ -68,6 +68,17 @@ public sealed partial class DataRepo(IConfiguration config)
             else Git("init");
         }
         ready = true;
+    }
+
+    // Rebase so unpushed local commits (after a failed push) replay on top of remote; abort and ask for a human on conflict.
+    void Sync()
+    {
+        try { Git("pull", "--rebase", "--autostash", "origin", Branch()); }
+        catch (GitException e)
+        {
+            try { Git("rebase", "--abort"); } catch (GitException) { }
+            throw new GitException($"data repo needs manual intervention (pull --rebase failed): {e.Message}");
+        }
     }
 
     string Branch() => Git("rev-parse", "--abbrev-ref", "HEAD").Trim();

@@ -3,7 +3,7 @@ import { createServer } from 'node:http';
 import { createServer as createTcpServer } from 'node:net';
 import { generateKeyPairSync, sign } from 'node:crypto';
 import { spawn, execFileSync } from 'node:child_process';
-import { cpSync, mkdtempSync, rmSync } from 'node:fs';
+import { cpSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { once } from 'node:events';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
@@ -70,6 +70,14 @@ try {
   assert.equal((await call('/api/weeks/2026-W41/s1', 'H1', 'PUT', { ...edited, week: '2026-W40' })).status, 400);
   assert.equal((await call('/api/weeks/2026-W41/s1', 'H1', 'PUT', { ...edited, section: 's2' })).status, 400);
   assert.equal((await call('/api/weeks/2026-W41/s1', 'H1', 'PUT', [1])).status, 400);
+  // remote advanced by someone else: next write rebases and still pushes
+  git(seed, 'pull', remote, 'master');
+  writeFileSync(join(seed, 'weeks/2026-W41/s3.json'), JSON.stringify({ week: '2026-W41', section: 's3', items: [] }));
+  git(seed, 'add', '.');
+  git(seed, '-c', 'user.name=t', '-c', 'user.email=t@t', 'commit', '-m', 'external');
+  git(seed, 'push', remote, 'HEAD:refs/heads/master');
+  assert.equal((await call('/api/weeks/2026-W41/s1', 'H1', 'PUT', edited)).status, 204);
+  assert.equal((await call('/api/weeks/2026-W41', 'H1')).body.s3.items.length, 0);
   console.log('weeks API smoke passed');
 } catch (error) {
   console.error(logs);
