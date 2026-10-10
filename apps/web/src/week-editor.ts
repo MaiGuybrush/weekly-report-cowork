@@ -3,6 +3,7 @@ import { FormsModule } from "@angular/forms";
 import { HttpClient } from "@angular/common/http";
 import { ActivatedRoute } from "@angular/router";
 import { firstValueFrom } from "rxjs";
+import { cleanSchedule, ProjectSchedule, scheduleErrors } from "./project-schedule";
 import type { CrossFile, NonProjectSection, SectionFile, SectionItem } from "./report-types";
 
 const SECTION_LABELS: Record<NonProjectSection, string> = {
@@ -16,7 +17,7 @@ const FILE_LABELS: Record<string, string> = { s1: "第一課", s2: "第二課", 
 
 @Component({
   standalone: true,
-  imports: [FormsModule],
+  imports: [FormsModule, ProjectSchedule],
   template: `<header>
       <h1>處會週報 {{ week }}</h1>
       <span>{{ me?.name }} · {{ me?.role }}</span>
@@ -27,6 +28,12 @@ const FILE_LABELS: Record<string, string> = { s1: "第一課", s2: "第二課", 
       @for (file of files; track file) {
         <section class="card" [attr.data-file]="file">
           <h2>{{ FILE_LABELS[file] }}@if (!canEdit(file)) { <small>（唯讀）</small> }</h2>
+          <h3>專案</h3>
+          @for (p of itemsOf(file, "projects"); track p.id) {
+            <app-project-schedule [project]="p" [editable]="canEdit(file)" />
+            @if (canEdit(file)) { <button type="button" (click)="remove(file, p)">刪除專案</button> }
+          }
+          @if (canEdit(file)) { <button type="button" data-add-project (click)="addProject(file)">新增專案</button> }
           @for (key of sectionKeys; track key) {
             <h3>{{ SECTION_LABELS[key] }}</h3>
             @for (item of itemsOf(file, key); track item.id) {
@@ -88,14 +95,28 @@ export class WeekEditor implements OnInit {
   add(file: string, section: NonProjectSection) {
     const data = (this.data[file] ??= {});
     (data.items ??= []).push({ id: crypto.randomUUID(), section, title: "", content: "", details: {} });
+    this.changes.detectChanges();
+  }
+  addProject(file: string) {
+    const data = (this.data[file] ??= {});
+    (data.items ??= []).push({ id: crypto.randomUUID(), section: "projects", title: "", content: "", details: {}, owner: "", participants: [file], schedule: [], externalDependencies: [] });
+    this.changes.detectChanges();
   }
   remove(file: string, item: SectionItem) {
     const data = this.data[file];
     if (data?.items) data.items = data.items.filter((i) => i !== item);
+    this.changes.detectChanges();
   }
 
   async save(file: string) {
-    const body: SectionFile = { week: this.week, section: file, items: this.data[file]?.items ?? [] };
+    const items = (this.data[file]?.items ?? []).map((i) => (i.schedule ? { ...i, schedule: cleanSchedule(i.schedule) } : i));
+    const errors = items.flatMap(scheduleErrors);
+    if (errors.length) {
+      this.message = `時程有誤，未儲存：${errors.join("；")}`;
+      this.changes.detectChanges();
+      return;
+    }
+    const body: SectionFile = { week: this.week, section: file, items };
     try {
       await firstValueFrom(this.http.put(`/api/weeks/${this.week}/${file}`, body));
       this.message = "已儲存。";
