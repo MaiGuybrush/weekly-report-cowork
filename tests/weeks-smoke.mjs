@@ -23,7 +23,7 @@ git(seed, 'push', remote, 'HEAD:refs/heads/master');
 git(temporary, 'clone', remote, work);
 
 const { privateKey, publicKey } = generateKeyPairSync('rsa', { modulusLength: 2048 });
-const jwks = createServer((_req, res) => { res.setHeader('content-type', 'application/json'); res.end(JSON.stringify({ keys: [publicKey.export({ format: 'jwk' })] })); });
+const jwks = createServer((_req, res) => { res.setHeader('content-type', 'application/json'); res.end(JSON.stringify({ keys: [{ ...publicKey.export({ format: 'jwk' }), alg: 'RS256' }] })); });
 await new Promise(r => jwks.listen(0, '127.0.0.1', r));
 const port = await new Promise(r => { const s = createTcpServer(); s.listen(0, '127.0.0.1', () => { const p = s.address().port; s.close(() => r(p)); }); });
 const api = spawn('dotnet', [process.env.WEEKLY_REPORT_API_DLL ?? join(root, 'apps/api/bin/Debug/net9.0/WeeklyReport.Api.dll'), '--urls', `http://127.0.0.1:${port}`], {
@@ -48,7 +48,7 @@ async function call(path, user, method = 'GET', body) {
 try {
   for (let i = 0; i < 100; i++) { try { await fetch(base); break; } catch { await new Promise(r => setTimeout(r, 100)); } }
 
-  assert.deepEqual((await call('/api/weeks', 'H1')).body, ['2026-W41']);
+  const first = await call('/api/weeks', 'H1'); assert.deepEqual(first.body, ['2026-W41'], 'status ' + first.status);
   const week = (await call('/api/weeks/2026-W41', 'H1')).body;
   assert.equal(week.s1.items.length, 2);
   assert.equal(week.cross.managementSummary, '本週無重大風險。');
