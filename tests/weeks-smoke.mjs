@@ -99,6 +99,16 @@ try {
   assert.equal((await call('/api/publications/2026-41/1', 'H1')).status, 400);
   assert.deepEqual(git(remote, 'tag', '--list', 'pub/*').trim().split(/[^A-Za-z0-9/.-]+/), ['pub/2026-W41-v1', 'pub/2026-W41-v2']);
   assert.match(git(remote, 'log', '--format=%s', 'master'), /2026-W41: publish v2 by G/);
+  const snap2 = (await call('/api/publications/2026-W41/2', 'H1')).body;
+  // create next week: division only, copies latest snapshot (week rewritten), 409 when it exists
+  assert.equal((await call('/api/weeks', 'H1', 'POST')).status, 403);
+  const created = await call('/api/weeks', 'G', 'POST');
+  assert.equal(created.status, 201); assert.equal(created.body.week, '2026-W42');
+  const w42 = (await call('/api/weeks/2026-W42', 'H1')).body;
+  assert.equal(w42.s1.week, '2026-W42'); assert.equal(w42.s1.section, 's1');
+  assert.deepEqual(w42.s1.items, snap2.s1.items); assert.equal(w42.cross.managementSummary, snap2.cross.managementSummary);
+  assert.equal((await call('/api/weeks', 'G', 'POST')).status, 409);
+  assert.match(git(remote, 'log', '--format=%s', 'master'), /2026-W42: create by G/);
   console.log('weeks API smoke passed');
 } catch (error) {
   console.error(logs);

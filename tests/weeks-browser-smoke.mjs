@@ -124,6 +124,15 @@ try {
   assert.equal(await guyPage.locator('[data-file="cross"] [data-field="managementSummary"]').inputValue(), '本週有一項風險。');
   assert.equal(await guyPage.locator('[data-file="cross"] [data-field="decision-description"]').last().inputValue(), '是否延後上線');
 
+  // create next week with no publication yet: empty files; only division head sees the button
+  assert.equal(await page.locator('[data-create-week]').count(), 0);
+  await guyPage.goto(base + '/#/');
+  await guyPage.locator('[data-create-week]').click();
+  await guyPage.locator('a[href="#/weeks/2026-W42"]').waitFor({ timeout: 15000 });
+  const w42 = await (await fetch(base + '/api/weeks/2026-W42', { headers: { Authorization: `Bearer ${jwt}` } })).json();
+  assert.deepEqual(w42.s1, { section: 's1', week: '2026-W42' });
+  await guyPage.goto(url);
+
   // division head publishes and lands on the publication page; section head cannot publish
   assert.equal(await page.locator('[data-publish]').count(), 0);
   await guyPage.locator('[data-publish]').click();

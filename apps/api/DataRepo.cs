@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.Globalization;
 using System.Text.Encodings.Web;
 using System.Text.Json;
 using System.Text.Json.Nodes;
@@ -103,6 +104,43 @@ public sealed partial class DataRepo(IConfiguration config)
             return entry;
         }
         finally { writeLock.Release(); }
+    }
+
+    /// <summary>Creates the week after the latest published one (or after the newest draft week, or this week) from the latest snapshot, else empty files. Null when that week already exists.</summary>
+    public async Task<string?> CreateNextWeek(string empNo)
+    {
+        await writeLock.WaitAsync();
+        try
+        {
+            EnsureReady();
+            if (HasRemoteHeads()) Sync();
+            var latest = (Publications()["publications"] as JsonArray)?.LastOrDefault() as JsonObject;
+            var baseWeek = latest?["week"]?.GetValue<string>() ?? Weeks().FirstOrDefault();
+            var next = NextWeek(baseWeek);
+            if (Directory.Exists(Path.Combine(Root, "weeks", next))) return null;
+            Directory.CreateDirectory(Path.Combine(Root, "weeks", next));
+            foreach (var f in Files)
+            {
+                JsonObject content = new();
+                if (latest is not null && ReadPublication(baseWeek!, latest["version"]!.GetValue<int>(), f) is { } text && JsonNode.Parse(text) is JsonObject copy) content = copy;
+                else if (f != "cross") content["section"] = f;
+                content["week"] = next;
+                File.WriteAllText(PathOf(next, f), content.ToJsonString(new JsonSerializerOptions { WriteIndented = true, Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping }));
+            }
+            Git("add", "--", $"weeks/{next}");
+            Git("commit", "-m", $"{next}: create by {empNo}", "--", $"weeks/{next}");
+            if (Remote.Length > 0) Git("push", "-u", "origin", "HEAD");
+            return next;
+        }
+        finally { writeLock.Release(); }
+    }
+
+    static string NextWeek(string? week)
+    {
+        var monday = week is null ? ISOWeek.ToDateTime(ISOWeek.GetYear(DateTime.Today), ISOWeek.GetWeekOfYear(DateTime.Today), DayOfWeek.Monday) - TimeSpan.FromDays(7)
+            : ISOWeek.ToDateTime(int.Parse(week[..4]), int.Parse(week[6..]), DayOfWeek.Monday);
+        var next = monday.AddDays(7);
+        return $"{ISOWeek.GetYear(next)}-W{ISOWeek.GetWeekOfYear(next):00}";
     }
 
     void EnsureReady()

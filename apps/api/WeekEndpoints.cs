@@ -13,6 +13,15 @@ public static class WeekEndpoints
     {
         app.MapGet("/api/weeks", (DataRepo repo) => repo.Configured ? Results.Ok(repo.Weeks()) : Results.Ok(Array.Empty<string>()));
 
+        app.MapPost("/api/weeks", async (HttpContext ctx, DataRepo repo) =>
+        {
+            var user = (User)ctx.Items["user"]!;
+            if (user.Role != "Guy") return Results.StatusCode(403);
+            if (!repo.Configured) return Results.StatusCode(503);
+            try { return await repo.CreateNextWeek(user.EmpNo) is { } week ? Results.Json(new { week }, statusCode: 201) : Results.Conflict(new { error = "week already exists" }); }
+            catch (GitException e) { return Results.Json(new { error = e.Message }, statusCode: 500); }
+        });
+
         app.MapGet("/api/weeks/{week}", (DataRepo repo, string week) =>
         {
             if (!DataRepo.ValidWeek(week)) return Results.BadRequest(new { error = "invalid week" });

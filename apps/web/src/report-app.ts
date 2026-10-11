@@ -267,6 +267,7 @@ export class App {}
         </ul>
         @if (latest) { <p><a data-latest-publication href="#/publications/{{ latest.week }}/{{ latest.version }}">最新正式版 {{ latest.week }} v{{ latest.version }}</a></p> }
         <h2>週次</h2>
+        @if (me?.role === "Guy") { <button data-create-week (click)="createWeek()">建立下週</button> }
         <ul>
           @for (week of weeks; track week) {
             <li><a href="#/weeks/{{ week }}">{{ week }}</a></li>
@@ -292,6 +293,15 @@ export class Home implements OnInit {
     );
     this.weeks = await firstValueFrom(this.http.get<string[]>("/api/weeks"));
     this.latest = latestPublication(await firstValueFrom(this.http.get<{ publications: any[] }>("/api/publications")));
+    this.changes.detectChanges();
+  }
+  async createWeek() {
+    try {
+      await firstValueFrom(this.http.post("/api/weeks", {}));
+      this.weeks = await firstValueFrom(this.http.get<string[]>("/api/weeks"));
+    } catch {
+      this.message = "無法建立下週（可能已存在）。";
+    }
     this.changes.detectChanges();
   }
   async create() {
