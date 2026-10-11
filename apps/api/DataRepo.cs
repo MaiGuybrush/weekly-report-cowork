@@ -1,4 +1,7 @@
 using System.Diagnostics;
+using System.Text.Encodings.Web;
+using System.Text.Json;
+using System.Text.Json.Nodes;
 using System.Text.RegularExpressions;
 
 public sealed class GitException(string message) : Exception(message);
@@ -54,6 +57,50 @@ public sealed partial class DataRepo(IConfiguration config)
             if (Git("status", "--porcelain", "--", relative).Length > 0)
                 Git("commit", "-m", $"{week}/{file}: update by {empNo}", "--", relative);
             if (Remote.Length > 0) Git("push", "-u", "origin", "HEAD");
+        }
+        finally { writeLock.Release(); }
+    }
+
+    string IndexPath => Path.Combine(Root, "publications", "index.json");
+
+    public JsonObject Publications() =>
+        File.Exists(IndexPath) && JsonNode.Parse(File.ReadAllText(IndexPath)) is JsonObject index ? index : new JsonObject { ["publications"] = new JsonArray() };
+
+    public string? ReadPublication(string week, int version, string file)
+    {
+        if (!ValidWeek(week) || !ValidFile(file)) throw new ArgumentException("invalid week or file");
+        var path = Path.Combine(Root, "publications", week, $"v{version}", file + ".json");
+        return File.Exists(path) ? File.ReadAllText(path) : null;
+    }
+
+    /// <summary>Copies the draft into an immutable snapshot, appends to the index, commits, tags and pushes. Null when the week has no draft.</summary>
+    public async Task<JsonObject?> Publish(string week, string empNo)
+    {
+        if (!ValidWeek(week)) throw new ArgumentException("invalid week");
+        await writeLock.WaitAsync();
+        try
+        {
+            EnsureReady();
+            if (HasRemoteHeads()) Sync();
+            var drafts = Files.Where(f => File.Exists(PathOf(week, f))).ToList();
+            if (drafts.Count == 0) return null;
+            var index = Publications();
+            var list = index["publications"] as JsonArray ?? new JsonArray();
+            index["publications"] = list;
+            var version = list.Select(p => (p?["week"]?.GetValue<string>() == week ? p["version"]?.GetValue<int>() : null) ?? 0).DefaultIfEmpty(0).Max() + 1;
+            var relative = $"publications/{week}/v{version}";
+            var directory = Path.Combine(Root, "publications", week, $"v{version}");
+            Directory.CreateDirectory(directory);
+            foreach (var f in drafts) File.Copy(PathOf(week, f), Path.Combine(directory, f + ".json"), overwrite: false);
+            var entry = new JsonObject { ["week"] = week, ["version"] = version, ["publishedAt"] = DateTime.UtcNow.ToString("o"), ["publishedBy"] = empNo, ["path"] = relative };
+            list.Add(entry);
+            File.WriteAllText(IndexPath, index.ToJsonString(new JsonSerializerOptions { WriteIndented = true, Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping }));
+            Git("add", "--", relative, "publications/index.json");
+            Git("commit", "-m", $"{week}: publish v{version} by {empNo}");
+            var tag = $"pub/{week}-v{version}";
+            Git("tag", tag);
+            if (Remote.Length > 0) Git("push", "-u", "origin", "HEAD", $"refs/tags/{tag}");
+            return entry;
         }
         finally { writeLock.Release(); }
     }

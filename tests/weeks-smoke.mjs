@@ -78,6 +78,27 @@ try {
   git(seed, 'push', remote, 'HEAD:refs/heads/master');
   assert.equal((await call('/api/weeks/2026-W41/s1', 'H1', 'PUT', edited)).status, 204);
   assert.equal((await call('/api/weeks/2026-W41', 'H1')).body.s3.items.length, 0);
+
+  // publish: division only, versions increment, snapshots immutable
+  assert.equal((await call('/api/weeks/2026-W41/publications', 'H1', 'POST')).status, 403);
+  assert.deepEqual((await call('/api/publications', 'H1')).body, { publications: [] });
+  const v1 = await call('/api/weeks/2026-W41/publications', 'G', 'POST');
+  assert.equal(v1.status, 201); assert.equal(v1.body.version, 1);
+  const before = (await call('/api/weeks/2026-W41', 'H1')).body;
+  const changed = { ...before.s1, items: before.s1.items.slice(0, 1) };
+  assert.equal((await call('/api/weeks/2026-W41/s1', 'H1', 'PUT', changed)).status, 204);
+  assert.equal((await call('/api/weeks/2026-W41/publications', 'G', 'POST')).body.version, 2);
+  assert.equal((await call('/api/weeks/2026-W42/publications', 'G', 'POST')).status, 404);
+  const index = (await call('/api/publications', 'H1')).body.publications;
+  assert.deepEqual(index.map(p => [p.week, p.version, p.publishedBy, p.path]), [['2026-W41', 1, 'G', 'publications/2026-W41/v1'], ['2026-W41', 2, 'G', 'publications/2026-W41/v2']]);
+  assert.ok(index[0].publishedAt);
+  const snap1 = (await call('/api/publications/2026-W41/1', 'H1')).body;
+  assert.deepEqual(snap1.s1.items, before.s1.items);
+  assert.equal((await call('/api/publications/2026-W41/2', 'H1')).body.s1.items.length, 1);
+  assert.equal((await call('/api/publications/2026-W41/3', 'H1')).status, 404);
+  assert.equal((await call('/api/publications/2026-41/1', 'H1')).status, 400);
+  assert.deepEqual(git(remote, 'tag', '--list', 'pub/*').trim().split(/[^A-Za-z0-9/.-]+/), ['pub/2026-W41-v1', 'pub/2026-W41-v2']);
+  assert.match(git(remote, 'log', '--format=%s', 'master'), /2026-W41: publish v2 by G/);
   console.log('weeks API smoke passed');
 } catch (error) {
   console.error(logs);

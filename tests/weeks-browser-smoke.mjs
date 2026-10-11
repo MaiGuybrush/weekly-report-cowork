@@ -123,6 +123,21 @@ try {
   await guyPage.locator('[data-file="cross"] [data-field="managementSummary"]').waitFor({ timeout: 15000 });
   assert.equal(await guyPage.locator('[data-file="cross"] [data-field="managementSummary"]').inputValue(), '本週有一項風險。');
   assert.equal(await guyPage.locator('[data-file="cross"] [data-field="decision-description"]').last().inputValue(), '是否延後上線');
+
+  // division head publishes and lands on the publication page; section head cannot publish
+  assert.equal(await page.locator('[data-publish]').count(), 0);
+  await guyPage.locator('[data-publish]').click();
+  await guyPage.waitForURL(/#\/publications\/2026-W41\/1$/, { timeout: 15000 });
+  await guyPage.locator('[data-file="s1"] app-project-schedule .gantt-row').first().waitFor({ timeout: 15000 });
+  assert.equal(await guyPage.locator('[data-file="s1"] [data-field="project-title"]').last().isDisabled(), true);
+  assert.equal(await guyPage.locator('[data-file="cross"] p').first().innerText(), '本週有一項風險。');
+  // publish a second version from the draft, then switch back to v1
+  await guyPage.goto(url);
+  await guyPage.locator('[data-publish]').click();
+  await guyPage.waitForURL(/#\/publications\/2026-W41\/2$/, { timeout: 15000 });
+  await guyPage.locator('[data-version-select]').selectOption('2026-W41/1');
+  await guyPage.waitForURL(/#\/publications\/2026-W41\/1$/, { timeout: 15000 });
+  await guyPage.getByRole('heading', { name: /v1$/ }).waitFor({ timeout: 15000 });
   console.log('weeks browser smoke passed');
 } catch (error) {
   console.error(logs);

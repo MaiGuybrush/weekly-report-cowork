@@ -13,6 +13,7 @@ import { ActivatedRoute, Router, RouterOutlet, Routes } from "@angular/router";
 import { firstValueFrom } from "rxjs";
 import { Gantt } from "./gantt";
 import { WeekEditor } from "./week-editor";
+import { latestPublication, PublicationPage as WeekPublication } from "./publication-page";
 import { API_BASE_URL, apiUrl, Auth, editorGuard, entryGuard, readerGuard } from "./auth";
 
 type User = {
@@ -264,6 +265,7 @@ export class App {}
             </li>
           }
         </ul>
+        @if (latest) { <p><a data-latest-publication href="#/publications/{{ latest.week }}/{{ latest.version }}">最新正式版 {{ latest.week }} v{{ latest.version }}</a></p> }
         <h2>週次</h2>
         <ul>
           @for (week of weeks; track week) {
@@ -280,6 +282,7 @@ export class Home implements OnInit {
   me: User | null = null;
   reports: { id: string; meetingDate: string }[] = [];
   weeks: string[] = [];
+  latest?: { week: string; version: number };
   meetingDate = new Date().toISOString().slice(0, 10);
   message = "";
   async ngOnInit() {
@@ -288,6 +291,7 @@ export class Home implements OnInit {
       this.http.get<typeof this.reports>("/api/reports"),
     );
     this.weeks = await firstValueFrom(this.http.get<string[]>("/api/weeks"));
+    this.latest = latestPublication(await firstValueFrom(this.http.get<{ publications: any[] }>("/api/publications")));
     this.changes.detectChanges();
   }
   async create() {
@@ -3469,6 +3473,7 @@ export class Forbidden {}
 export const routes: Routes = [
   { path: "", component: Home, canActivate: [entryGuard] },
   { path: "weeks/:week", component: WeekEditor, canActivate: [editorGuard] },
+  { path: "publications/:week/:version", component: WeekPublication, canActivate: [editorGuard] },
   { path: "reports/:id", component: ReportEditor, canActivate: [editorGuard] },
   {
     path: "publications/:id",

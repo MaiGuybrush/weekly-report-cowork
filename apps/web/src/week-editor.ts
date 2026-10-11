@@ -1,19 +1,19 @@
 import { ChangeDetectorRef, Component, inject, OnInit } from "@angular/core";
 import { FormsModule } from "@angular/forms";
 import { HttpClient } from "@angular/common/http";
-import { ActivatedRoute } from "@angular/router";
+import { ActivatedRoute, Router } from "@angular/router";
 import { firstValueFrom } from "rxjs";
 import { cleanSchedule, ProjectSchedule, scheduleErrors } from "./project-schedule";
 import type { CrossFile, NonProjectSection, SectionFile, SectionItem } from "./report-types";
 
-const SECTION_LABELS: Record<NonProjectSection, string> = {
+export const SECTION_LABELS: Record<NonProjectSection, string> = {
   incidents: "重大系統異常",
   operations: "系統維護與營運",
   personnel: "人力與組織異動",
   technology: "新技術評估",
   appendix: "工程師工作明細與來源連結",
 };
-const FILE_LABELS: Record<string, string> = { s1: "第一課", s2: "第二課", s3: "第三課" };
+export const FILE_LABELS: Record<string, string> = { s1: "第一課", s2: "第二課", s3: "第三課" };
 
 @Component({
   standalone: true,
@@ -22,6 +22,7 @@ const FILE_LABELS: Record<string, string> = { s1: "第一課", s2: "第二課", 
       <h1>處會週報 {{ week }}</h1>
       <span>{{ me?.name }} · {{ me?.role }}</span>
       <a href="#/">返回</a>
+      @if (canEditCross()) { <button type="button" data-publish (click)="publish()">發布</button> }
     </header>
     <main>
       @if (message) { <p class="message" role="status">{{ message }}</p> }
@@ -87,6 +88,7 @@ const FILE_LABELS: Record<string, string> = { s1: "第一課", s2: "第二課", 
 export class WeekEditor implements OnInit {
   private http = inject(HttpClient);
   private route = inject(ActivatedRoute);
+  private router = inject(Router);
   private changes = inject(ChangeDetectorRef);
   readonly SECTION_LABELS = SECTION_LABELS;
   readonly FILE_LABELS = FILE_LABELS;
@@ -123,6 +125,15 @@ export class WeekEditor implements OnInit {
   async saveCross() {
     const { managementSummary, pendingDecisions } = this.cross;
     await this.put("cross", { week: this.week, managementSummary, pendingDecisions });
+  }
+  async publish() {
+    try {
+      const entry = await firstValueFrom(this.http.post<{ week: string; version: number }>(`/api/weeks/${this.week}/publications`, {}));
+      await this.router.navigate(["/publications", entry.week, entry.version]);
+    } catch (e: any) {
+      this.message = `發布失敗：${e?.error?.error ?? ""}`;
+      this.changes.detectChanges();
+    }
   }
   itemsOf = (file: string, section: string): SectionItem[] => (this.data[file]?.items ?? []).filter((i) => i.section === section);
 

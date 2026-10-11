@@ -23,6 +23,28 @@ public static class WeekEndpoints
             return Results.Json(result);
         });
 
+        app.MapPost("/api/weeks/{week}/publications", async (HttpContext ctx, DataRepo repo, string week) =>
+        {
+            if (!DataRepo.ValidWeek(week)) return Results.BadRequest(new { error = "invalid week" });
+            var user = (User)ctx.Items["user"]!;
+            if (user.Role != "Guy") return Results.StatusCode(403);
+            if (!repo.Configured) return Results.StatusCode(503);
+            try { return await repo.Publish(week, user.EmpNo) is { } entry ? Results.Json(entry, statusCode: 201) : Results.NotFound(new { error = "week has no draft" }); }
+            catch (GitException e) { return Results.Json(new { error = e.Message }, statusCode: 500); }
+        });
+
+        app.MapGet("/api/publications", (DataRepo repo) => Results.Json(repo.Configured ? repo.Publications() : new JsonObject { ["publications"] = new JsonArray() }));
+
+        app.MapGet("/api/publications/{week}/{version:int}", (DataRepo repo, string week, int version) =>
+        {
+            if (!DataRepo.ValidWeek(week)) return Results.BadRequest(new { error = "invalid week" });
+            if (!repo.Configured) return Results.StatusCode(503);
+            var result = new Dictionary<string, JsonNode?>();
+            foreach (var file in DataRepo.Files)
+                result[file] = repo.ReadPublication(week, version, file) is { } text ? JsonNode.Parse(text) : new JsonObject();
+            return result.Values.All(v => v is JsonObject o && o.Count == 0) ? Results.NotFound() : Results.Json(result);
+        });
+
         app.MapPut("/api/weeks/{week}/{file}", async (HttpContext ctx, DataRepo repo, string week, string file) =>
         {
             if (!DataRepo.ValidWeek(week) || !DataRepo.ValidFile(file)) return Results.BadRequest(new { error = "invalid week or file" });
