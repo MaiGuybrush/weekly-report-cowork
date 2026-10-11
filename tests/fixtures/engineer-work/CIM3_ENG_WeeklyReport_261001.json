@@ -1,0 +1,17 @@
+{
+ "today_str": "2026-10-09",
+ "results": {
+  "alice": {
+   "items": [
+    {
+     "workId": 1,
+     "workContent": "舊週工作",
+     "status": "處理中",
+     "ownerName": "Alice",
+     "ownerId": "alice",
+     "subItems": []
+    }
+   ]
+  }
+ }
+}

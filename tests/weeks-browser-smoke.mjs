@@ -31,7 +31,7 @@ const port = await new Promise(r => { const s = createTcpServer(); s.listen(0, '
 const api = spawn('dotnet', [process.env.WEEKLY_REPORT_API_DLL ?? join(root, 'apps/api/bin/Debug/net9.0/WeeklyReport.Api.dll'), '--urls', `http://127.0.0.1:${port}`], {
   cwd: join(root, 'apps/api'),
   env: { ...process.env, DatabasePath: join(temporary, 'report.db'), JwksUrl: `http://127.0.0.1:${jwks.address().port}/jwks`,
-    DataRepo__Path: work, DataRepo__Remote: remote,
+    DataRepo__Path: work, DataRepo__Remote: remote, EngineerWork__Path: join(root, 'tests/fixtures/engineer-work'),
     Access__Users__0__EmpNo: 'G', Access__Users__0__Name: 'Guy', Access__Users__0__Role: 'Guy',
     Access__Users__1__EmpNo: 'H1', Access__Users__1__Name: 'Head One', Access__Users__1__Role: 'Head', Access__Users__1__Section: 's1',
     Access__Users__2__EmpNo: 'H2', Access__Users__2__Name: 'Head Two', Access__Users__2__Role: 'Head', Access__Users__2__Section: 's2' }
@@ -88,6 +88,13 @@ try {
   // valid link: milestone after task
   await project.locator('[data-entry="撰寫規格"] [data-field="predecessors"]').selectOption([]);
   await project.locator('[data-entry="上線"] [data-field="predecessors"]').selectOption({ label: '撰寫規格' });
+  // pick an engineer work item with a summary, plus a manual one
+  await project.locator('[data-entry="撰寫規格"] [data-evidence-toggle]').click();
+  await project.locator('[data-work="101"] [data-pick]').click();
+  await project.locator('[data-field="evidence-summary"]').last().fill('管線已上線');
+  await project.locator('[data-field="manual-work-id"]').fill('555');
+  await project.locator('[data-manual-add]').click();
+  await project.locator('[data-field="evidence-summary"]').last().fill('手動補充');
   await s1.locator('[data-save]').click();
   await page.getByText('已儲存。').waitFor({ timeout: 15000 });
 
@@ -100,6 +107,9 @@ try {
   const saved = (await (await fetch(base + '/api/weeks/2026-W41', { headers: { Authorization: `Bearer ${jwt}` } })).json()).s1.items.find(i => i.title === '新平台');
   assert.deepEqual(saved.schedule.find(e => e.name === '上線').predecessors, [saved.schedule.find(e => e.name === '撰寫規格').id]);
   for (const k of ['successors', 'warnings', 'externalNotices', 'history', 'version', 'continuityId']) assert.ok(saved.schedule.every(e => !(k in e)), k);
+  assert.deepEqual(saved.schedule.find(e => e.name === '撰寫規格').evidenceLinks, [{ workId: 101, summary: '管線已上線' }, { workId: 555, summary: '手動補充' }]);
+  await again.locator('.btn-phase-expand').click();
+  assert.match(await again.locator('.gantt-evidence-chip').innerText(), /2/);
   // section head sees cross read-only
   assert.equal(await page.locator('[data-file="cross"] [data-save]').count(), 0);
   assert.equal(await page.locator('[data-file="cross"] [data-field="managementSummary"]').isDisabled(), true);
@@ -121,7 +131,7 @@ try {
   assert.equal(await guyPage.locator('[data-file="s1"] [data-add-project]').count(), 0);
   await guyPage.reload();
   await guyPage.locator('[data-file="cross"] [data-field="managementSummary"]').waitFor({ timeout: 15000 });
-  assert.equal(await guyPage.locator('[data-file="cross"] [data-field="managementSummary"]').inputValue(), '本週有一項風險。');
+  await guyPage.waitForFunction(() => document.querySelector('[data-file="cross"] [data-field="managementSummary"]')?.value === '本週有一項風險。', null, { timeout: 15000 });
   assert.equal(await guyPage.locator('[data-file="cross"] [data-field="decision-description"]').last().inputValue(), '是否延後上線');
 
   // create next week with no publication yet: empty files; only division head sees the button

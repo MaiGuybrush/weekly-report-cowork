@@ -1,5 +1,7 @@
 import { ChangeDetectorRef, Component, inject, input } from "@angular/core";
+import { HttpClient } from "@angular/common/http";
 import { FormsModule } from "@angular/forms";
+import { firstValueFrom } from "rxjs";
 import { Gantt } from "./gantt";
 import { cancelEntry, evaluateSchedule, reactivateEntry, type ScheduleInput } from "./schedule-rules";
 import type { ExternalDependency, ScheduleEntry, SectionItem } from "./report-types";
@@ -17,6 +19,8 @@ const KIND_LABELS = { phase: "階段", task: "關鍵任務", milestone: "里程�
 export function cleanSchedule(entries: ScheduleEntry[]): ScheduleEntry[] {
   return entries.map((e) => Object.fromEntries(KEYS.filter((k) => e[k] !== undefined).map((k) => [k, e[k]])) as ScheduleEntry);
 }
+
+type WorkItem = { workId: number; workContent: string; ownerName: string; status: string; subItems?: WorkItem[] };
 
 const toInput = (e: ScheduleEntry) => e as ScheduleInput;
 const toDeliveries = (project: SectionItem) =>
@@ -75,6 +79,29 @@ export function scheduleErrors(project: SectionItem) {
               </select></label>
           }
           @for (msg of entryErrors(e.id); track msg) { <p class="error" role="alert">{{ msg }}</p> }
+          @if (editable() && e.kind === 'task' && e.state !== 'cancelled') {
+            <button type="button" data-evidence-toggle (click)="toggleEvidence(e.id)">📎 {{ e.evidenceLinks?.length || 0 }}</button>
+            @if (evidenceOpen === e.id) {
+              <div class="evidence-panel" data-evidence-panel>
+                @for (l of e.evidenceLinks; track l.workId) {
+                  <div class="evidence-link">
+                    <span>#{{ l.workId }}</span>
+                    <input data-field="evidence-summary" placeholder="摘要" [(ngModel)]="l.summary" />
+                    <button type="button" (click)="unlink(e, l.workId)">移除</button>
+                  </div>
+                }
+                @for (w of unlinked(e); track w.workId) {
+                  <div class="evidence-candidate" [attr.data-work]="w.workId">
+                    <button type="button" data-pick (click)="link(e, w.workId)">挑選</button>
+                    #{{ w.workId }} {{ w.workContent }}（{{ w.ownerName }}・{{ w.status }}）
+                    @for (c of w.subItems; track c.workId) { <small>　└ #{{ c.workId }} {{ c.workContent }}</small> }
+                  </div>
+                }
+                <label>手動輸入 workId <input type="number" data-field="manual-work-id" [(ngModel)]="manualId" /></label>
+                <button type="button" data-manual-add [disabled]="!manualId" (click)="link(e, manualId!); manualId = null">加入</button>
+              </div>
+            }
+          }
           @if (editable()) {
             @if (e.state === 'cancelled') { <button type="button" (click)="reactivate(e.id)">重新啟用</button> }
             @else { <button type="button" (click)="cancel(e.id)">取消項目</button> }
@@ -112,7 +139,13 @@ export function scheduleErrors(project: SectionItem) {
 })
 export class ProjectSchedule {
   protected changes = inject(ChangeDetectorRef);
+  private http = inject(HttpClient);
   project = input.required<SectionItem>();
+  week = input("");
+  evidenceOpen: string | null = null;
+  manualId: number | null = null;
+  work: WorkItem[] = [];
+  private workLoaded = false;
   editable = input(false);
   readonly SECTIONS = SECTIONS;
   readonly KIND_LABELS = KIND_LABELS;
@@ -137,6 +170,22 @@ export class ProjectSchedule {
   };
   statesOf = (kind: ScheduleEntry["kind"]) =>
     kind === "milestone" ? [["pending", "待達成"], ["achieved", "已達成"]] : [["open", "開放"], ["in-progress", "進行中"], ["completed", "完成"]];
+
+  async toggleEvidence(id: string) {
+    this.evidenceOpen = this.evidenceOpen === id ? null : id;
+    if (this.workLoaded || !this.week()) return;
+    this.workLoaded = true;
+    try {
+      const data = await firstValueFrom(this.http.get<{ results: Record<string, { items: WorkItem[] }> }>(`/api/weeks/${this.week()}/engineer-work`));
+      this.work = Object.values(data.results ?? {}).flatMap((r) => r.items ?? []);
+    } catch { /* 404 or unreadable: manual entry still works */ }
+    this.changes.detectChanges();
+  }
+  unlinked = (e: ScheduleEntry) => this.work.filter((w) => !e.evidenceLinks?.some((l) => l.workId === w.workId));
+  link(e: ScheduleEntry, workId: number) {
+    if (!e.evidenceLinks?.some((l) => l.workId === workId)) (e.evidenceLinks ??= []).push({ workId, summary: "" });
+  }
+  unlink(e: ScheduleEntry, workId: number) { e.evidenceLinks = e.evidenceLinks?.filter((l) => l.workId !== workId); }
 
   has = (s: string) => !!this.project().participants?.includes(s);
   toggle(s: string) {

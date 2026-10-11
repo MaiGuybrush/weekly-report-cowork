@@ -1,0 +1,46 @@
+{
+ "today_str": "2026-10-09",
+ "results": {
+  "alice": {
+   "items": [
+    {
+     "workId": 101,
+     "workContent": "部署管線改版",
+     "status": "處理中",
+     "ownerName": "Alice",
+     "ownerId": "alice",
+     "subItems": [
+      {
+       "workId": 1011,
+       "workContent": "整合測試",
+       "status": "處理中",
+       "ownerName": "Alice",
+       "ownerId": "alice",
+       "subItems": []
+      }
+     ]
+    },
+    {
+     "workId": 102,
+     "workContent": "監控告警調整",
+     "status": "已完成",
+     "ownerName": "Alice",
+     "ownerId": "alice",
+     "subItems": []
+    }
+   ]
+  },
+  "bob": {
+   "items": [
+    {
+     "workId": 103,
+     "workContent": "資料庫升級",
+     "status": "待發佈",
+     "ownerName": "Bob",
+     "ownerId": "bob",
+     "subItems": []
+    }
+   ]
+  }
+ }
+}

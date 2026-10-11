@@ -29,7 +29,7 @@ const port = await new Promise(r => { const s = createTcpServer(); s.listen(0, '
 const api = spawn('dotnet', [process.env.WEEKLY_REPORT_API_DLL ?? join(root, 'apps/api/bin/Debug/net9.0/WeeklyReport.Api.dll'), '--urls', `http://127.0.0.1:${port}`], {
   cwd: join(root, 'apps/api'),
   env: { ...process.env, DatabasePath: join(temporary, 'report.db'), JwksUrl: `http://127.0.0.1:${jwks.address().port}/jwks`,
-    DataRepo__Path: work, DataRepo__Remote: remote,
+    DataRepo__Path: work, DataRepo__Remote: remote, EngineerWork__Path: join(root, 'tests/fixtures/engineer-work'),
     Access__Users__0__EmpNo: 'G', Access__Users__0__Name: 'Guy', Access__Users__0__Role: 'Guy',
     Access__Users__1__EmpNo: 'H1', Access__Users__1__Name: 'Head One', Access__Users__1__Role: 'Head', Access__Users__1__Section: 's1',
     Access__Users__2__EmpNo: 'H2', Access__Users__2__Name: 'Head Two', Access__Users__2__Role: 'Head', Access__Users__2__Section: 's2' }
@@ -109,6 +109,13 @@ try {
   assert.deepEqual(w42.s1.items, snap2.s1.items); assert.equal(w42.cross.managementSummary, snap2.cross.managementSummary);
   assert.equal((await call('/api/weeks', 'G', 'POST')).status, 409);
   assert.match(git(remote, 'log', '--format=%s', 'master'), /2026-W42: create by G/);
+  // engineer work: week picks file by name date, latest wins, no file 404, badly named ignored, invalid week 400
+  const ew = await call('/api/weeks/2026-W41/engineer-work', 'H1');
+  assert.equal(ew.status, 200); assert.deepEqual(Object.keys(ew.body.results), ['alice', 'bob']);
+  assert.equal(ew.body.results.alice.items[0].workContent, '部署管線改版');
+  assert.equal((await call('/api/weeks/2026-W40/engineer-work', 'G')).body.results.alice.items[0].workId, 1);
+  assert.equal((await call('/api/weeks/2026-W42/engineer-work', 'H1')).status, 404);
+  assert.equal((await call('/api/weeks/2026-42/engineer-work', 'H1')).status, 400);
   console.log('weeks API smoke passed');
 } catch (error) {
   console.error(logs);

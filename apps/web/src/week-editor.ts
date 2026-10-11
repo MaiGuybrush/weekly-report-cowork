@@ -31,7 +31,7 @@ export const FILE_LABELS: Record<string, string> = { s1: "第一課", s2: "第�
           <h2>{{ FILE_LABELS[file] }}@if (!canEdit(file)) { <small>（唯讀）</small> }</h2>
           <h3>專案</h3>
           @for (p of itemsOf(file, "projects"); track p.id) {
-            <app-project-schedule [project]="p" [editable]="canEdit(file)" />
+            <app-project-schedule [week]="week" [project]="p" [editable]="canEdit(file)" />
             @if (canEdit(file)) { <button type="button" (click)="remove(file, p)">刪除專案</button> }
           }
           @if (canEdit(file)) { <button type="button" data-add-project (click)="addProject(file)">新增專案</button> }
