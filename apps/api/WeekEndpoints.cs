@@ -16,7 +16,7 @@ public static class WeekEndpoints
         app.MapPost("/api/weeks", async (HttpContext ctx, DataRepo repo) =>
         {
             var user = (User)ctx.Items["user"]!;
-            if (user.Role != "Guy") return Results.StatusCode(403);
+            if (user.Role != "Division") return Results.StatusCode(403);
             if (!repo.Configured) return Results.StatusCode(503);
             try { return await repo.CreateNextWeek(user.EmpNo) is { } week ? Results.Json(new { week }, statusCode: 201) : Results.Conflict(new { error = "week already exists" }); }
             catch (GitException e) { return Results.Json(new { error = e.Message }, statusCode: 500); }
@@ -36,7 +36,7 @@ public static class WeekEndpoints
         {
             if (!DataRepo.ValidWeek(week)) return Results.BadRequest(new { error = "invalid week" });
             var user = (User)ctx.Items["user"]!;
-            if (user.Role != "Guy" && user.Role != "Head") return Results.StatusCode(403);
+            if (user.Role != "Division" && user.Role != "Head") return Results.StatusCode(403);
             return repo.ReadEngineerWork(week) is { } text ? Results.Content(text, "application/json; charset=utf-8") : Results.NotFound();
         });
 
@@ -44,7 +44,7 @@ public static class WeekEndpoints
         {
             if (!DataRepo.ValidWeek(week)) return Results.BadRequest(new { error = "invalid week" });
             var user = (User)ctx.Items["user"]!;
-            if (user.Role != "Guy") return Results.StatusCode(403);
+            if (user.Role != "Division") return Results.StatusCode(403);
             if (!repo.Configured) return Results.StatusCode(503);
             try { return await repo.Publish(week, user.EmpNo) is { } entry ? Results.Json(entry, statusCode: 201) : Results.NotFound(new { error = "week has no draft" }); }
             catch (GitException e) { return Results.Json(new { error = e.Message }, statusCode: 500); }
@@ -66,7 +66,7 @@ public static class WeekEndpoints
         {
             if (!DataRepo.ValidWeek(week) || !DataRepo.ValidFile(file)) return Results.BadRequest(new { error = "invalid week or file" });
             var user = (User)ctx.Items["user"]!;
-            var allowed = file == "cross" ? user.Role == "Guy" : user.Role == "Head" && user.Section == file;
+            var allowed = file == "cross" ? user.Role == "Division" : user.Role == "Head" && user.Section == file;
             if (!allowed) return Results.StatusCode(403);
             if (!repo.Configured) return Results.StatusCode(503);
             if (ctx.Request.ContentLength > MaxBytes) return Results.StatusCode(413);

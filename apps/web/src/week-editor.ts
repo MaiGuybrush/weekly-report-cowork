@@ -113,7 +113,7 @@ export class WeekEditor implements OnInit {
   }
 
   canEdit = (file: string) => this.me?.role === "Head" && this.me.section === file;
-  canEditCross = () => this.me?.role === "Guy";
+  canEditCross = () => this.me?.role === "Division";
   addDecision() {
     this.cross.pendingDecisions.push({ id: crypto.randomUUID(), description: "" });
     this.changes.detectChanges();

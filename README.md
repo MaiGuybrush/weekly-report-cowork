@@ -1,6 +1,6 @@
 # 處會週報共同編輯
 
-依 [實作規格](docs/implementation-spec.md) 建置的處會週報工作區。已具備 UAC JWT 身分驗證、按課別共編、私有草稿與租約、結構化專案時程與甘特圖、人事權限、不可變發布版、跨週延續、正式讀者入口，以及 eCIM 課別同步與候選決策。
+依[簡化週報解決方案規格](docs/simplified-weekly-report-spec.md)建置的處會週報網站。週報內容以 JSON 存放於資料 repo，課長編輯自己的課檔，部級編輯跨課內容並發布不可變的正式版；另可從上週正式版建立下週，並從工程師工作彙整挑選來源連結。
 
 ## 建置與啟動
 
@@ -40,27 +40,26 @@ dotnet run --project apps/api/WeeklyReport.Api.csproj --no-launch-profile --urls
 
 ## 設定
 
-需求：.NET SDK 9、Node.js 20.19 以上、pnpm、可連到 UAC 的內網環境。
+需求：.NET SDK 9、Node.js 20.19 以上、pnpm、git、可連到 UAC 的內網環境。
 
-API 從 `apps/api/appsettings.json` 讀取 `JwksUrl` 與 `DatabasePath`。`Access:Users` 需在首次啟動前設定 Guy、三位課長與正式版讀者的 `EmpNo`、`Name`、`Role` (`Guy`、`Head` 或 `Reader`)；課長另需 `Section`（例如 `s1`、`s2`、`s3`）。項目的 `section` 是六段報告章節，`ownerSection` 是可編輯該項目的課別，兩者彼此獨立。讀者無編輯頁權限。設定會於首次啟動匯入 SQLite；既有帳號不會因修改設定檔而覆寫，後續名單由 Guy 的受控 API 調整並留稽核。
+API 設定位於 `apps/api/appsettings.json`（可用環境變數覆寫，例如 `DataRepo__Path`）：
 
-人事項目以生效日期、交接、影響、下一步四欄保存；一般項目可附多個來源 URL 與待決策事項。下週草稿保留來源與上週承諾；未解待決事項在新週發布前須填決策結果或新期限。
+- `JwksUrl`：UAC 的 JWKS 位址，用於驗證 JWT 並取得 `empNo`。
+- `Access:Users`：角色名單。部級主管 `Role` 為 `Division`；三位課長 `Role` 為 `Head`，並需指定 `Section`（`s1`、`s2`、`s3`）。名單外的帳號一律回 403。
+- `DataRepo:Path`：資料 repo 的本機工作目錄（內含 `weeks/<週>/{s1,s2,s3,cross}.json` 與 `publications/`）。目錄尚未是 git repo 時，若設定 `DataRepo:Remote` 會自動 clone，否則 `git init`。
+- `DataRepo:Remote`：選用，資料 repo 的遠端；設定後每次儲存、發布與建立下週都會 push。
+- `EngineerWork:Path`：工程師工作彙整目錄，位於資料 repo 之外。檔名需以 `_yyMMdd.json` 結尾（例如 `CIM3_ENG_WeeklyReport_261001.json`）；週報取檔名日期落在該週的最新一份。
+- `Cors:AllowedOrigins`：跨來源部署時列出 Web 來源。
 
-`DatabasePath` 預設在 API 工作目錄的 `weekly-report.db`。正式部署時請設為持久磁碟上的絕對路徑。資料庫以 `CREATE TABLE IF NOT EXISTS` 建立初始結構；保存正式資料前需加入 migration 和備份流程。
-
-eCIM 同步設定在 `Ecim`：`BaseUrl`、選用的 `ReviewWorkPath` 與每位工程師的 `Members` 設定。每筆成員設定需包含 `Section`、`UserId`、`UpdateDateFrom`、`UpdateDateTo`，並可附上 `TimeFrom`、`TimeTo`、`Division`、`Dept`、`TeamId`。服務端憑證可用部署秘密的 `Ecim:ApiKey` 提供；不會傳給瀏覽器。
+服務帳號的 git 憑證（SSH 金鑰或 credential helper）放在伺服器環境，由執行 API 的帳號持有，不放入設定檔或 repo；課長不直接接觸 git。
 
 ## 使用方式
 
-登入後，系統會依 UAC JWT 中的 `empNo` 對應本機帳號權限。
+登入後，系統依 UAC JWT 中的 `empNo` 對應角色名單。
 
-- **Guy**：從首頁建立指定會議日期的週報、維護跨課內容、接管卡住的租約，並發布正式版。發布後仍可編輯草稿；每次發布都會產生不可變的固定連結。
-- **課長（Head）**：在自己的課別新增與編輯項目。按「開始編輯」取得 30 分鐘租約，內容先自動存為私有草稿；按「儲存完成」才會更新共用內容。
-- **專案週報維護人**：取得專案編輯租約後建立階段與關鍵任務。任務必須指定負責人或單位，可歸屬同專案階段，或直接隸屬專案；負責人不因此取得編輯權。階段與任務均維護原始計畫、目前計畫、實際日期及明確狀態。建立後每次修改都須填原因；誤植須選「更正原始資料」，一般改期只更新目前計畫。可查看修訂前後值及相對原始計畫的偏差。階段不會隨任務自動完成；若仍有未完成任務，維護人確認階段時須明確勾選例外並寫出原因。甘特圖僅供檢視，點選階段後仍以表單修改。
-- **eCIM 候選決策**：課長按「同步本課工程師工作」後，可針對來源候選建立項目、合併至既有項目、暫緩或忽略。已有人工修改的欄位會同時顯示上次來源、最新來源與目前週報值；可選擇維持人工版或套用來源。
-- **正式版讀者（Reader）**：僅能進入正式版與固定版本連結；可在正式頁檢視時程甘特圖與偏差，並使用瀏覽器列印。
-
-一般項目可附多個來源 URL 與待決策事項。若前週延續的待決策尚未處理，發布下週週報前必須填寫決策結果或新的期限。
+- **部級（Division）**：編輯跨課內容（管理摘要與需決策事項）、發布正式版、建立下週。每次發布在 `publications/<週>/v<n>/` 產生不可變快照，並更新發布索引與 git tag。
+- **課長（Head）**：只能編輯自己課別的課檔，包含一般項目與專案時程（階段、關鍵任務、里程碑、甘特圖），並可從工程師工作彙整挑選工作項目作為來源連結。
+- 兩種角色都可開啟任一週的編輯頁與正式版頁；歷史由 git 保存。
 
 UAC 登入需企業內網與可用的 `CertificateKey` 或 refresh token。
 
@@ -69,8 +68,10 @@ UAC 登入需企業內網與可用的 `CertificateKey` 或 refresh token。
 ```powershell
 dotnet build apps/api/WeeklyReport.Api.csproj
 pnpm --dir apps/web build
+node tests/gantt-model.test.mjs
+node tests/schedule-rules.test.mjs
 node tests/smoke.mjs
 node tests/browser-smoke.mjs
 ```
 
-HTTP 煙霧測試以暫時 RSA 金鑰、JWKS 服務與 SQLite 資料庫驗證簽章、角色、日期唯一、四位編輯者同時修改不同項目、私有草稿、租約競爭與逾期、衝突、接管及修訂紀錄。瀏覽器測試以模擬 UAC 服務驗證 SSO 回跳、建立項目及提交；需先完成 Angular 建置並安裝 Playwright 和 Chrome。正式內網 UAC 仍需部署環境驗收。
+HTTP 煙霧測試以暫時 RSA 金鑰、JWKS 服務與暫存 git repo 驗證簽章、角色、課檔寫入權限、發布與建立下週。瀏覽器測試以模擬 UAC 服務驗證 SSO 回跳、編輯、儲存、發布與正式版頁；需先完成 Angular 建置並安裝 Playwright 和 Chrome。正式內網 UAC 仍需部署環境驗收。

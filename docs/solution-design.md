@@ -1,5 +1,7 @@
 # 處會週報共同編輯解決方案設計
 
+> **已由[簡化週報解決方案規格](simplified-weekly-report-spec.md)取代。** 本文件僅供歷史參考。
+
 狀態：設計版，2026-09-29。依 [Wayfinder 決策地圖](../.scratch/weekly-report-collaboration/map.md) 撰寫；專案時程以 [專案時程重設計規格](project-schedule-redesign-spec.md) 為準，週報內容版型見 [report-structure.md](report-structure.md)。本文件供後續正式系統開發與驗收使用。
 
 ## 1. 目標與邊界

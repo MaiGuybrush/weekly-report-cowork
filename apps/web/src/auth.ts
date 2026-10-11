@@ -85,7 +85,7 @@ export const apiToken: HttpInterceptorFn = (request, next) => {
   return next(isApiRequest ? request.clone({ url: requestUrl, setHeaders: token ? { Authorization: `Bearer ${token}` } : {} }) : request);
 };
 
-type SessionUser = { role: string; readerAccess: boolean };
+type SessionUser = { role: string };
 
 async function signedInUser(auth: Auth, http: HttpClient, baseUrl: string, state: { url: string }): Promise<SessionUser | null> {
   if (!auth.token()) { await auth.enter(state.url); return null; }
@@ -103,25 +103,5 @@ export const editorGuard: CanActivateFn = async (_route, state) => {
   const baseUrl = inject(API_BASE_URL);
   const router = inject(Router);
   const me = await signedInUser(auth, http, baseUrl, state);
-  return me ? (me.role === 'Guy' || me.role === 'Head' ? true : router.parseUrl('/forbidden')) : auth.token() ? router.parseUrl('/forbidden') : false;
-};
-
-export const readerGuard: CanActivateFn = async (_route, state) => {
-  const auth = inject(Auth);
-  const http = inject(HttpClient);
-  const baseUrl = inject(API_BASE_URL);
-  const router = inject(Router);
-  const me = await signedInUser(auth, http, baseUrl, state);
-  return me ? (me.role === 'Guy' || me.readerAccess ? true : router.parseUrl('/forbidden')) : auth.token() ? router.parseUrl('/forbidden') : false;
-};
-
-export const entryGuard: CanActivateFn = async (_route, state) => {
-  const auth = inject(Auth);
-  const http = inject(HttpClient);
-  const baseUrl = inject(API_BASE_URL);
-  const router = inject(Router);
-  const me = await signedInUser(auth, http, baseUrl, state);
-  if (!me) return auth.token() ? router.parseUrl('/forbidden') : false;
-  if (me.role === 'Reader') return router.parseUrl('/reader');
-  return me.role === 'Guy' || me.role === 'Head' ? true : router.parseUrl('/forbidden');
+  return me ? (me.role === 'Division' || me.role === 'Head' ? true : router.parseUrl('/forbidden')) : auth.token() ? router.parseUrl('/forbidden') : false;
 };
