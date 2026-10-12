@@ -64,6 +64,46 @@ API 設定位於 `apps/api/appsettings.json`（可用環境變數覆寫，例如
 
 UAC 登入需企業內網與可用的 `CertificateKey` 或 refresh token。
 
+## 本機測試（免 UAC）
+
+在非內網環境用 mock UAC（`tools/mock-uac.mjs`）取代真實 UAC；登入頁可選部級或任一課長，權限與正式環境相同（角色取自 `Access:Users`）。
+
+### 一次性設定
+
+1. 還原相依（見上方「建置與啟動」）。
+2. 準備本機資料目錄與工程師工作彙整（皆在專案外，避免誤提交）：
+
+   ```powershell
+   $env:DataRepo__Path = "C:	empweekly-data"          # 不存在會自動 git init
+   $env:EngineerWork__Path = "C:	empengineer-work"    # 放 *_yyMMdd.json，可複製 docs/CIM3_ENG_WeeklyReport_261001.json
+   $env:JwksUrl = "http://localhost:5090/.well-known/jwks.json"
+   ```
+
+   未設 `DataRepo__Path` 時 API 可啟動，但週清單為空、無法儲存。本機不要設 `DataRepo__Remote`，以免 push 到正式 repo。
+3. 把 `apps/web/src/assets/config.json` 的 `uacBaseUrl` 暫改為 `http://localhost:5090/auth`（`apiBaseUrl` 維持 `http://localhost:5080`）。**測完還原，勿提交**。
+
+### 啟動流程
+
+```powershell
+# 終端機 1：mock UAC（預設 port 5090）
+node tools/mock-uac.mjs
+
+# 終端機 2：API（需先在同一終端機設好上述環境變數）
+dotnet run --project apps/api/WeeklyReport.Api.csproj --no-launch-profile --urls http://localhost:5080
+
+# 終端機 3：Web
+pnpm --dir apps/web start
+```
+
+1. 開啟 `http://localhost:4200`，會導向 mock 登入頁。
+2. 點選帳號登入（部級可建立下週、發布；課長只能編輯自己課檔），回跳後即可操作。
+3. 要切換身分：清除瀏覽器 localStorage 的 `CIM_TK`、`CIM_RTK` 後重新整理。
+
+### 注意
+
+- mock 每次啟動都會產生新金鑰；重啟 mock 後 API 也要重啟，並重新登入。
+- 自動化驗證見下方「驗證」；本機測試無法取代正式內網 UAC 的驗收。
+
 ## 驗證
 
 ```powershell
