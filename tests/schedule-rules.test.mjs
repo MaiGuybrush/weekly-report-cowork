@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { cancelEntry, evaluateSchedule, reactivateEntry } from '../apps/web/src/schedule-rules.ts';
 
-const blank = { baselineStart: null, baselineEnd: null, forecastStart: null, forecastEnd: null, actualStart: null, actualEnd: null };
+const blank = { planStart: null, planEnd: null, actualStart: null, actualEnd: null };
 const e = (id, o = {}) => ({ ...blank, id, kind: 'task', name: id.toUpperCase(), state: 'open', predecessors: [], ...o });
 const errs = (entries) => evaluateSchedule(entries).errors.map((x) => `${x.entryId}<-${x.predecessorId}:${x.message}`);
 
@@ -24,7 +24,7 @@ test('derives successors; invalid links are not derived', () => {
 });
 
 test('order conflict (planned and historical) and live warning', () => {
-  const planned = evaluateSchedule([e('a', { forecastEnd: '2026-10-10' }), e('b', { predecessors: ['a'], forecastStart: '2026-10-05' })]).entries[1].warnings;
+  const planned = evaluateSchedule([e('a', { planEnd: '2026-10-10' }), e('b', { predecessors: ['a'], planStart: '2026-10-05' })]).entries[1].warnings;
   assert.equal(planned[0].type, 'conflict');
   assert.equal(planned[0].message, '順序衝突：前置項目「A」預計完成日 (2026-10-10) 晚於本項預計開始日 (2026-10-05)');
 
@@ -35,7 +35,7 @@ test('order conflict (planned and historical) and live warning', () => {
   const hist = evaluateSchedule([e('a', { actualEnd: '2026-10-10', state: 'completed' }), e('b', { predecessors: ['a'], actualStart: '2026-10-05', state: 'in-progress' })]).entries[1].warnings;
   assert.equal(hist[0].message, '順序衝突（歷史搶先開始）：前置項目「A」完成日 (2026-10-10) 晚於本項開始日 (2026-10-05)');
 
-  const ok = evaluateSchedule([e('a', { forecastEnd: '2026-10-01' }), e('b', { predecessors: ['a'], forecastStart: '2026-10-05' })]).entries[1].warnings;
+  const ok = evaluateSchedule([e('a', { planEnd: '2026-10-01' }), e('b', { predecessors: ['a'], planStart: '2026-10-05' })]).entries[1].warnings;
   assert.deepEqual(ok, []);
 });
 
@@ -68,4 +68,12 @@ test('cancel drops membership and dependencies; reactivate restores original sta
   assert.equal(reactivateEntry(cancelEntry(start, 'x'), 'x').find((x) => x.id === 'x').state, 'open');
   assert.equal(reactivateEntry(cancelEntry(start, 'm'), 'm').find((x) => x.id === 'm').state, 'pending');
   assert.equal(cancelEntry(start, 'p').find((x) => x.id === 't').phaseId, null);
+});
+
+test('date priority: actual over plan decides warnings', () => {
+  // plan says a ends after b starts, but actual dates show a finished before
+  const w = evaluateSchedule([e('a', { planEnd: '2026-10-10', actualEnd: '2026-10-01', state: 'completed' }), e('b', { predecessors: ['a'], planStart: '2026-10-05' })]).entries[1].warnings;
+  assert.deepEqual(w, []);
+  const late = evaluateSchedule([e('a', { planEnd: '2026-10-01', actualEnd: '2026-10-10', state: 'completed' }), e('b', { predecessors: ['a'], planStart: '2026-10-05' })]).entries[1].warnings;
+  assert.equal(late[0].type, 'conflict');
 });

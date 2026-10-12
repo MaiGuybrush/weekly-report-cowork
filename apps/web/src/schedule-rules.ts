@@ -55,10 +55,10 @@ export function evaluateSchedule(entries: ScheduleInput[], deliveries: ExternalD
       const list = warnings.get(sId) ?? [];
       warnings.set(sId, list);
 
-      const pFinish = isMilestone(p) ? (p.actualDate ?? p.forecastDate ?? p.baselineDate) : (p.actualEnd ?? p.forecastEnd ?? p.baselineEnd);
+      const pFinish = isMilestone(p) ? (p.actualDate ?? p.planDate) : (p.actualEnd ?? p.planEnd);
       const pActual = isMilestone(p) ? p.actualDate : p.actualEnd;
       const pCompleted = isMilestone(p) ? (p.actualDate != null || p.state === "achieved") : (p.actualEnd != null || p.state === "completed");
-      const sStart = isMilestone(s) ? (s.actualDate ?? s.forecastDate ?? s.baselineDate) : (s.actualStart ?? s.forecastStart ?? s.baselineStart);
+      const sStart = isMilestone(s) ? (s.actualDate ?? s.planDate) : (s.actualStart ?? s.planStart);
       const sActual = isMilestone(s) ? s.actualDate : s.actualStart;
       const sStarted = isMilestone(s) ? (s.actualDate != null || s.state === "achieved") : (s.actualStart != null || s.state === "in-progress" || s.state === "completed");
 

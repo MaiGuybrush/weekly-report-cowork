@@ -122,12 +122,7 @@ label { display: block; margin: 1rem 0; } input, textarea { display: block; box-
   border-radius: 2px;
 }
 
-.legend-bar.baseline-bar {
-  background: #64748b;
-  height: 3px;
-}
-
-.legend-bar.forecast-bar {
+.legend-bar.plan-bar {
   background: #17678c;
 }
 
@@ -332,14 +327,7 @@ label { display: block; margin: 1rem 0; } input, textarea { display: block; box-
   border-radius: 3px;
 }
 
-.gantt-track .baseline {
-  top: 2px;
-  height: 3px;
-  background: #64748b;
-  z-index: 1;
-}
-
-.gantt-track .forecast {
+.gantt-track .plan {
   top: 7px;
   height: 6px;
   background: linear-gradient(90deg, #17678c, #1f7fa8);

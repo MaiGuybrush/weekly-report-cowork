@@ -7,11 +7,11 @@ import { cancelEntry, evaluateSchedule, reactivateEntry, type ScheduleInput } fr
 import type { ExternalDependency, ScheduleEntry, SectionItem } from "./report-types";
 
 const KEYS: (keyof ScheduleEntry)[] = [
-  "id", "kind", "name", "owner", "phaseId", "state", "baselineStart", "baselineEnd", "forecastStart", "forecastEnd",
-  "actualStart", "actualEnd", "baselineDate", "forecastDate", "actualDate", "predecessors", "evidenceLinks",
+  "id", "kind", "name", "owner", "phaseId", "state", "planStart", "planEnd",
+  "actualStart", "actualEnd", "planDate", "actualDate", "predecessors", "evidenceLinks",
 ];
-const RANGE_FIELDS = [["baselineStart", "原始開始"], ["baselineEnd", "原始結束"], ["forecastStart", "目前開始"], ["forecastEnd", "目前結束"], ["actualStart", "實際開始"], ["actualEnd", "實際結束"]];
-const DATE_FIELDS = [["baselineDate", "原始日期"], ["forecastDate", "目前日期"], ["actualDate", "實際日期"]];
+const RANGE_FIELDS = [["planStart", "計畫開始"], ["planEnd", "計畫結束"], ["actualStart", "實際開始"], ["actualEnd", "實際結束"]];
+const DATE_FIELDS = [["planDate", "計畫日期"], ["actualDate", "實際日期"]];
 const SECTIONS = [["s1", "第一課"], ["s2", "第二課"], ["s3", "第三課"]];
 const KIND_LABELS = { phase: "階段", task: "關鍵任務", milestone: "里程碑" };
 
@@ -196,7 +196,7 @@ export class ProjectSchedule {
 
   add(kind: ScheduleEntry["kind"]) {
     const p = this.project();
-    const blank = { baselineStart: null, baselineEnd: null, forecastStart: null, forecastEnd: null, actualStart: null, actualEnd: null };
+    const blank = { planStart: null, planEnd: null, actualStart: null, actualEnd: null };
     (p.schedule ??= []).push({ ...blank, id: crypto.randomUUID(), kind, name: "", state: kind === "milestone" ? "pending" : "open", predecessors: [] });
   }
   cancel(id: string) { this.replace(cancelEntry((this.project().schedule ?? []).map(toInput), id)); }

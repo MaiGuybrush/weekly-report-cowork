@@ -4,14 +4,11 @@ export type GanttEntry = {
   name: string;
   owner?: string | null;
   phaseId?: string | null;
-  baselineStart: string | null;
-  baselineEnd: string | null;
-  forecastStart: string | null;
-  forecastEnd: string | null;
+  planStart: string | null;
+  planEnd: string | null;
   actualStart: string | null;
   actualEnd: string | null;
-  baselineDate?: string | null;
-  forecastDate?: string | null;
+  planDate?: string | null;
   actualDate?: string | null;
   state: "open" | "in-progress" | "completed" | "cancelled" | "pending" | "achieved";
   warnings?: { message: string }[];
@@ -26,7 +23,7 @@ const time = (date: string) => new Date(`${date}T00:00:00`).getTime();
 
 function dates(entries: GanttEntry[]) {
   return entries
-    .flatMap((e) => [e.baselineStart, e.baselineEnd, e.forecastStart, e.forecastEnd, e.actualStart, e.actualEnd, e.baselineDate, e.forecastDate, e.actualDate])
+    .flatMap((e) => [e.planStart, e.planEnd, e.actualStart, e.actualEnd, e.planDate, e.actualDate])
     .filter((d): d is string => !!d)
     .map(time);
 }
@@ -82,17 +79,15 @@ export function hasChildTasks(entries: GanttEntry[], phaseId: string, showCancel
 }
 
 function varianceDays(entry: GanttEntry): number | null {
-  const [base, end] = entry.kind === "milestone"
-    ? [entry.baselineDate, entry.state === "achieved" ? entry.actualDate : entry.forecastDate]
-    : [entry.baselineEnd, entry.actualEnd || entry.forecastEnd];
+  const [base, end] = entry.kind === "milestone" ? [entry.planDate, entry.actualDate] : [entry.planEnd, entry.actualEnd];
   return base && end ? Math.round((Date.parse(end) - Date.parse(base)) / DAY) : null;
 }
 
 export function varianceText(entry: GanttEntry) {
   const milestone = entry.kind === "milestone";
-  if (milestone ? !entry.baselineDate : !entry.baselineEnd) return "無基準";
+  if (milestone ? !entry.planDate : !entry.planEnd) return "無基準";
   const days = varianceDays(entry);
-  if (days === null) return milestone ? "—" : "無基準";
+  if (days === null) return "—";
   if (days === 0) return milestone ? "如期達成" : "如期";
   return `${days > 0 ? "+" : ""}${days} 天`;
 }

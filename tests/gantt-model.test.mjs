@@ -2,13 +2,13 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { ganttDisplayEntries, ganttPosition, ganttRange, ganttTicks, ganttWidth, hasChildTasks, varianceBadgeClass, varianceText } from '../apps/web/src/gantt-model.ts';
 
-const blank = { baselineStart: null, baselineEnd: null, forecastStart: null, forecastEnd: null, actualStart: null, actualEnd: null };
+const blank = { planStart: null, planEnd: null, actualStart: null, actualEnd: null };
 const entries = [
-  { ...blank, id: 'p1', kind: 'phase', name: 'P1', state: 'open', baselineStart: '2026-10-01', baselineEnd: '2026-10-11', forecastEnd: '2026-10-13' },
+  { ...blank, id: 'p1', kind: 'phase', name: 'P1', state: 'open', planStart: '2026-10-01', planEnd: '2026-10-11', actualStart: '2026-10-01', actualEnd: '2026-10-13' },
   { ...blank, id: 't1', kind: 'task', name: 'T1', phaseId: 'p1', state: 'open' },
   { ...blank, id: 't2', kind: 'task', name: 'T2', state: 'open' },
   { ...blank, id: 't3', kind: 'task', name: 'T3', phaseId: 'p1', state: 'cancelled' },
-  { ...blank, id: 'm1', kind: 'milestone', name: 'M1', state: 'achieved', baselineDate: '2026-10-21', actualDate: '2026-10-21' },
+  { ...blank, id: 'm1', kind: 'milestone', name: 'M1', state: 'achieved', planDate: '2026-10-21', actualDate: '2026-10-21' },
 ];
 const view = (o = {}) => ({ expandTasks: false, showCancelled: false, expandedPhases: new Set(), ...o });
 const ids = (v) => ganttDisplayEntries(entries, v).map((e) => e.id);
@@ -45,4 +45,15 @@ test('variance text and badge', () => {
   assert.equal(varianceBadgeClass(entries[4]), 'variance-ontime');
   assert.equal(varianceText(entries[1]), '無基準');
   assert.equal(varianceBadgeClass(entries[1]), 'variance-neutral');
+});
+
+test('variance: actual vs plan (late, early, on time, unfinished)', () => {
+  const t = (o) => ({ ...blank, id: 'x', kind: 'task', name: 'X', state: 'open', planEnd: '2026-10-10', ...o });
+  assert.equal(varianceText(t({ actualEnd: '2026-10-12' })), '+2 天');
+  assert.equal(varianceText(t({ actualEnd: '2026-10-08' })), '-2 天');
+  assert.equal(varianceText(t({ actualEnd: '2026-10-10' })), '如期');
+  assert.equal(varianceText(t({})), '—');
+  const m = (o) => ({ ...blank, id: 'm', kind: 'milestone', name: 'M', state: 'pending', planDate: '2026-10-10', ...o });
+  assert.equal(varianceText(m({})), '—');
+  assert.equal(varianceText(m({ actualDate: '2026-10-11', state: 'achieved' })), '+1 天');
 });

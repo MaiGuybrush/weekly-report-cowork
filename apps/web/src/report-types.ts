@@ -17,14 +17,11 @@ export type ScheduleEntry = {
   owner?: string | null;
   phaseId?: string | null;
   state: "open" | "in-progress" | "completed" | "cancelled" | "pending" | "achieved";
-  baselineStart: string | null;
-  baselineEnd: string | null;
-  forecastStart: string | null;
-  forecastEnd: string | null;
+  planStart: string | null;
+  planEnd: string | null;
   actualStart: string | null;
   actualEnd: string | null;
-  baselineDate?: string | null;
-  forecastDate?: string | null;
+  planDate?: string | null;
   actualDate?: string | null;
   predecessors?: string[];
   evidenceLinks?: { workId: number; summary: string }[];

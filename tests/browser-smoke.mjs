@@ -72,14 +72,14 @@ try {
     await project.locator('[data-field="entry-name"]').last().fill(name);
   };
   await addEntry('phase', '設計階段');
-  await project.locator('[data-field="baselineStart"]').last().fill('2026-10-01');
-  await project.locator('[data-field="baselineEnd"]').last().fill('2026-10-20');
+  await project.locator('[data-field="planStart"]').last().fill('2026-10-01');
+  await project.locator('[data-field="planEnd"]').last().fill('2026-10-20');
   await addEntry('task', '撰寫規格');
   await project.locator('[data-entry="撰寫規格"] select').first().selectOption({ label: '設計階段' });
-  await project.locator('[data-field="baselineStart"]').last().fill('2026-10-02');
-  await project.locator('[data-field="baselineEnd"]').last().fill('2026-10-10');
+  await project.locator('[data-field="planStart"]').last().fill('2026-10-02');
+  await project.locator('[data-field="planEnd"]').last().fill('2026-10-10');
   await addEntry('milestone', '上線');
-  await project.locator('[data-field="baselineDate"]').last().fill('2026-10-30');
+  await project.locator('[data-field="planDate"]').last().fill('2026-10-30');
   // phase <- direct child link is rejected, and save is blocked
   await project.locator('[data-entry="撰寫規格"] [data-field="predecessors"]').selectOption({ label: '設計階段' });
   await project.getByRole('alert').first().waitFor({ timeout: 5000 });

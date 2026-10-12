@@ -43,9 +43,8 @@ import {
       </div>
 
       <div class="gantt-legend">
-        <span class="legend-item"><i class="legend-bar baseline-bar"></i> 原始計畫</span>
-        <span class="legend-item"><i class="legend-bar forecast-bar"></i> 目前目標</span>
-        <span class="legend-item"><i class="legend-bar actual-bar"></i> 實際結果</span>
+        <span class="legend-item"><i class="legend-bar plan-bar"></i> 計畫</span>
+        <span class="legend-item"><i class="legend-bar actual-bar"></i> 實際</span>
         <span class="legend-item"><i class="legend-diamond pending-diamond"></i> 未達成節點</span>
         <span class="legend-item"><i class="legend-diamond achieved-diamond"></i> 已達成節點</span>
       </div>
@@ -106,23 +105,17 @@ import {
 
               @if (entry.kind === 'milestone') {
                 @if (entry.state !== 'achieved') {
-                  @if (entry.baselineDate && entry.baselineDate !== (entry.forecastDate || entry.baselineDate)) {
-                    <i
-                      class="milestone-ghost-marker"
-                      [style.left.%]="position(entry.baselineDate)"
-                      [title]="'原始目標：' + entry.baselineDate"></i>
-                  }
                   <i
                     class="milestone-marker pending-marker"
                     [attr.data-state]="entry.state"
-                    [style.left.%]="position(entry.forecastDate || entry.baselineDate)"
-                    [title]="'最新目標：' + (entry.forecastDate || entry.baselineDate)"></i>
+                    [style.left.%]="position(entry.planDate)"
+                    [title]="'計畫：' + (entry.planDate || '—')"></i>
                 } @else {
-                  @if (entry.forecastDate && entry.forecastDate !== entry.actualDate) {
+                  @if (entry.planDate && entry.planDate !== entry.actualDate) {
                     <i
                       class="milestone-target-marker"
-                      [style.left.%]="position(entry.forecastDate)"
-                      [title]="'最新目標：' + entry.forecastDate"></i>
+                      [style.left.%]="position(entry.planDate)"
+                      [title]="'計畫：' + entry.planDate"></i>
                   }
                   <i
                     class="milestone-marker achieved-marker"
@@ -131,26 +124,19 @@ import {
                     [title]="'實際達成：' + entry.actualDate"></i>
                 }
               } @else {
-                @if (entry.baselineStart && entry.baselineEnd) {
+                @if (entry.planStart && entry.planEnd) {
                   <i
-                    class="baseline baseline-bar"
-                    [style.left.%]="position(entry.baselineStart)"
-                    [style.width.%]="width(entry.baselineStart, entry.baselineEnd)"
-                    [title]="'原始計畫：' + entry.baselineStart + ' ~ ' + entry.baselineEnd"></i>
-                }
-                @if (entry.forecastStart && entry.forecastEnd) {
-                  <i
-                    class="forecast forecast-bar"
-                    [style.left.%]="position(entry.forecastStart)"
-                    [style.width.%]="width(entry.forecastStart, entry.forecastEnd)"
-                    [title]="'目前目標：' + entry.forecastStart + ' ~ ' + entry.forecastEnd"></i>
+                    class="plan plan-bar"
+                    [style.left.%]="position(entry.planStart)"
+                    [style.width.%]="width(entry.planStart, entry.planEnd)"
+                    [title]="'計畫：' + entry.planStart + ' ~ ' + entry.planEnd"></i>
                 }
                 @if (entry.actualStart || entry.actualEnd) {
                   <i
                     class="actual actual-bar"
                     [style.left.%]="position(entry.actualStart || entry.actualEnd)"
                     [style.width.%]="width(entry.actualStart || entry.actualEnd, entry.actualEnd || entry.actualStart)"
-                    [title]="'實際進展：' + (entry.actualStart || '—') + ' ~ ' + (entry.actualEnd || '進行中')"></i>
+                    [title]="'實際：' + (entry.actualStart || '—') + ' ~ ' + (entry.actualEnd || '進行中')"></i>
                 }
               }
             </div>
