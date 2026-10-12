@@ -74,12 +74,15 @@ try {
   await addEntry('phase', '設計階段');
   await project.locator('[data-field="planStart"]').last().fill('2026-10-01');
   await project.locator('[data-field="planEnd"]').last().fill('2026-10-20');
+  await project.locator('[data-field="actualStart"]').last().fill('2026-10-01');
+  await project.locator('[data-field="actualEnd"]').last().fill('2026-10-22');
   await addEntry('task', '撰寫規格');
   await project.locator('[data-entry="撰寫規格"] select').first().selectOption({ label: '設計階段' });
   await project.locator('[data-field="planStart"]').last().fill('2026-10-02');
   await project.locator('[data-field="planEnd"]').last().fill('2026-10-10');
   await addEntry('milestone', '上線');
   await project.locator('[data-field="planDate"]').last().fill('2026-10-30');
+  await project.locator('[data-field="actualDate"]').last().fill('2026-10-31');
   // phase <- direct child link is rejected, and save is blocked
   await project.locator('[data-entry="撰寫規格"] [data-field="predecessors"]').selectOption({ label: '設計階段' });
   await project.getByRole('alert').first().waitFor({ timeout: 5000 });
@@ -104,6 +107,12 @@ try {
   assert.equal(await again.locator('[data-field="project-title"]').inputValue(), '新平台');
   assert.equal(await again.locator('.gantt-row-phase').count(), 1);
   assert.equal(await again.locator('.gantt-row-milestone').count(), 1);
+  assert.equal(await again.locator('.gantt-row-phase .plan-bar').count(), 1);
+  assert.equal(await again.locator('.gantt-row-phase .actual-bar').count(), 1);
+  assert.equal(await again.locator('.gantt-row-phase .gantt-variance-badge').innerText(), '+2 天');
+  assert.equal(await again.locator('.gantt-row-milestone .milestone-target-marker').count(), 1);
+  assert.equal(await again.locator('.gantt-row-milestone .achieved-marker').count(), 1);
+  assert.equal(await again.locator('.gantt-row-milestone .gantt-variance-badge').innerText(), '+1 天');
   const saved = (await (await fetch(base + '/api/weeks/2026-W41', { headers: { Authorization: `Bearer ${jwt}` } })).json()).s1.items.find(i => i.title === '新平台');
   assert.deepEqual(saved.schedule.find(e => e.name === '上線').predecessors, [saved.schedule.find(e => e.name === '撰寫規格').id]);
   for (const k of ['successors', 'warnings', 'externalNotices', 'history', 'version', 'continuityId']) assert.ok(saved.schedule.every(e => !(k in e)), k);
@@ -149,6 +158,8 @@ try {
   await guyPage.waitForURL(/#\/publications\/2026-W41\/1$/, { timeout: 15000 });
   await guyPage.locator('[data-file="s1"] app-project-schedule .gantt-row').first().waitFor({ timeout: 15000 });
   assert.equal(await guyPage.locator('[data-file="s1"] [data-field="project-title"]').last().isDisabled(), true);
+  assert.equal(await guyPage.locator('[data-file="s1"] .gantt-row-phase .plan-bar').count(), 1);
+  assert.equal(await guyPage.locator('[data-file="s1"] .gantt-row-phase .actual-bar').count(), 1);
   assert.equal(await guyPage.locator('[data-file="cross"] p').first().innerText(), '本週有一項風險。');
   // publish a second version from the draft, then switch back to v1
   await guyPage.goto(url);

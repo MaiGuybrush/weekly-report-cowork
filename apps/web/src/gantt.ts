@@ -2,7 +2,9 @@ import { Component, computed, input, output, signal } from "@angular/core";
 import {
   GanttEntry,
   ganttDisplayEntries,
+  ganttMarks,
   ganttPosition,
+  ganttTooltip,
   ganttRange,
   ganttTicks,
   ganttWidth,
@@ -45,8 +47,8 @@ import {
       <div class="gantt-legend">
         <span class="legend-item"><i class="legend-bar plan-bar"></i> 計畫</span>
         <span class="legend-item"><i class="legend-bar actual-bar"></i> 實際</span>
-        <span class="legend-item"><i class="legend-diamond pending-diamond"></i> 未達成節點</span>
-        <span class="legend-item"><i class="legend-diamond achieved-diamond"></i> 已達成節點</span>
+        <span class="legend-item"><i class="legend-diamond pending-diamond"></i> 計畫節點</span>
+        <span class="legend-item"><i class="legend-diamond achieved-diamond"></i> 實際節點</span>
       </div>
 
       <div class="gantt-timeline-header">
@@ -103,40 +105,33 @@ import {
                 <div class="gantt-today-line" [style.left.%]="mPos" title="報告日基準線"></div>
               }
 
-              @if (entry.kind === 'milestone') {
-                @if (entry.state !== 'achieved') {
+              @if (marks(entry); as m) {
+                @if (m.planDiamond) {
                   <i
-                    class="milestone-marker pending-marker"
-                    [attr.data-state]="entry.state"
-                    [style.left.%]="position(entry.planDate)"
-                    [title]="'計畫：' + (entry.planDate || '—')"></i>
-                } @else {
-                  @if (entry.planDate && entry.planDate !== entry.actualDate) {
-                    <i
-                      class="milestone-target-marker"
-                      [style.left.%]="position(entry.planDate)"
-                      [title]="'計畫：' + entry.planDate"></i>
-                  }
+                    class="milestone-target-marker"
+                    [style.left.%]="position(m.planDiamond)"
+                    [title]="tooltip(entry)"></i>
+                }
+                @if (m.actualDiamond) {
                   <i
                     class="milestone-marker achieved-marker"
                     [attr.data-state]="entry.state"
-                    [style.left.%]="position(entry.actualDate)"
-                    [title]="'實際達成：' + entry.actualDate"></i>
+                    [style.left.%]="position(m.actualDiamond)"
+                    [title]="tooltip(entry)"></i>
                 }
-              } @else {
-                @if (entry.planStart && entry.planEnd) {
+                @if (m.planBar) {
                   <i
                     class="plan plan-bar"
-                    [style.left.%]="position(entry.planStart)"
-                    [style.width.%]="width(entry.planStart, entry.planEnd)"
-                    [title]="'計畫：' + entry.planStart + ' ~ ' + entry.planEnd"></i>
+                    [style.left.%]="position(m.planBar.start)"
+                    [style.width.%]="width(m.planBar.start, m.planBar.end)"
+                    [title]="tooltip(entry)"></i>
                 }
-                @if (entry.actualStart || entry.actualEnd) {
+                @if (m.actualBar) {
                   <i
                     class="actual actual-bar"
-                    [style.left.%]="position(entry.actualStart || entry.actualEnd)"
-                    [style.width.%]="width(entry.actualStart || entry.actualEnd, entry.actualEnd || entry.actualStart)"
-                    [title]="'實際：' + (entry.actualStart || '—') + ' ~ ' + (entry.actualEnd || '進行中')"></i>
+                    [style.left.%]="position(m.actualBar.start)"
+                    [style.width.%]="width(m.actualBar.start, m.actualBar.end)"
+                    [title]="tooltip(entry)"></i>
                 }
               }
             </div>
@@ -183,6 +178,8 @@ export class Gantt {
     this.expandedPhases.set(next);
   }
 
+  marks = ganttMarks;
+  tooltip = ganttTooltip;
   stateLabel = stateLabel;
   varianceText = varianceText;
   varianceBadgeClass = varianceBadgeClass;

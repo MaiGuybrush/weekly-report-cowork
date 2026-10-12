@@ -123,11 +123,11 @@ label { display: block; margin: 1rem 0; } input, textarea { display: block; box-
 }
 
 .legend-bar.plan-bar {
-  background: #17678c;
+  background: #93c5fd;
 }
 
 .legend-bar.actual-bar {
-  background: #238b4d;
+  background: #1e3a8a;
 }
 
 .legend-diamond {
@@ -138,13 +138,13 @@ label { display: block; margin: 1rem 0; } input, textarea { display: block; box-
 }
 
 .legend-diamond.pending-diamond {
-  background: #2563eb;
+  background: #eff6ff;
   border: 1.5px solid #60a5fa;
 }
 
 .legend-diamond.achieved-diamond {
-  background: #16a34a;
-  border: 1.5px solid #86efac;
+  background: #1e3a8a;
+  border: 1.5px solid #93c5fd;
 }
 
 /* Timeline Header */
@@ -330,16 +330,15 @@ label { display: block; margin: 1rem 0; } input, textarea { display: block; box-
 .gantt-track .plan {
   top: 7px;
   height: 6px;
-  background: linear-gradient(90deg, #17678c, #1f7fa8);
+  background: #93c5fd;
   border-radius: 3px;
-  box-shadow: 0 1px 2px rgba(23, 103, 140, 0.25);
   z-index: 2;
 }
 
 .gantt-track .actual {
   top: 15px;
   height: 5px;
-  background: linear-gradient(90deg, #1d7e48, #2ab368);
+  background: #1e3a8a;
   border-radius: 3px;
   z-index: 3;
 }
@@ -355,7 +354,6 @@ label { display: block; margin: 1rem 0; } input, textarea { display: block; box-
   z-index: 4;
 }
 
-.milestone-marker.pending-marker,
 .milestone-marker[data-state="pending"] {
   background: #2563eb;
   border: 2px solid #93c5fd;
@@ -364,20 +362,9 @@ label { display: block; margin: 1rem 0; } input, textarea { display: block; box-
 
 .milestone-marker.achieved-marker,
 .milestone-marker[data-state="achieved"] {
-  background: #16a34a;
-  border: 2px solid #86efac;
-  box-shadow: 0 0 6px rgba(22, 163, 74, 0.6);
-}
-
-.milestone-ghost-marker {
-  position: absolute;
-  top: 6px;
-  width: 10px;
-  height: 10px;
-  transform: translateX(-50%) rotate(45deg);
-  border: 1.5px dashed #94a3b8;
-  background: transparent;
-  z-index: 2;
+  background: #1e3a8a;
+  border: 2px solid #93c5fd;
+  box-shadow: 0 0 6px rgba(30, 58, 138, 0.5);
 }
 
 .milestone-target-marker {

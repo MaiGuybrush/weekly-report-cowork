@@ -97,6 +97,35 @@ export function varianceBadgeClass(entry: GanttEntry) {
   return days === null ? "variance-neutral" : days > 0 ? "variance-delayed" : days < 0 ? "variance-ahead" : "variance-ontime";
 }
 
+export type GanttMarks = {
+  planBar: { start: string; end: string } | null;
+  actualBar: { start: string; end: string } | null;
+  planDiamond: string | null;
+  actualDiamond: string | null;
+};
+
+/** Plan/actual shapes for one row; the actual side is absent until it happens. */
+export function ganttMarks(entry: GanttEntry): GanttMarks {
+  if (entry.kind === "milestone") {
+    return { planBar: null, actualBar: null, planDiamond: entry.planDate || null, actualDiamond: entry.actualDate || null };
+  }
+  const actualStart = entry.actualStart || entry.actualEnd;
+  const actualEnd = entry.actualEnd || entry.actualStart;
+  return {
+    planBar: entry.planStart && entry.planEnd ? { start: entry.planStart, end: entry.planEnd } : null,
+    actualBar: actualStart && actualEnd ? { start: actualStart, end: actualEnd } : null,
+    planDiamond: null,
+    actualDiamond: null,
+  };
+}
+
+export function ganttTooltip(entry: GanttEntry) {
+  const range = (a: string | null, b: string | null, open: string) => (a || b ? `${a || "—"} ~ ${b || open}` : "—");
+  const plan = entry.kind === "milestone" ? entry.planDate || "—" : range(entry.planStart, entry.planEnd, "—");
+  const actual = entry.kind === "milestone" ? entry.actualDate || "—" : range(entry.actualStart, entry.actualEnd, "進行中");
+  return `計畫：${plan}\n實際：${actual}\n偏差：${varianceText(entry)}`;
+}
+
 export function stateLabel(state: GanttEntry["state"]) {
   return ({ open: "開放", "in-progress": "進行中", completed: "完成", cancelled: "取消", pending: "待達成", achieved: "已達成" } as Record<string, string>)[state] ?? state;
 }

@@ -57,3 +57,23 @@ test('variance: actual vs plan (late, early, on time, unfinished)', () => {
   assert.equal(varianceText(m({})), '—');
   assert.equal(varianceText(m({ actualDate: '2026-10-11', state: 'achieved' })), '+1 天');
 });
+
+test('marks: plan only, plan + actual, milestone diamonds, no original target', async () => {
+  const { ganttMarks, ganttTooltip } = await import('../apps/web/src/gantt-model.ts');
+  const t = (o) => ({ ...blank, id: 'x', kind: 'task', name: 'X', state: 'open', ...o });
+  const planOnly = ganttMarks(t({ planStart: '2026-10-01', planEnd: '2026-10-10' }));
+  assert.deepEqual(planOnly.planBar, { start: '2026-10-01', end: '2026-10-10' });
+  assert.equal(planOnly.actualBar, null);
+  const both = ganttMarks(t({ planStart: '2026-10-01', planEnd: '2026-10-10', actualStart: '2026-10-02', actualEnd: '2026-10-12' }));
+  assert.deepEqual(both.actualBar, { start: '2026-10-02', end: '2026-10-12' });
+  const running = ganttMarks(t({ planStart: '2026-10-01', planEnd: '2026-10-10', actualStart: '2026-10-02' }));
+  assert.deepEqual(running.actualBar, { start: '2026-10-02', end: '2026-10-02' });
+  const m = (o) => ({ ...blank, id: 'm', kind: 'milestone', name: 'M', state: 'pending', planDate: '2026-10-10', ...o });
+  const pending = ganttMarks(m({}));
+  assert.deepEqual([pending.planDiamond, pending.actualDiamond, pending.planBar], ['2026-10-10', null, null]);
+  const done = ganttMarks(m({ state: 'achieved', actualDate: '2026-10-11' }));
+  assert.deepEqual([done.planDiamond, done.actualDiamond], ['2026-10-10', '2026-10-11']);
+  assert.deepEqual(Object.keys(done).sort(), ['actualBar', 'actualDiamond', 'planBar', 'planDiamond']);
+  assert.equal(ganttTooltip(m({ state: 'achieved', actualDate: '2026-10-11' })), '計畫：2026-10-10\n實際：2026-10-11\n偏差：+1 天');
+  assert.match(ganttTooltip(t({ planStart: '2026-10-01', planEnd: '2026-10-10', actualStart: '2026-10-02' })), /實際：2026-10-02 ~ 進行中\n偏差：—/);
+});
