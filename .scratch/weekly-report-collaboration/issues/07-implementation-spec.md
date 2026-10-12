@@ -8,7 +8,7 @@ Blocked by: None
 
 ## Spec
 
-[處會週報協作系統規格](../../../docs/implementation-spec.md)
+處會週報協作系統規格（已刪除）
 
 ## Delivery
 

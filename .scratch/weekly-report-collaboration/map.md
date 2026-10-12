@@ -13,7 +13,7 @@ Labels: wayfinder:map
 - 設計須參照 `weekly-report` 的 eCIM 工作取得方式、`weekly-meeting-report` 的上週延續與既有編輯器，以及根目錄 `CONTEXT.md`。
 - 原有兩份協作設計草案因週三 17:00 發布、10 分鐘鎖等設定與已確認決策牴觸，已依 Guy 指示刪除；完成決策後重新撰寫設計文件。
 - 本機 Markdown 為此專案的議題追蹤器；子票位於本目錄。
-- 交付文件：[共同編輯解決方案設計](../../docs/solution-design.md)、[週報架構設計](../../docs/report-structure.md)；排版 Prototype 見「決定週報呈現與 Prototype 驗證範圍」票。
+- 交付文件：共同編輯解決方案設計、週報架構設計（已刪除）；排版 Prototype 見「決定週報呈現與 Prototype 驗證範圍」票。
 
 ## Decisions so far
 

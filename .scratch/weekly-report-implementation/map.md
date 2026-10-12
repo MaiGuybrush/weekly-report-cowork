@@ -3,7 +3,7 @@
 Status: ready
 Labels: ready-for-agent
 
-規格：[處會週報協作系統規格](../../docs/implementation-spec.md)。原始規格議題：[處會週報協作系統實作規格](../weekly-report-collaboration/issues/07-implementation-spec.md)。架構決策見 `docs/adr/`。
+規格：處會週報協作系統規格（已刪除）。原始規格議題：[處會週報協作系統實作規格](../weekly-report-collaboration/issues/07-implementation-spec.md)。架構決策見 `docs/adr/`。
 
 第一階段：01–09。第二階段：10–12。各票的 `Blocked by` 僅列真正的起始前提；其餘票可並行。從沒有 blocker 的票開始，完成後再推進新開放的票。
 

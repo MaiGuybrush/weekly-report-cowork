@@ -17,4 +17,4 @@
 3. 讀取該票的 **What to build**、核取清單、阻擋票，以及索引連到的規格。審查規格符合度時以票據要求為準；相關設計文件提供背景。
 4. 若提交訊息含 `#NN`，依其系列查找對應檔案。若票據檔不在工作區，明確回報缺少的路徑，不要憑編號推測內容。
 
-目前的專案時程重設計 #1 規格位於 [專案階段與完整修訂紀錄](../../.scratch/project-schedule-redesign/issues/01-phase-schedule-and-revisions.md)，上層設計為 [專案時程重設計規格](../project-schedule-redesign-spec.md)。
+目前的專案時程重設計 #1 規格位於 [專案階段與完整修訂紀錄](../../.scratch/project-schedule-redesign/issues/01-phase-schedule-and-revisions.md)。上層設計文件已取代並刪除。
