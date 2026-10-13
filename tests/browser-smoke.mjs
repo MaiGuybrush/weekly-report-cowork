@@ -152,26 +152,26 @@ try {
   await again.locator('[data-deliveries] summary').click();
   assert.equal(await again.locator('[data-dependency] [data-field="dep-description"]').inputValue(), '伺服器採購');
   assert.equal(await again.locator('[data-dependency] [data-field="dep-status"]').inputValue(), 'delivered');
-  // source links on a non-project item: blank-url rows are not saved; survives reload
+  // reference links on a non-project item: blank-url rows are not saved; survives reload
   await page.locator('[data-tab="personnel"]').click();
   await page.locator('[data-file="s1"] [data-add="personnel"]').click();
   const card = page.locator('[data-file="s1"] .item').last();
   await card.locator('[data-field="title"]').fill('人員異動');
-  await card.locator('[data-add-source-link]').click();
-  await card.locator('[data-field="source-label"]').last().fill('空網址');
-  await card.locator('[data-add-source-link]').click();
-  await card.locator('[data-field="source-label"]').last().fill('公告');
-  await card.locator('[data-field="source-url"]').last().fill('https://example.com/notice');
+  await card.locator('[data-add-ref-link]').click();
+  await card.locator('[data-field="ref-label"]').last().fill('空網址');
+  await card.locator('[data-add-ref-link]').click();
+  await card.locator('[data-field="ref-label"]').last().fill('公告');
+  await card.locator('[data-field="ref-url"]').last().fill('https://example.com/notice');
   await page.locator('[data-save]').click();
   await page.getByText('已儲存第一課').waitFor({ timeout: 15000 });
-  assert.equal(await card.locator('[data-source-link]').count(), 1);
+  assert.equal(await card.locator('[data-ref-link]').count(), 1);
   const personnel = (await (await fetch(base + '/api/weeks/2026-W41', { headers: { Authorization: `Bearer ${jwt}` } })).json()).s1.items.find(i => i.title === '人員異動');
   assert.deepEqual(personnel.details.sourceLinks, [{ label: '公告', url: 'https://example.com/notice' }]);
   await page.reload();
-  await card.locator('[data-source-link] [data-field="source-url"]').waitFor({ timeout: 15000 });
-  assert.equal(await card.locator('[data-source-link] [data-field="source-url"]').inputValue(), 'https://example.com/notice');
-  await card.locator('[data-remove-source-link]').click();
-  assert.equal(await card.locator('[data-source-link]').count(), 0);
+  await card.locator('[data-ref-link] [data-field="ref-url"]').waitFor({ timeout: 15000 });
+  assert.equal(await card.locator('[data-ref-link] [data-field="ref-url"]').inputValue(), 'https://example.com/notice');
+  await card.locator('[data-remove-ref-link]').click();
+  assert.equal(await card.locator('[data-ref-link]').count(), 0);
   await page.locator('[data-save]').click();
   await page.locator('[data-save-state="clean"]').waitFor({ timeout: 15000 });
   await page.locator('[data-tab="projects"]').click();
@@ -196,7 +196,7 @@ try {
   assert.equal(await page.locator('[data-save]').count(), 0);
   assert.equal(await page.locator('[data-rail-file="s1"] [data-dirty]').count(), 1);
   assert.equal(await page.locator('[data-file="s2"] [data-add="personnel"]').count(), 0);
-  assert.equal(await page.locator('[data-file="s2"] [data-add-source-link]').count(), 0);
+  assert.equal(await page.locator('[data-file="s2"] [data-add-ref-link]').count(), 0);
   await page.locator('[data-rail-file="s1"]').click();
   await page.locator('[data-tab="projects"]').click();
   assert.equal(await page.locator('[data-file="s1"] [data-field="project-title"]').inputValue(), '新平台');

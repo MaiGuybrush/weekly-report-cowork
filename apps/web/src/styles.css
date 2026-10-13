@@ -211,11 +211,11 @@ input:disabled, select:disabled, textarea:disabled { background: var(--paper); -
 .grid td input, .grid td select { margin: 0; padding: .3rem .45rem; font-size: .88rem; }
 .grid td select[multiple] { min-width: 9rem; }
 .grid .empty-row { color: var(--mute); text-align: center; }
-.src-links { margin: .8rem 0; padding-top: .6rem; border-top: 1px dashed var(--line); }
-.src-links > strong { display: block; font-size: .85rem; color: var(--mute); }
-.src-link-row { display: flex; align-items: center; gap: .5rem; margin: .3rem 0; }
-.src-link-row input { margin: 0; }
-.src-link-row input:first-child { flex: 0 1 14rem; }
-.src-link-row input:nth-child(2) { flex: 1 1 auto; }
+.ref-links { margin: .8rem 0; padding-top: .6rem; border-top: 1px dashed var(--line); }
+.ref-links > strong { display: block; font-size: .85rem; color: var(--mute); }
+.ref-link-row { display: flex; align-items: center; gap: .5rem; margin: .3rem 0; }
+.ref-link-row input { margin: 0; }
+.ref-link-row input:first-child { flex: 0 1 14rem; }
+.ref-link-row input:nth-child(2) { flex: 1 1 auto; }
 [data-evidence-toggle] { padding: 0 .6rem; border-radius: 99px; background: var(--line2); color: var(--mute); font-size: .8rem; }
 .evidence-panel { background: var(--steel-t); border-color: var(--plan); }
