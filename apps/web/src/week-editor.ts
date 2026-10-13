@@ -10,13 +10,11 @@ import type { CrossFile, SectionFile } from "./report-types";
 @Component({
   standalone: true,
   imports: [FileView, CrossEditor],
-  template: `<header>
-      <h1>處會週報 {{ week }}</h1>
-      <span>{{ me?.name }} · {{ me?.role }}</span>
-      <a href="#/">返回</a>
-      @if (canEditCross()) { <button type="button" data-publish (click)="publish()">發布</button> }
-    </header>
-    <main>
+  template: `<main>
+      <div class="page-head">
+        <h1>處會週報 {{ week }}</h1>
+        @if (canEditCross()) { <button type="button" data-publish (click)="publish()">發布</button> }
+      </div>
       @if (message) { <p class="message" role="status">{{ message }}</p> }
       @for (file of files; track file) {
         <app-file-view [file]="file" [week]="week" [data]="fileData(file)" [editable]="canEdit(file)" (save)="save(file)" />

@@ -4,17 +4,26 @@ import { Home } from "./home";
 import { WeekEditor } from "./week-editor";
 import { PublicationPage } from "./publication-page";
 import { editorGuard } from "./auth";
+import { Shell } from "./shell";
+import { weekGuard } from "./shell-state";
 
 @Component({
   standalone: true,
-  template: "<main><h1>無權限</h1><p>此帳號無法編輯處會週報。</p></main>",
+  template: '<main class="center-card" role="alert"><h1>無權限</h1><p>此帳號無法編輯處會週報。</p></main>',
 })
 export class Forbidden {}
 
 export const routes: Routes = [
-  { path: "", component: Home, canActivate: [editorGuard] },
-  { path: "weeks/:week", component: WeekEditor, canActivate: [editorGuard] },
-  { path: "publications/:week/:version", component: PublicationPage, canActivate: [editorGuard] },
+  {
+    path: "",
+    component: Shell,
+    canActivateChild: [editorGuard],
+    children: [
+      { path: "", component: Home },
+      { path: "weeks/:week", component: WeekEditor, canActivate: [weekGuard] },
+      { path: "publications/:week/:version", component: PublicationPage, canActivate: [weekGuard] },
+    ],
+  },
   { path: "forbidden", component: Forbidden },
   { path: "**", redirectTo: "" },
 ];

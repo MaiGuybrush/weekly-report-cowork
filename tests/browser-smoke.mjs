@@ -64,6 +64,8 @@ try {
   await page.goto(url);
   const s1 = page.locator('[data-file="s1"]');
   await s1.locator('[data-add-project]').waitFor({ timeout: 15000 });
+  assert.equal(await page.locator('[data-shell]').count(), 1);
+  assert.match(await page.locator('[data-shell] .who').innerText(), /Head One\s*課長/);
   await s1.locator('[data-add-project]').click();
   const project = s1.locator('app-project-schedule').last();
   await project.locator('[data-field="project-title"]').fill('新平台');
@@ -149,11 +151,26 @@ try {
   await guyPage.waitForFunction(() => document.querySelector('[data-file="cross"] [data-field="managementSummary"]')?.value === '本週有一項風險。', null, { timeout: 15000 });
   assert.equal(await guyPage.locator('[data-file="cross"] [data-field="decision-description"]').last().inputValue(), '是否延後上線');
 
-  // create next week with no publication yet: empty files; only division head sees the button
+  // section head home: hint without create button; unknown week bounces home with a toast
+  await page.goto(base + '/#/');
+  await page.locator('[data-role-hint]').waitFor({ timeout: 15000 });
+  assert.equal(await page.locator('[data-shell]').count(), 1);
+  assert.match(await page.locator('[data-role-hint]').innerText(), /編輯第一課的專案與各分項[\s\S]*其他課與跨課內容唯讀/);
   assert.equal(await page.locator('[data-create-week]').count(), 0);
+  await page.goto(base + '/#/weeks/2026-W99');
+  await page.getByText('找不到該週').waitFor({ timeout: 15000 });
+  await page.waitForURL(/#\/$/, { timeout: 15000 });
+
+  // create next week with no publication yet: empty files; only division head sees the button
   await guyPage.goto(base + '/#/');
+  await guyPage.locator('[data-role-hint]').waitFor({ timeout: 15000 });
+  assert.match(await guyPage.locator('[data-role-hint]').innerText(), /編輯管理摘要與待決策事項[\s\S]*發布本週正式版[\s\S]*建立下週/);
+  assert.match(await guyPage.locator('[data-shell] .who').innerText(), /部級/);
+  assert.equal(await guyPage.locator('[data-no-publication]').innerText(), '尚無正式版');
+  assert.equal(await guyPage.locator('[data-nav="pub"]').count(), 0);
+  assert.deepEqual(await guyPage.locator('[data-week-status]').allInnerTexts(), ['草稿']);
   await guyPage.locator('[data-create-week]').click();
-  await guyPage.locator('a[href="#/weeks/2026-W42"]').waitFor({ timeout: 15000 });
+  await guyPage.locator('.weeklist a[href="#/weeks/2026-W42"]').waitFor({ timeout: 15000 });
   const w42 = await (await fetch(base + '/api/weeks/2026-W42', { headers: { Authorization: `Bearer ${jwt}` } })).json();
   assert.deepEqual(w42.s1, { section: 's1', week: '2026-W42' });
   await guyPage.goto(url);
@@ -175,6 +192,14 @@ try {
   await guyPage.locator('[data-version-select]').selectOption('2026-W41/1');
   await guyPage.waitForURL(/#\/publications\/2026-W41\/1$/, { timeout: 15000 });
   await guyPage.getByRole('heading', { name: /v1$/ }).waitFor({ timeout: 15000 });
+  assert.equal(await guyPage.locator('[data-shell]').count(), 1);
+  // home: latest card, week status pills, and 正式版 nav now present
+  await guyPage.locator('[data-nav="home"]').click();
+  await guyPage.locator('[data-latest-publication]').waitFor({ timeout: 15000 });
+  assert.match(await guyPage.locator('[data-latest-publication]').innerText(), /2026-W41 v2 · \d\d\/\d\d 發布/);
+  assert.deepEqual(await guyPage.locator('[data-week-status]').allInnerTexts(), ['草稿', '已發布 v2']);
+  await guyPage.locator('[data-nav="pub"]').click();
+  await guyPage.waitForURL(/#\/publications\/2026-W41\/2$/, { timeout: 15000 });
   console.log('browser smoke passed');
 } catch (error) {
   console.error(logs);

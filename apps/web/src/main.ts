@@ -20,6 +20,7 @@ loadRuntimeConfig().then(config => bootstrapApplication(App, {
 })).catch(error => {
   console.error('Runtime configuration or startup failed', error);
   const message = document.createElement('div');
+  message.className = 'center-card';
   message.setAttribute('role', 'alert');
   message.textContent = `週報無法啟動：${error instanceof Error ? error.message : '設定載入失敗'}`;
   document.body.replaceChildren(message);

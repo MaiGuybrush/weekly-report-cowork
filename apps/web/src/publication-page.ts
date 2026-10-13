@@ -15,11 +15,8 @@ export function latestPublication(index: PublicationIndex): Entry | undefined {
 @Component({
   standalone: true,
   imports: [ProjectSchedule],
-  template: `<header>
+  template: `<main>
       <h1>正式版 {{ week }} v{{ version }}</h1>
-      <a href="#/">返回</a>
-    </header>
-    <main>
       <label>版本
         <select data-version-select (change)="select($any($event.target).value)">
           @for (p of entries; track p.path) {
