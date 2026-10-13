@@ -55,3 +55,12 @@ export type SectionItem = {
 export type SectionFile = { week: string; section: string; items: SectionItem[] };
 export type CrossFile = { week: string; managementSummary: string; pendingDecisions: { id: string; description: string; result?: string; newDueDate?: string }[] };
 export type PublicationIndex = { publications: { week: string; version: number; publishedAt: string; publishedBy: string; path: string }[] };
+
+export const SECTION_LABELS: Record<NonProjectSection, string> = {
+  incidents: "重大系統異常",
+  operations: "系統維護與營運",
+  personnel: "人力與組織異動",
+  technology: "新技術評估",
+  appendix: "工程師工作明細與來源連結",
+};
+export const FILE_LABELS: Record<string, string> = { s1: "第一課", s2: "第二課", s3: "第三課" };

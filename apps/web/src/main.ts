@@ -3,7 +3,8 @@ import { bootstrapApplication } from '@angular/platform-browser';
 import { provideHttpClient, withInterceptors } from '@angular/common/http';
 import { provideRouter, withHashLocation } from '@angular/router';
 import { APP_INITIALIZER, provideZoneChangeDetection } from '@angular/core';
-import { App, routes } from './report-app';
+import { App } from './report-app';
+import { routes } from './routes';
 import { API_BASE_URL, UAC_BASE_URL, Auth, apiToken } from './auth';
 import { loadRuntimeConfig } from './config';
 

@@ -1465,3 +1465,5 @@ label { display: block; margin: 1rem 0; } input, textarea { display: block; box-
 
 
 
+
+app-file-view, app-cross-editor, app-project-header { display: contents; }

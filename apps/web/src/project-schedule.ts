@@ -3,6 +3,7 @@ import { HttpClient } from "@angular/common/http";
 import { FormsModule } from "@angular/forms";
 import { firstValueFrom } from "rxjs";
 import { Gantt } from "./gantt";
+import { ProjectHeader } from "./project-header";
 import { cancelEntry, evaluateSchedule, reactivateEntry, type ScheduleInput } from "./schedule-rules";
 import type { ExternalDependency, ScheduleEntry, SectionItem } from "./report-types";
 
@@ -12,7 +13,6 @@ const KEYS: (keyof ScheduleEntry)[] = [
 ];
 const RANGE_FIELDS = [["planStart", "計畫開始"], ["planEnd", "計畫結束"], ["actualStart", "實際開始"], ["actualEnd", "實際結束"]];
 const DATE_FIELDS = [["planDate", "計畫日期"], ["actualDate", "實際日期"]];
-const SECTIONS = [["s1", "第一課"], ["s2", "第二課"], ["s3", "第三課"]];
 const KIND_LABELS = { phase: "階段", task: "關鍵任務", milestone: "里程碑" };
 
 /** Only contract fields reach the JSON: derived successors / warnings / externalNotices never do. */
@@ -35,20 +35,11 @@ export function scheduleErrors(project: SectionItem) {
 @Component({
   selector: "app-project-schedule",
   standalone: true,
-  imports: [FormsModule, Gantt],
+  imports: [FormsModule, Gantt, ProjectHeader],
   template: `
     <!-- the app refreshes views manually (no zone events), so re-render after any edit bubbling up -->
     <div class="project" [attr.data-project]="project().id" (input)="changes.detectChanges()" (change)="changes.detectChanges()" (click)="changes.detectChanges()">
-      <label>專案名稱
-        <input data-field="project-title" [(ngModel)]="project().title" [disabled]="!editable()" /></label>
-      <label>實際專案負責人
-        <input data-field="project-owner" [(ngModel)]="project().owner" [disabled]="!editable()" /></label>
-      <p>參與課別：
-        @for (s of SECTIONS; track s[0]) {
-          <label><input type="checkbox" [disabled]="!editable()" [checked]="has(s[0])" (change)="toggle(s[0])" /> {{ s[1] }}</label>
-        }
-        @if (!editable() && !project().participants?.length) { 無 }
-      </p>
+      <app-project-header [project]="project()" [editable]="editable()" />
 
       @for (e of project().schedule; track e.id) {
         <div class="entry" [attr.data-entry]="e.name" [class.cancelled]="e.state === 'cancelled'">
@@ -147,7 +138,6 @@ export class ProjectSchedule {
   work: WorkItem[] = [];
   private workLoaded = false;
   editable = input(false);
-  readonly SECTIONS = SECTIONS;
   readonly KIND_LABELS = KIND_LABELS;
   readonly KINDS = ["phase", "task", "milestone"] as const;
   readonly RANGE_FIELDS = RANGE_FIELDS;
@@ -186,13 +176,6 @@ export class ProjectSchedule {
     if (!e.evidenceLinks?.some((l) => l.workId === workId)) (e.evidenceLinks ??= []).push({ workId, summary: "" });
   }
   unlink(e: ScheduleEntry, workId: number) { e.evidenceLinks = e.evidenceLinks?.filter((l) => l.workId !== workId); }
-
-  has = (s: string) => !!this.project().participants?.includes(s);
-  toggle(s: string) {
-    const p = this.project();
-    const list = p.participants ?? [];
-    p.participants = list.includes(s) ? list.filter((x) => x !== s) : [...list, s];
-  }
 
   add(kind: ScheduleEntry["kind"]) {
     const p = this.project();

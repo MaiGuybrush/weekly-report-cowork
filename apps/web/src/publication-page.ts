@@ -3,8 +3,7 @@ import { HttpClient } from "@angular/common/http";
 import { ActivatedRoute } from "@angular/router";
 import { firstValueFrom } from "rxjs";
 import { ProjectSchedule } from "./project-schedule";
-import { FILE_LABELS, SECTION_LABELS } from "./week-editor";
-import type { CrossFile, NonProjectSection, PublicationIndex, SectionFile, SectionItem } from "./report-types";
+import { FILE_LABELS, SECTION_LABELS, type CrossFile, type NonProjectSection, type PublicationIndex, type SectionFile, type SectionItem } from "./report-types";
 
 type Entry = PublicationIndex["publications"][number];
 
