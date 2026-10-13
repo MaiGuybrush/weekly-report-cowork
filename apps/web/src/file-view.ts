@@ -1,7 +1,14 @@
 import { ChangeDetectorRef, Component, computed, inject, input } from "@angular/core";
 import { FormsModule } from "@angular/forms";
 import { ProjectSchedule } from "./project-schedule";
-import { type NonProjectSection, type SectionFile, type SectionItem } from "./report-types";
+import { type NonProjectSection, type SourceLink, type SectionFile, type SectionItem } from "./report-types";
+
+/** Rows without a URL are dropped on save; an emptied list leaves no field behind. */
+export function pruneSourceLinks(item: SectionItem) {
+  const links = item.details?.sourceLinks?.map((l) => ({ ...l, url: l.url?.trim() })).filter((l) => l.url);
+  if (links?.length) item.details.sourceLinks = links;
+  else delete item.details?.sourceLinks;
+}
 
 @Component({
   selector: "app-file-view",
@@ -32,6 +39,17 @@ import { type NonProjectSection, type SectionFile, type SectionItem } from "./re
               <label>內容
                 <textarea data-field="content" rows="6" [(ngModel)]="item.content" [disabled]="!editable()"></textarea></label>
             }
+            <div class="src-links">
+              <strong>來源連結</strong>
+              @for (l of item.details.sourceLinks; track l) {
+                <div class="src-link-row" data-source-link>
+                  <input data-field="source-label" placeholder="標籤" [(ngModel)]="l.label" [disabled]="!editable()" />
+                  <input data-field="source-url" type="url" placeholder="https://" [(ngModel)]="l.url" [disabled]="!editable()" />
+                  @if (editable()) { <button type="button" data-remove-source-link (click)="removeLink(item, l)">移除</button> }
+                </div>
+              } @empty { @if (!editable()) { <small>無</small> } }
+              @if (editable()) { <button type="button" data-add-source-link (click)="addLink(item)">新增來源連結</button> }
+            </div>
             @if (editable()) { <button type="button" (click)="remove(item)">刪除</button> }
           </div>
         }
@@ -58,6 +76,14 @@ export class FileView {
   }
   addProject() {
     (this.data().items ??= []).push({ id: crypto.randomUUID(), section: "projects", title: "", content: "", details: {}, owner: "", participants: [this.file()], schedule: [], externalDependencies: [] });
+    this.changes.detectChanges();
+  }
+  addLink(item: SectionItem) {
+    (item.details.sourceLinks ??= []).push({ label: "", url: "" });
+    this.changes.detectChanges();
+  }
+  removeLink(item: SectionItem, link: SourceLink) {
+    item.details.sourceLinks = item.details.sourceLinks?.filter((l) => l !== link);
     this.changes.detectChanges();
   }
   remove(item: SectionItem) {

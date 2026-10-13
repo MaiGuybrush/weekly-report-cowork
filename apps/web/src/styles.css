@@ -196,3 +196,26 @@ input:disabled, select:disabled, textarea:disabled { background: var(--paper); -
   .gantt, .gantt-track, .pill { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
 }
 @media (prefers-reduced-motion: reduce) { * { transition: none !important; animation: none !important; } }
+
+/* retained data: schedule / delivery details, evidence panel, source links */
+.sched { margin: .8rem 0; border: 1px solid var(--line); border-radius: 8px; background: var(--sheet); }
+.sched > summary { display: flex; align-items: center; gap: .5rem; padding: .6rem 1rem; color: var(--steel-d); font-weight: 600; list-style: none; cursor: pointer; }
+.sched > summary::before { content: '▸'; transition: transform .15s; }
+.sched[open] > summary::before { transform: rotate(90deg); }
+.sched > summary:hover { background: var(--steel-t); }
+.sched > :not(summary) { margin-left: 1rem; margin-right: 1rem; }
+.sched > :last-child { margin-bottom: 1rem; }
+.grid { width: calc(100% - 2rem); border-collapse: collapse; font-size: .88rem; }
+.grid th { padding: .3rem .4rem; border-bottom: 1px solid var(--line); color: var(--mute); font-weight: 600; text-align: left; white-space: nowrap; }
+.grid td { padding: .3rem .4rem; border-bottom: 1px solid var(--line2); vertical-align: top; }
+.grid td input, .grid td select { margin: 0; padding: .3rem .45rem; font-size: .88rem; }
+.grid td select[multiple] { min-width: 9rem; }
+.grid .empty-row { color: var(--mute); text-align: center; }
+.src-links { margin: .8rem 0; padding-top: .6rem; border-top: 1px dashed var(--line); }
+.src-links > strong { display: block; font-size: .85rem; color: var(--mute); }
+.src-link-row { display: flex; align-items: center; gap: .5rem; margin: .3rem 0; }
+.src-link-row input { margin: 0; }
+.src-link-row input:first-child { flex: 0 1 14rem; }
+.src-link-row input:nth-child(2) { flex: 1 1 auto; }
+[data-evidence-toggle] { padding: 0 .6rem; border-radius: 99px; background: var(--line2); color: var(--mute); font-size: .8rem; }
+.evidence-panel { background: var(--steel-t); border-color: var(--plan); }

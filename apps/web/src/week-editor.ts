@@ -5,7 +5,7 @@ import { firstValueFrom } from "rxjs";
 import { CrossEditor } from "./cross-editor";
 import { isDirty, snapshotOf } from "./dirty-state";
 import { EDIT_FILES, tabsOf } from "./edit-nav";
-import { FileView } from "./file-view";
+import { FileView, pruneSourceLinks } from "./file-view";
 import { cleanSchedule, scheduleErrors } from "./project-schedule";
 import { FILE_LABELS, SECTION_LABELS, type CrossFile, type SectionFile } from "./report-types";
 import { ShellState } from "./shell-state";
@@ -178,9 +178,10 @@ export class WeekEditor implements OnInit {
   }
 
   async save(file: string) {
-    const items = (this.data[file]?.items ?? []).map((i) => (i.schedule ? { ...i, schedule: cleanSchedule(i.schedule) } : i));
-    const errors = items.flatMap(scheduleErrors);
+    const errors = (this.data[file]?.items ?? []).flatMap(scheduleErrors);
     if (errors.length) return this.fail(file, `時程有誤，未儲存：${errors.join("；")}`);
+    for (const i of this.data[file]?.items ?? []) pruneSourceLinks(i);
+    const items = (this.data[file]?.items ?? []).map((i) => (i.schedule ? { ...i, schedule: cleanSchedule(i.schedule) } : i));
     const body: SectionFile = { week: this.week, section: file, items };
     await this.put(file, body);
   }

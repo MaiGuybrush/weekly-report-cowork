@@ -5,10 +5,12 @@ export type ItemDetails = {
   handover?: string;
   impact?: string;
   nextStep?: string;
-  sourceLinks?: { label: string; url: string }[];
+  sourceLinks?: SourceLink[];
   pendingDecision?: { description: string; result?: string; newDueDate?: string; requiresFollowUp?: boolean };
   previousCommitment?: string;
 };
+
+export type SourceLink = { label: string; url: string };
 
 export type ScheduleEntry = {
   id: string;

@@ -110,6 +110,19 @@ try {
   await project.locator('[data-field="manual-work-id"]').fill('555');
   await project.locator('[data-manual-add]').click();
   await project.locator('[data-field="evidence-summary"]').last().fill('手動補充');
+  // external deliveries: add two, delete one, fill the other
+  await project.locator('[data-deliveries] summary').click();
+  await project.locator('[data-add-dependency]').click();
+  await project.locator('[data-add-dependency]').click();
+  assert.match(await project.locator('[data-deliveries] summary').innerText(), /外部交付（2 項）/);
+  await project.locator('[data-dependency]').first().locator('[data-remove-dependency]').click();
+  const dep = project.locator('[data-dependency]');
+  assert.equal(await dep.count(), 1);
+  await dep.locator('[data-field="dep-description"]').fill('伺服器採購');
+  await dep.locator('[data-field="dep-supplier"]').fill('資訊採購組');
+  await dep.locator('[data-field="dep-due"]').fill('2026-10-15');
+  await dep.locator('[data-field="dep-status"]').selectOption('delivered');
+  await dep.locator('[data-field="dep-links"]').selectOption({ label: '撰寫規格' });
   await page.locator('[data-save]').click();
   await page.getByText('已儲存第一課').waitFor({ timeout: 15000 });
   assert.equal(await page.locator('[data-dirty]').count(), 0);
@@ -135,6 +148,34 @@ try {
   assert.deepEqual(saved.schedule.find(e => e.name === '上線').predecessors, [saved.schedule.find(e => e.name === '撰寫規格').id]);
   for (const k of ['successors', 'warnings', 'externalNotices', 'history', 'version', 'continuityId']) assert.ok(saved.schedule.every(e => !(k in e)), k);
   assert.deepEqual(saved.schedule.find(e => e.name === '撰寫規格').evidenceLinks, [{ workId: 101, summary: '管線已上線' }, { workId: 555, summary: '手動補充' }]);
+  assert.deepEqual(saved.externalDependencies.map(({ id, ...d }) => d), [{ description: '伺服器採購', supplier: '資訊採購組', dueDate: '2026-10-15', status: 'delivered', linkedEntryIds: [saved.schedule.find(e => e.name === '撰寫規格').id] }]);
+  await again.locator('[data-deliveries] summary').click();
+  assert.equal(await again.locator('[data-dependency] [data-field="dep-description"]').inputValue(), '伺服器採購');
+  assert.equal(await again.locator('[data-dependency] [data-field="dep-status"]').inputValue(), 'delivered');
+  // source links on a non-project item: blank-url rows are not saved; survives reload
+  await page.locator('[data-tab="personnel"]').click();
+  await page.locator('[data-file="s1"] [data-add="personnel"]').click();
+  const card = page.locator('[data-file="s1"] .item').last();
+  await card.locator('[data-field="title"]').fill('人員異動');
+  await card.locator('[data-add-source-link]').click();
+  await card.locator('[data-field="source-label"]').last().fill('空網址');
+  await card.locator('[data-add-source-link]').click();
+  await card.locator('[data-field="source-label"]').last().fill('公告');
+  await card.locator('[data-field="source-url"]').last().fill('https://example.com/notice');
+  await page.locator('[data-save]').click();
+  await page.getByText('已儲存第一課').waitFor({ timeout: 15000 });
+  assert.equal(await card.locator('[data-source-link]').count(), 1);
+  const personnel = (await (await fetch(base + '/api/weeks/2026-W41', { headers: { Authorization: `Bearer ${jwt}` } })).json()).s1.items.find(i => i.title === '人員異動');
+  assert.deepEqual(personnel.details.sourceLinks, [{ label: '公告', url: 'https://example.com/notice' }]);
+  await page.reload();
+  await card.locator('[data-source-link] [data-field="source-url"]').waitFor({ timeout: 15000 });
+  assert.equal(await card.locator('[data-source-link] [data-field="source-url"]').inputValue(), 'https://example.com/notice');
+  await card.locator('[data-remove-source-link]').click();
+  assert.equal(await card.locator('[data-source-link]').count(), 0);
+  await page.locator('[data-save]').click();
+  await page.locator('[data-save-state="clean"]').waitFor({ timeout: 15000 });
+  await page.locator('[data-tab="projects"]').click();
+  await again.locator('.gantt-row').first().waitFor({ timeout: 15000 });
   await again.locator('.btn-phase-expand').click();
   assert.match(await again.locator('.gantt-evidence-chip').innerText(), /2/);
   // health pill (today fixed at 2026-10-12): task past its plan end is overdue; finishing it late turns it into a slip
@@ -155,6 +196,7 @@ try {
   assert.equal(await page.locator('[data-save]').count(), 0);
   assert.equal(await page.locator('[data-rail-file="s1"] [data-dirty]').count(), 1);
   assert.equal(await page.locator('[data-file="s2"] [data-add="personnel"]').count(), 0);
+  assert.equal(await page.locator('[data-file="s2"] [data-add-source-link]').count(), 0);
   await page.locator('[data-rail-file="s1"]').click();
   await page.locator('[data-tab="projects"]').click();
   assert.equal(await page.locator('[data-file="s1"] [data-field="project-title"]').inputValue(), '新平台');
@@ -282,6 +324,7 @@ try {
   await guyPage.waitForURL(/#\/publications\/2026-W41\/1$/, { timeout: 15000 });
   await guyPage.locator('[data-file="s1"] app-project-schedule .gantt-row').first().waitFor({ timeout: 15000 });
   assert.equal(await guyPage.locator('[data-file="s1"] [data-field="project-title"]').last().isDisabled(), true);
+  assert.equal(await guyPage.locator('[data-file="s1"] [data-add-dependency], [data-file="s1"] [data-remove-dependency], [data-file="s1"] [data-evidence-toggle]').count(), 0);
   assert.equal(await guyPage.locator('[data-file="s1"] .gantt-row-phase .plan-bar').count(), 1);
   assert.equal(await guyPage.locator('[data-file="s1"] .gantt-row-phase .actual-bar').count(), 1);
   assert.match(await guyPage.locator('[data-file="s1"] app-project-schedule').last().locator('[data-health]').innerText(), /逾期 1 項\s*完成 0\/2/);
