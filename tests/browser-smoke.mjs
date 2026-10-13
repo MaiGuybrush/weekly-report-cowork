@@ -164,14 +164,14 @@ try {
   await card.locator('[data-field="ref-url"]').last().fill('https://example.com/notice');
   await page.locator('[data-save]').click();
   await page.getByText('已儲存第一課').waitFor({ timeout: 15000 });
-  assert.equal(await card.locator('[data-ref-link]').count(), 1);
+  assert.equal(await card.locator('[data-link-row]').count(), 1);
   const personnel = (await (await fetch(base + '/api/weeks/2026-W41', { headers: { Authorization: `Bearer ${jwt}` } })).json()).s1.items.find(i => i.title === '人員異動');
   assert.deepEqual(personnel.details.sourceLinks, [{ label: '公告', url: 'https://example.com/notice' }]);
   await page.reload();
-  await card.locator('[data-ref-link] [data-field="ref-url"]').waitFor({ timeout: 15000 });
-  assert.equal(await card.locator('[data-ref-link] [data-field="ref-url"]').inputValue(), 'https://example.com/notice');
+  await card.locator('[data-link-row] [data-field="ref-url"]').waitFor({ timeout: 15000 });
+  assert.equal(await card.locator('[data-link-row] [data-field="ref-url"]').inputValue(), 'https://example.com/notice');
   await card.locator('[data-remove-ref-link]').click();
-  assert.equal(await card.locator('[data-ref-link]').count(), 0);
+  assert.equal(await card.locator('[data-link-row]').count(), 0);
   await page.locator('[data-save]').click();
   await page.locator('[data-save-state="clean"]').waitFor({ timeout: 15000 });
   await page.locator('[data-tab="projects"]').click();

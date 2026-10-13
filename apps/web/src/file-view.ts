@@ -42,7 +42,7 @@ export function pruneRefLinks(item: SectionItem) {
             <div class="ref-links">
               <strong>參考連結</strong>
               @for (l of item.details.sourceLinks; track l) {
-                <div class="ref-link-row" data-ref-link>
+                <div class="ref-link-row" data-link-row>
                   <input data-field="ref-label" placeholder="標籤" [(ngModel)]="l.label" [disabled]="!editable()" />
                   <input data-field="ref-url" type="url" placeholder="https://" [(ngModel)]="l.url" [disabled]="!editable()" />
                   @if (editable()) { <button type="button" data-remove-ref-link (click)="removeLink(item, l)">移除</button> }
