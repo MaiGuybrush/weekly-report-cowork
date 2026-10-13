@@ -19,19 +19,23 @@ export type GanttEntry = {
 export type GanttView = { expandTasks: boolean; showCancelled: boolean; expandedPhases: ReadonlySet<string> };
 
 const DAY = 86400000;
+export const localToday = () => {
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+};
 const time = (date: string) => new Date(`${date}T00:00:00`).getTime();
 
-function dates(entries: GanttEntry[]) {
-  return entries
-    .flatMap((e) => [e.planStart, e.planEnd, e.actualStart, e.actualEnd, e.planDate, e.actualDate])
+function dates(entries: GanttEntry[], extra: string[] = []) {
+  return [...entries.flatMap((e) => [e.planStart, e.planEnd, e.actualStart, e.actualEnd, e.planDate, e.actualDate]), ...extra]
     .filter((d): d is string => !!d)
     .map(time);
 }
 
 export type GanttRange = { min: number; max: number };
 
-export function ganttRange(entries: GanttEntry[]): GanttRange | null {
-  const all = dates(entries);
+/** `extra` dates (e.g. today) widen the range so their marker stays on the chart. */
+export function ganttRange(entries: GanttEntry[], extra: string[] = []): GanttRange | null {
+  const all = dates(entries, extra);
   return all.length ? { min: Math.min(...all), max: Math.max(...all) } : null;
 }
 
@@ -102,20 +106,27 @@ export type GanttMarks = {
   actualBar: { start: string; end: string } | null;
   planDiamond: string | null;
   actualDiamond: string | null;
+  /** Style classes for the actual side: "late" (past plan end) and/or "running" (not finished yet). */
+  actualClass: string;
 };
 
-/** Plan/actual shapes for one row; the actual side is absent until it happens. */
-export function ganttMarks(entry: GanttEntry): GanttMarks {
+/** Plan/actual shapes for one row; the actual side is absent until it happens. A running bar reaches today. */
+export function ganttMarks(entry: GanttEntry, today = localToday()): GanttMarks {
+  const cls = (late: boolean, running: boolean) => [late && "late", running && "running"].filter(Boolean).join(" ");
   if (entry.kind === "milestone") {
-    return { planBar: null, actualBar: null, planDiamond: entry.planDate || null, actualDiamond: entry.actualDate || null };
+    const late = !!entry.planDate && !!entry.actualDate && entry.actualDate > entry.planDate;
+    return { planBar: null, actualBar: null, planDiamond: entry.planDate || null, actualDiamond: entry.actualDate || null, actualClass: cls(late, false) };
   }
   const actualStart = entry.actualStart || entry.actualEnd;
-  const actualEnd = entry.actualEnd || entry.actualStart;
+  const running = !entry.actualEnd && !!actualStart;
+  const actualEnd = entry.actualEnd || (running && today > actualStart! ? today : actualStart);
+  const late = !!entry.planEnd && (entry.actualEnd || today) > entry.planEnd && !!actualStart;
   return {
     planBar: entry.planStart && entry.planEnd ? { start: entry.planStart, end: entry.planEnd } : null,
     actualBar: actualStart && actualEnd ? { start: actualStart, end: actualEnd } : null,
     planDiamond: null,
     actualDiamond: null,
+    actualClass: cls(late, running),
   };
 }
 

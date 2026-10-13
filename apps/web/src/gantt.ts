@@ -9,6 +9,7 @@ import {
   ganttTicks,
   ganttWidth,
   hasChildTasks,
+  localToday,
   stateLabel,
   varianceBadgeClass,
   varianceText,
@@ -47,6 +48,7 @@ import {
       <div class="gantt-legend">
         <span class="legend-item"><i class="legend-bar plan-bar"></i> 計畫</span>
         <span class="legend-item"><i class="legend-bar actual-bar"></i> 實際</span>
+        <span class="legend-item"><i class="legend-bar actual-bar late"></i> 實際（逾期）</span>
         <span class="legend-item"><i class="legend-diamond pending-diamond"></i> 計畫節點</span>
         <span class="legend-item"><i class="legend-diamond achieved-diamond"></i> 實際節點</span>
       </div>
@@ -57,6 +59,7 @@ import {
           @for (tick of ticks(); track tick.percent) {
             <span class="gantt-tick" [style.left.%]="tick.percent">{{ tick.label }}</span>
           }
+          <b class="gantt-today-label" [style.left.%]="todayPosition()">今天 {{ todayLabel() }}</b>
         </div>
         <div class="gantt-stats-spacer">狀態與總偏差</div>
       </div>
@@ -101,11 +104,9 @@ import {
             </div>
 
             <div class="gantt-track">
-              @if (meetingPosition(); as mPos) {
-                <div class="gantt-today-line" [style.left.%]="mPos" title="報告日基準線"></div>
-              }
+              <div class="gantt-today-line" [style.left.%]="todayPosition()" title="今日基準線"></div>
 
-              @if (marks(entry); as m) {
+              @if (marks(entry, today()); as m) {
                 @if (m.planDiamond) {
                   <i
                     class="milestone-target-marker"
@@ -115,6 +116,7 @@ import {
                 @if (m.actualDiamond) {
                   <i
                     class="milestone-marker achieved-marker"
+                    [class.late]="m.actualClass.includes('late')"
                     [attr.data-state]="entry.state"
                     [style.left.%]="position(m.actualDiamond)"
                     [title]="tooltip(entry)"></i>
@@ -129,6 +131,8 @@ import {
                 @if (m.actualBar) {
                   <i
                     class="actual actual-bar"
+                    [class.late]="m.actualClass.includes('late')"
+                    [class.running]="m.actualClass.includes('running')"
                     [style.left.%]="position(m.actualBar.start)"
                     [style.width.%]="width(m.actualBar.start, m.actualBar.end)"
                     [title]="tooltip(entry)"></i>
@@ -156,7 +160,9 @@ export class Gantt {
   showCancelled = signal(false);
   private expandedPhases = signal<ReadonlySet<string>>(new Set());
 
-  private range = computed(() => ganttRange(this.entries()));
+  /** Browser date, not the report date: overdue and the today line follow the real clock. */
+  today = computed(() => localToday());
+  private range = computed(() => ganttRange(this.entries(), [this.today()]));
   ticks = computed(() => ganttTicks(this.range()));
   cancelledCount = computed(() => this.entries().filter((e) => e.state === "cancelled").length);
   rows = computed(() =>
@@ -166,7 +172,8 @@ export class Gantt {
       expandedPhases: this.expandedPhases(),
     }),
   );
-  meetingPosition = computed(() => (this.meetingDate() ? ganttPosition(this.range(), this.meetingDate()) : null));
+  todayPosition = computed(() => ganttPosition(this.range(), this.today()));
+  todayLabel = computed(() => this.today().slice(5).replace("-", "/"));
 
   position = (date: string | null | undefined) => ganttPosition(this.range(), date);
   width = (start: string | null | undefined, end: string | null | undefined) => ganttWidth(this.range(), start, end);

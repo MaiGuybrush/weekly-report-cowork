@@ -1,11 +1,6 @@
-import type { GanttEntry } from "./gantt-model";
+import { localToday, type GanttEntry } from "./gantt-model";
 
 export type ProjectHealth = { status: "ok" | "warn" | "bad"; text: string; progress: string };
-
-const localToday = () => {
-  const d = new Date();
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
-};
 
 /** Summary of one project's schedule; cancelled entries are ignored, milestones don't count toward 完成 x/y. */
 export function projectHealth(schedule: Pick<GanttEntry, "kind" | "state" | "planEnd" | "actualEnd" | "planDate" | "actualDate">[] = [], today = localToday()): ProjectHealth {
