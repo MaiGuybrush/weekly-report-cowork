@@ -13,7 +13,7 @@ export type GanttEntry = {
   state: "open" | "in-progress" | "completed" | "cancelled" | "pending" | "achieved";
   warnings?: { message: string }[];
   externalNotices?: { message: string }[];
-  evidenceLinks?: unknown[];
+  evidenceLinks?: { workId: number; summary: string }[];
 };
 
 export type GanttView = { expandTasks: boolean; showCancelled: boolean; expandedPhases: ReadonlySet<string> };

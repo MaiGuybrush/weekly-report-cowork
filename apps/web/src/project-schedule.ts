@@ -38,9 +38,10 @@ export function scheduleErrors(project: SectionItem) {
   imports: [FormsModule, Gantt, ProjectHeader],
   template: `
     <!-- the app refreshes views manually (no zone events), so re-render after any edit bubbling up -->
-    <div class="project" [class.invalid]="evaluated().errors.length > 0" [attr.data-project-error]="evaluated().errors.length > 0 ? '' : null" [attr.data-project]="project().id" (input)="changes.detectChanges()" (change)="changes.detectChanges()" (click)="changes.detectChanges()">
-      <app-project-header [project]="project()" [editable]="editable()" />
+    <div class="project" [class.doc-project]="document()" [class.invalid]="evaluated().errors.length > 0" [attr.data-project-error]="evaluated().errors.length > 0 ? '' : null" [attr.data-project]="project().id" (input)="changes.detectChanges()" (change)="changes.detectChanges()" (click)="changes.detectChanges()">
+      <app-project-header [project]="project()" [editable]="editable()" [document]="document()" />
 
+      @if (!document()) {
       <details class="sched" open>
         <summary>時程明細（{{ project().schedule?.length || 0 }} 項）</summary>
         @for (e of project().schedule; track e.id) {
@@ -136,8 +137,22 @@ export function scheduleErrors(project: SectionItem) {
         </table>
         @if (editable()) { <button type="button" data-add-dependency (click)="addDependency()">新增外部交付</button> }
       </details>
+      }
 
       <app-gantt [entries]="evaluated().entries" />
+      @if (document()) {
+        @if (project().externalDependencies?.length) {
+          <table class="grid doc-deliveries" data-deliveries-table>
+            <caption>外部交付</caption>
+            <thead><tr><th>內容</th><th>供應者</th><th>到期日</th><th>狀態</th></tr></thead>
+            <tbody>
+              @for (d of project().externalDependencies; track d.id) {
+                <tr data-dependency><td>{{ d.description }}</td><td>{{ d.supplier }}</td><td class="num">{{ d.dueDate }}</td><td>{{ d.status === "delivered" ? "已交付" : "未交付" }}</td></tr>
+              }
+            </tbody>
+          </table>
+        }
+      }
     </div>`,
 })
 export class ProjectSchedule {
@@ -150,6 +165,8 @@ export class ProjectSchedule {
   work: WorkItem[] = [];
   private workLoaded = false;
   editable = input(false);
+  /** Publication layout: title line, gantt and a read-only deliveries table; no schedule forms. */
+  document = input(false);
   readonly KIND_LABELS = KIND_LABELS;
   readonly KINDS = ["phase", "task", "milestone"] as const;
   readonly RANGE_FIELDS = RANGE_FIELDS;

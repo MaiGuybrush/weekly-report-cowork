@@ -9,6 +9,7 @@ import { FileView, pruneRefLinks } from "./file-view";
 import { cleanSchedule, scheduleErrors } from "./project-schedule";
 import { FILE_LABELS, SECTION_LABELS, type CrossFile, type SectionFile } from "./report-types";
 import { ShellState } from "./shell-state";
+import { weekStatus } from "./week-status";
 
 const TAB_LABELS: Record<string, string> = { projects: "專案", ...SECTION_LABELS, summary: "管理摘要", decisions: "待決策事項" };
 const RAIL_LABELS: Record<string, string> = { ...FILE_LABELS, cross: "跨課" };
@@ -33,7 +34,6 @@ export const leaveGuard: CanDeactivateFn<WeekEditor> = (editor, _route, _state, 
         <div class="page-head">
           <h1>{{ RAIL_LABELS[file] }}</h1>
           @if (!canEditFile(file)) { <span class="lock" data-readonly-note>🔒 唯讀。這一頁由{{ file === "cross" ? "部級主管" : RAIL_LABELS[file] + "課長" }}編輯。</span> }
-          @if (canEditCross()) { <button type="button" data-publish (click)="publish()">發布</button> }
         </div>
         <div class="tabs" role="tablist" aria-label="分項">
           @for (t of tabsOf(file); track t) {
@@ -54,11 +54,22 @@ export const leaveGuard: CanDeactivateFn<WeekEditor> = (editor, _route, _state, 
           <span class="st" [class.dirty]="dirty(file)" [attr.data-save-state]="dirty(file) ? 'dirty' : 'clean'">{{ dirty(file) ? "● 有未儲存變更" : "所有變更已儲存" }}</span>
           @if (error && errorFile === file) { <span class="err" role="alert">{{ error }}</span> }
           <span class="sp"></span>
+          @if (canEditCross()) {
+            @if (dirty("cross")) { <span class="st" data-publish-hint>請先儲存跨課</span> }
+            <button type="button" data-publish [disabled]="publishing || dirty('cross')" (click)="askPublish()">{{ publishing ? "發布中…" : "發布 " + week }}</button>
+          }
           @if (canEditFile(file)) {
             <button type="button" data-save [disabled]="!dirty(file)" (click)="file === 'cross' ? saveCross() : save(file)">儲存{{ RAIL_LABELS[file] }}</button>
           }
         </div>
       }
+      <dialog #publishDialog data-publish-dialog aria-label="發布確認">
+        <form method="dialog">
+          <p>發布 {{ week }} 為 v{{ nextVersion() }}？發布後無法修改。</p>
+          <button value="cancel" autofocus>取消</button>
+          <button value="publish" data-publish-confirm>確認發布</button>
+        </form>
+      </dialog>
       <dialog #leave data-leave-dialog aria-label="離開確認">
         <form method="dialog">
           <p>有未儲存變更，確定要離開？離開後這些變更會遺失。</p>
@@ -87,6 +98,8 @@ export class WeekEditor implements OnInit {
   errorFile = "";
   /** Per-file snapshot of what was last loaded or saved; a file is dirty when its draft differs. */
   private saved: Record<string, string> = {};
+  publishing = false;
+  private publishDialog = viewChild.required<ElementRef<HTMLDialogElement>>("publishDialog");
   private leaveDialog = viewChild.required<ElementRef<HTMLDialogElement>>("leave");
   get me() { return this.state.me(); }
   get cross(): CrossFile {
@@ -168,11 +181,25 @@ export class WeekEditor implements OnInit {
     const { managementSummary, pendingDecisions } = this.cross;
     await this.put("cross", { week: this.week, managementSummary, pendingDecisions });
   }
-  async publish() {
+  nextVersion = () => weekStatus(this.state.publications(), this.week).version + 1;
+
+  askPublish() {
+    const dialog = this.publishDialog().nativeElement;
+    dialog.returnValue = "";
+    dialog.addEventListener("close", () => dialog.returnValue === "publish" && void this.publish(), { once: true });
+    dialog.showModal();
+  }
+
+  private async publish() {
+    if (this.publishing) return;
+    this.publishing = true;
+    this.error = "";
+    this.changes.detectChanges();
     try {
       const entry = await firstValueFrom(this.http.post<{ week: string; version: number }>(`/api/weeks/${this.week}/publications`, {}));
       await this.router.navigate(["/publications", entry.week, entry.version]);
     } catch (e: any) {
+      this.publishing = false;
       this.fail(this.file, `發布失敗：${e?.error?.error ?? ""}`);
     }
   }

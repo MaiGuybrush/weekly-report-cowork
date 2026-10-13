@@ -320,22 +320,80 @@ try {
 
   // division head publishes and lands on the publication page; section head cannot publish
   assert.equal(await page.locator('[data-publish]').count(), 0);
+  // a source link on a retained personnel item shows up in the publication
+  const week41 = await call('/api/weeks/2026-W41', 'H1');
+  const s1Items = week41.body.s1.items;
+  s1Items.find(i => i.id === 's1-hr-1').details.sourceLinks = [{ label: '公告', url: 'https://example.com/notice' }];
+  assert.equal((await call('/api/weeks/2026-W41/s1', 'H1', 'PUT', { week: '2026-W41', section: 's1', items: s1Items })).status, 204);
+  await guyPage.goto(base + '/#/weeks/2026-W41/cross/summary');
+  await guyPage.reload();
+  await guyPage.locator('[data-save-state="clean"]').waitFor({ timeout: 15000 });
+  // unsaved cross file blocks publishing and says why; reverting the edit re-enables it
+  const summary = guyPage.locator('[data-file="cross"] [data-field="managementSummary"]');
+  await summary.fill('尚未儲存');
+  assert.equal(await guyPage.locator('[data-publish]').isDisabled(), true);
+  assert.equal(await guyPage.locator('[data-publish-hint]').innerText(), '請先儲存跨課');
+  await summary.fill('本週有一項風險。');
+  assert.equal(await guyPage.locator('[data-publish]').isDisabled(), false);
+  assert.equal(await guyPage.locator('[data-publish]').innerText(), '發布 2026-W41');
+  // confirmation dialog: Esc stays, confirm publishes once even though the request is slow
+  let posts = 0;
+  await guyPage.route('**/api/weeks/2026-W41/publications', async r => { posts++; await new Promise(x => setTimeout(x, 800)); await r.continue(); });
   await guyPage.locator('[data-publish]').click();
+  await guyPage.locator('[data-publish-dialog]').waitFor({ state: 'visible', timeout: 5000 });
+  assert.match(await guyPage.locator('[data-publish-dialog]').innerText(), /發布 2026-W41 為 v1？發布後無法修改/);
+  await guyPage.keyboard.press('Escape');
+  await guyPage.locator('[data-publish-dialog]').waitFor({ state: 'hidden', timeout: 5000 });
+  assert.equal(posts, 0);
+  await guyPage.locator('[data-publish]').click();
+  await guyPage.locator('[data-publish-confirm]').click();
+  await guyPage.locator('[data-publish]', { hasText: '發布中…' }).waitFor({ timeout: 5000 });
+  assert.equal(await guyPage.locator('[data-publish]').isDisabled(), true);
   await guyPage.waitForURL(/#\/publications\/2026-W41\/1$/, { timeout: 15000 });
+  assert.equal(posts, 1);
+  await guyPage.unroute('**/api/weeks/2026-W41/publications');
+  // document: 管理摘要, then 三課; version in the title row; project header, deliveries, evidence, links, personnel line
   await guyPage.locator('[data-file="s1"] app-project-schedule .gantt-row').first().waitFor({ timeout: 15000 });
-  assert.equal(await guyPage.locator('[data-file="s1"] [data-field="project-title"]').last().isDisabled(), true);
-  assert.equal(await guyPage.locator('[data-file="s1"] [data-add-dependency], [data-file="s1"] [data-remove-dependency], [data-file="s1"] [data-evidence-toggle]').count(), 0);
-  assert.equal(await guyPage.locator('[data-file="s1"] .gantt-row-phase .plan-bar').count(), 1);
-  assert.equal(await guyPage.locator('[data-file="s1"] .gantt-row-phase .actual-bar').count(), 1);
-  assert.match(await guyPage.locator('[data-file="s1"] app-project-schedule').last().locator('[data-health]').innerText(), /逾期 1 項\s*完成 0\/2/);
-  assert.equal(await guyPage.locator('[data-file="cross"] p').first().innerText(), '本週有一項風險。');
-  // publish a second version from the draft, then switch back to v1
+  assert.equal(await guyPage.locator('[data-doc-version]').innerText(), '2026-W41 · v1');
+  assert.deepEqual(await guyPage.locator('.doc h2').allInnerTexts(), ['管理摘要', '第一課', '第二課', '第三課']);
+  assert.equal(await guyPage.locator('.doc .summary').innerText(), '本週有一項風險。');
+  assert.equal(await guyPage.locator('[data-file="s1"] input, [data-file="s1"] [data-evidence-toggle], [data-file="s1"] [data-add-dependency]').count(), 0);
+  const pub = guyPage.locator('[data-file="s1"] app-project-schedule').last();
+  assert.equal(await pub.locator('[data-project-title]').innerText(), '新平台');
+  assert.match(await pub.locator('.pj-title').innerText(), /負責人 王小明/);
+  assert.equal(await pub.locator('.gantt-row-phase .plan-bar').count(), 1);
+  assert.equal(await pub.locator('.gantt-row-phase .actual-bar').count(), 1);
+  assert.match(await pub.locator('[data-health]').innerText(), /逾期 1 項\s*完成 0\/2/);
+  assert.match(await pub.locator('[data-deliveries-table]').innerText(), /伺服器採購\s+資訊採購組\s+2026-10-15\s+已交付/);
+  await pub.locator('.btn-phase-expand').click();
+  assert.match(await pub.locator('.gantt-evidence-chip').innerText(), /2/);
+  assert.match(await pub.locator('.gantt-evidence-chip').getAttribute('title'), /管線已上線/);
+  assert.equal(await guyPage.locator('[data-file="s1"] [data-source-links] a').getAttribute('href'), 'https://example.com/notice');
+  assert.equal(await guyPage.locator('[data-file="s2"] [data-impact-line]').innerText(), '交接：交接給同課同仁；影響：無；下一步：補人（2026-10-05 生效）');
+  assert.equal(await guyPage.locator('[data-old-version]').count(), 0);
+  // printing hides the top bar and the document controls
+  await guyPage.emulateMedia({ media: 'print' });
+  assert.equal(await guyPage.locator('[data-shell]').isHidden(), true);
+  assert.equal(await guyPage.locator('[data-print]').isHidden(), true);
+  assert.equal(await guyPage.locator('.doc .summary').isVisible(), true);
+  await guyPage.emulateMedia({ media: null });
+  // a failed publish stays on the editor and reports in the save bar; retry then makes v2
   await guyPage.goto(url);
+  await guyPage.locator('[data-save-state="clean"]').waitFor({ timeout: 15000 });
+  await guyPage.route('**/api/weeks/2026-W41/publications', r => r.fulfill({ status: 500, contentType: 'application/json', body: JSON.stringify({ error: 'boom' }) }));
   await guyPage.locator('[data-publish]').click();
+  await guyPage.locator('[data-publish-confirm]').click();
+  await guyPage.locator('[data-save-bar] [role="alert"]', { hasText: '發布失敗：boom' }).waitFor({ timeout: 5000 });
+  assert.match(guyPage.url(), /#\/weeks\/2026-W41\/cross\/summary$/);
+  assert.equal(await guyPage.locator('[data-publish]').isDisabled(), false);
+  await guyPage.unroute('**/api/weeks/2026-W41/publications');
+  await guyPage.locator('[data-publish]').click();
+  await guyPage.locator('[data-publish-confirm]').click();
   await guyPage.waitForURL(/#\/publications\/2026-W41\/2$/, { timeout: 15000 });
   await guyPage.locator('[data-version-select]').selectOption('2026-W41/1');
   await guyPage.waitForURL(/#\/publications\/2026-W41\/1$/, { timeout: 15000 });
-  await guyPage.getByRole('heading', { name: /v1$/ }).waitFor({ timeout: 15000 });
+  await guyPage.locator('[data-doc-version]', { hasText: '2026-W41 · v1' }).waitFor({ timeout: 15000 });
+  assert.equal(await guyPage.locator('[data-old-version]').innerText(), '舊版');
   assert.equal(await guyPage.locator('[data-shell]').count(), 1);
   // home: latest card, week status pills, and 正式版 nav now present
   await guyPage.locator('[data-nav="home"]').click();
@@ -344,6 +402,21 @@ try {
   assert.deepEqual(await guyPage.locator('[data-week-status]').allInnerTexts(), ['草稿', '已發布 v2']);
   await guyPage.locator('[data-nav="pub"]').click();
   await guyPage.waitForURL(/#\/publications\/2026-W41\/2$/, { timeout: 15000 });
+  // a newer week publishes: dropdown groups weeks newest first with versions newest first; older versions get the pill
+  await guyPage.goto(base + '/#/weeks/2026-W42');
+  await guyPage.locator('[data-publish]', { hasText: '發布 2026-W42' }).waitFor({ timeout: 15000 });
+  await guyPage.locator('[data-publish]').click();
+  assert.match(await guyPage.locator('[data-publish-dialog]').innerText(), /發布 2026-W42 為 v1？/);
+  await guyPage.locator('[data-publish-confirm]').click();
+  await guyPage.waitForURL(/#\/publications\/2026-W42\/1$/, { timeout: 15000 });
+  await guyPage.locator('[data-doc-version]', { hasText: '2026-W42 · v1' }).waitFor({ timeout: 15000 });
+  assert.equal(await guyPage.locator('[data-old-version]').count(), 0);
+  assert.deepEqual(await guyPage.locator('[data-version-select] optgroup').evaluateAll(g => g.map(x => x.label)), ['2026-W42', '2026-W41']);
+  assert.deepEqual((await guyPage.locator('[data-version-select] option').allInnerTexts()).map(x => x.replace(/\d\d\/\d\d/, 'MM/DD')), ['v1 · MM/DD 發布', 'v2 · MM/DD 發布', 'v1 · MM/DD 發布']);
+  assert.equal(await guyPage.locator('.doc h2').count(), 1, 'empty sections have no heading');
+  await guyPage.locator('[data-version-select]').selectOption('2026-W41/2');
+  await guyPage.waitForURL(/#\/publications\/2026-W41\/2$/, { timeout: 15000 });
+  await guyPage.locator('[data-old-version]').waitFor({ timeout: 15000 });
   console.log('browser smoke passed');
 } catch (error) {
   console.error(logs);

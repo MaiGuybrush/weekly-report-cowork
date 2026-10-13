@@ -99,7 +99,7 @@ import {
                 <small class="gantt-ext-icon" [title]="entry.externalNotices![0].message">🌐</small>
               }
               @if (entry.kind === 'task' && entry.evidenceLinks?.length) {
-                <span class="gantt-evidence-chip" [title]="'已連結 ' + entry.evidenceLinks!.length + ' 筆來源連結'">📎 {{ entry.evidenceLinks!.length }}</span>
+                <span class="gantt-evidence-chip" [title]="evidenceTitle(entry)">📎 {{ entry.evidenceLinks!.length }}</span>
               }
             </div>
 
@@ -185,6 +185,7 @@ export class Gantt {
     this.expandedPhases.set(next);
   }
 
+  evidenceTitle = (e: GanttEntry) => (e.evidenceLinks ?? []).map((l) => `#${l.workId} ${l.summary}`.trim()).join("\n");
   marks = ganttMarks;
   tooltip = ganttTooltip;
   stateLabel = stateLabel;
