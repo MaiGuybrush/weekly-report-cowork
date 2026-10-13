@@ -1,8 +1,10 @@
 import { Component, input } from "@angular/core";
 import { FormsModule } from "@angular/forms";
+import { projectHealth } from "./project-health";
 import type { SectionItem } from "./report-types";
 
 const SECTIONS = [["s1", "第一課"], ["s2", "第二課"], ["s3", "第三課"]];
+const HEALTH_STATUS = { ok: "status-accepted", warn: "status-pending", bad: "status-rejected" };
 
 @Component({
   selector: "app-project-header",
@@ -18,12 +20,20 @@ const SECTIONS = [["s1", "第一課"], ["s2", "第二課"], ["s3", "第三課"]]
         <label><input type="checkbox" [disabled]="!editable()" [checked]="has(s[0])" (change)="toggle(s[0])" /> {{ s[1] }}</label>
       }
       @if (!editable() && !project().participants?.length) { 無 }
+    </p>
+    <p [attr.data-health]="health().status">
+      <span [class]="'status-badge ' + HEALTH_STATUS[health().status]">{{ health().text }}</span>
+      <span class="task-owner-pill">{{ health().progress }}</span>
     </p>`,
 })
 export class ProjectHeader {
   project = input.required<SectionItem>();
   editable = input(false);
   readonly SECTIONS = SECTIONS;
+  readonly HEALTH_STATUS = HEALTH_STATUS;
+
+  // recomputed every check so in-place edits show immediately; cheap (one pass over the schedule)
+  health = () => projectHealth(this.project().schedule);
 
   has = (s: string) => !!this.project().participants?.includes(s);
   toggle(s: string) {

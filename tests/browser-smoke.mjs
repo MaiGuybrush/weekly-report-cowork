@@ -60,6 +60,7 @@ try {
   page.on('pageerror', e => console.error('page error:', e.message));
   await page.addInitScript(([t]) => { localStorage.setItem('CIM_TK', t); localStorage.setItem('CIM_RTK', 'r'); }, [jwt]);
   const url = `${base}/#/weeks/2026-W41`;
+  await page.clock.setFixedTime('2026-10-12T09:00:00');
   await page.goto(url);
   const s1 = page.locator('[data-file="s1"]');
   await s1.locator('[data-add-project]').waitFor({ timeout: 15000 });
@@ -119,6 +120,10 @@ try {
   assert.deepEqual(saved.schedule.find(e => e.name === '撰寫規格').evidenceLinks, [{ workId: 101, summary: '管線已上線' }, { workId: 555, summary: '手動補充' }]);
   await again.locator('.btn-phase-expand').click();
   assert.match(await again.locator('.gantt-evidence-chip').innerText(), /2/);
+  // health pill (today fixed at 2026-10-12): task past its plan end is overdue; finishing it late turns it into a slip
+  assert.match(await again.locator('[data-health]').innerText(), /逾期 1 項\s*完成 0\/2/);
+  await again.locator('[data-entry="撰寫規格"] [data-field="actualEnd"]').fill('2026-10-12');
+  assert.match(await again.locator('[data-health]').innerText(), /曾延後 3 項/);
   // section head sees cross read-only
   assert.equal(await page.locator('[data-file="cross"] [data-save]').count(), 0);
   assert.equal(await page.locator('[data-file="cross"] [data-field="managementSummary"]').isDisabled(), true);
@@ -129,6 +134,7 @@ try {
   await guyContext.route('**/assets/config.json', r => r.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ apiBaseUrl: '', uacBaseUrl: 'http://mock-uac.test/auth' }) }));
   await guyContext.route('http://mock-uac.test/auth/**', r => r.fulfill({ status: 200, contentType: 'application/json', headers: { 'access-control-allow-origin': '*', 'access-control-allow-headers': '*' }, body: JSON.stringify({ token: guyJwt, refreshToken: 'r' }) }));
   const guyPage = await guyContext.newPage();
+  await guyPage.clock.setFixedTime('2026-10-12T09:00:00');
   await guyPage.addInitScript(([t]) => { localStorage.setItem('CIM_TK', t); localStorage.setItem('CIM_RTK', 'r'); }, [guyJwt]);
   await guyPage.goto(url);
   const cross = guyPage.locator('[data-file="cross"]');
@@ -160,6 +166,7 @@ try {
   assert.equal(await guyPage.locator('[data-file="s1"] [data-field="project-title"]').last().isDisabled(), true);
   assert.equal(await guyPage.locator('[data-file="s1"] .gantt-row-phase .plan-bar').count(), 1);
   assert.equal(await guyPage.locator('[data-file="s1"] .gantt-row-phase .actual-bar').count(), 1);
+  assert.match(await guyPage.locator('[data-file="s1"] app-project-schedule').last().locator('[data-health]').innerText(), /逾期 1 項\s*完成 0\/2/);
   assert.equal(await guyPage.locator('[data-file="cross"] p').first().innerText(), '本週有一項風險。');
   // publish a second version from the draft, then switch back to v1
   await guyPage.goto(url);
