@@ -64,6 +64,13 @@ try {
   await page.goto(url);
   const s1 = page.locator('[data-file="s1"]');
   await s1.locator('[data-add-project]').waitFor({ timeout: 15000 });
+  // head lands on own section's projects tab; rail/tab semantics and read-only marks
+  await page.waitForURL(/#\/weeks\/2026-W41\/s1\/projects$/);
+  assert.equal(await page.locator('[data-rail-file="s1"]').getAttribute('aria-current'), 'page');
+  assert.equal(await page.locator('[data-tab="projects"]').getAttribute('aria-selected'), 'true');
+  assert.equal(await page.locator('[data-rail-file="s1"] .ro').count(), 0);
+  for (const f of ['s2', 's3', 'cross']) assert.equal(await page.locator(`[data-rail-file="${f}"] .ro`).innerText(), '唯讀', f);
+  assert.equal(await page.locator('[data-readonly-note]').count(), 0);
   assert.equal(await page.locator('[data-shell]').count(), 1);
   assert.match(await page.locator('[data-shell] .who').innerText(), /Head One\s*課長/);
   await s1.locator('[data-add-project]').click();
@@ -126,7 +133,33 @@ try {
   assert.match(await again.locator('[data-health]').innerText(), /逾期 1 項\s*完成 0\/2/);
   await again.locator('[data-entry="撰寫規格"] [data-field="actualEnd"]').fill('2026-10-12');
   assert.match(await again.locator('[data-health]').innerText(), /曾延後 3 項/);
+  // tab counts follow the draft; switching tab keeps the edit; switching rail file keeps a shared tab
+  assert.equal(await page.locator('[data-tab="projects"] em').innerText(), '1');
+  await page.locator('[data-tab="personnel"]').click();
+  await page.waitForURL(/#\/weeks\/2026-W41\/s1\/personnel$/);
+  await page.locator('[data-rail-file="s2"]').click();
+  await page.waitForURL(/#\/weeks\/2026-W41\/s2\/personnel$/);
+  assert.match(await page.locator('[data-readonly-note]').innerText(), /🔒 唯讀.*第二課課長/);
+  assert.equal(await page.locator('[data-file="s2"] [data-save]').count(), 0);
+  assert.equal(await page.locator('[data-file="s2"] [data-add="personnel"]').count(), 0);
+  await page.locator('[data-rail-file="s1"]').click();
+  await page.locator('[data-tab="projects"]').click();
+  assert.equal(await page.locator('[data-file="s1"] [data-field="project-title"]').inputValue(), '新平台');
+  assert.equal(await page.locator('[data-file="s1"] [data-entry="撰寫規格"] [data-field="actualEnd"]').inputValue(), '2026-10-12');
+  // deep links open the named file and tab; unknown file/tab bounce home with a toast
+  await page.goto(base + '/#/weeks/2026-W41/cross/decisions');
+  await page.locator('[data-tab="decisions"][aria-selected="true"]').waitFor({ timeout: 15000 });
+  assert.equal(await page.locator('[data-rail-file="cross"]').getAttribute('aria-current'), 'page');
+  await page.goto(base + '/#/weeks/2026-W41/s9/projects');
+  await page.getByText('找不到該課別或頁籤').waitFor({ timeout: 15000 });
+  await page.waitForURL(/#\/$/);
+  await page.goto(base + '/#/weeks/2026-W41/s1/nope');
+  await page.getByText('找不到該課別或頁籤').waitFor({ timeout: 15000 });
+  await page.waitForURL(/#\/$/);
   // section head sees cross read-only
+  await page.goto(base + '/#/weeks/2026-W41/cross');
+  await page.waitForURL(/#\/weeks\/2026-W41\/cross\/summary$/);
+  assert.match(await page.locator('[data-readonly-note]').innerText(), /部級主管/);
   assert.equal(await page.locator('[data-file="cross"] [data-save]').count(), 0);
   assert.equal(await page.locator('[data-file="cross"] [data-field="managementSummary"]').isDisabled(), true);
 
@@ -139,16 +172,21 @@ try {
   await guyPage.clock.setFixedTime('2026-10-12T09:00:00');
   await guyPage.addInitScript(([t]) => { localStorage.setItem('CIM_TK', t); localStorage.setItem('CIM_RTK', 'r'); }, [guyJwt]);
   await guyPage.goto(url);
+  await guyPage.waitForURL(/#\/weeks\/2026-W41\/cross\/summary$/);
   const cross = guyPage.locator('[data-file="cross"]');
   await cross.locator('[data-field="managementSummary"]').fill('本週有一項風險。');
+  await guyPage.locator('[data-tab="decisions"]').click();
   await cross.locator('[data-add-decision]').click();
+  assert.equal(await guyPage.locator('[data-tab="decisions"] em').innerText(), '1');
   await cross.locator('[data-field="decision-description"]').last().fill('是否延後上線');
   await cross.locator('[data-save]').click();
   await guyPage.getByText('已儲存。').waitFor({ timeout: 15000 });
+  await guyPage.locator('[data-rail-file="s1"]').click();
   assert.equal(await guyPage.locator('[data-file="s1"] [data-add-project]').count(), 0);
-  await guyPage.reload();
+  await guyPage.goto(url);
   await guyPage.locator('[data-file="cross"] [data-field="managementSummary"]').waitFor({ timeout: 15000 });
   await guyPage.waitForFunction(() => document.querySelector('[data-file="cross"] [data-field="managementSummary"]')?.value === '本週有一項風險。', null, { timeout: 15000 });
+  await guyPage.locator('[data-tab="decisions"]').click();
   assert.equal(await guyPage.locator('[data-file="cross"] [data-field="decision-description"]').last().inputValue(), '是否延後上線');
 
   // section head home: hint without create button; unknown week bounces home with a toast
@@ -173,6 +211,10 @@ try {
   await guyPage.locator('.weeklist a[href="#/weeks/2026-W42"]').waitFor({ timeout: 15000 });
   const w42 = await (await fetch(base + '/api/weeks/2026-W42', { headers: { Authorization: `Bearer ${jwt}` } })).json();
   assert.deepEqual(w42.s1, { section: 's1', week: '2026-W42' });
+  // week pill keeps file and tab
+  await guyPage.goto(base + '/#/weeks/2026-W41/s2/personnel');
+  await guyPage.locator('[data-week-pill]', { hasText: 'W42' }).click();
+  await guyPage.waitForURL(/#\/weeks\/2026-W42\/s2\/personnel$/, { timeout: 15000 });
   await guyPage.goto(url);
 
   // division head publishes and lands on the publication page; section head cannot publish

@@ -5,7 +5,7 @@ import { WeekEditor } from "./week-editor";
 import { PublicationPage } from "./publication-page";
 import { editorGuard } from "./auth";
 import { Shell } from "./shell";
-import { weekGuard } from "./shell-state";
+import { editGuard, weekGuard } from "./shell-state";
 
 @Component({
   standalone: true,
@@ -20,7 +20,10 @@ export const routes: Routes = [
     canActivateChild: [editorGuard],
     children: [
       { path: "", component: Home },
-      { path: "weeks/:week", component: WeekEditor, canActivate: [weekGuard] },
+      // the short forms never render: editGuard redirects them to the full URL
+      { path: "weeks/:week", component: WeekEditor, canActivate: [editGuard] },
+      { path: "weeks/:week/:file", component: WeekEditor, canActivate: [editGuard] },
+      { path: "weeks/:week/:file/:tab", component: WeekEditor, canActivate: [editGuard] },
       { path: "publications/:week/:version", component: PublicationPage, canActivate: [weekGuard] },
     ],
   },
