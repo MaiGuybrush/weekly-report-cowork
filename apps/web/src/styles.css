@@ -30,13 +30,15 @@ app-file-view, app-cross-editor, app-project-header { display: contents; }
 
 /* week editor: rail + tabs */
 .edit { display: grid; grid-template-columns: 230px minmax(0, 1fr); min-height: calc(100vh - 3rem); }
-.rail { position: sticky; top: 3rem; align-self: start; height: calc(100vh - 3rem); overflow: auto; padding: 1.2rem .9rem; border-right: 1px solid var(--line); background: var(--paper); }
+.rail { position: sticky; top: 3rem; align-self: start; height: calc(100vh - 3rem); overflow: auto; padding: 1.2rem .9rem 6rem; border-right: 1px solid var(--line); background: var(--paper); }
 .rail h3 { margin: 0 0 .5rem .5rem; font: 600 .8rem var(--num); color: var(--mute); }
 .rail a { display: flex; align-items: center; gap: .5rem; padding: .45rem .6rem; border-radius: 6px; color: var(--ink); text-decoration: none; }
 .rail a:hover { background: var(--line2); }
 .rail a.on { background: var(--ink); color: #fff; }
 .rail a .ro { margin-left: auto; font-size: .75rem; opacity: .6; }
-main.page { max-width: 1180px; width: 100%; margin: 0; padding: 1.6rem 2rem 4rem; }
+.rail a .dot { width: .55rem; height: .55rem; margin-left: auto; border-radius: 50%; background: var(--amber); }
+.rail a .ro + .dot { margin-left: 0; }
+main.page { max-width: 1180px; width: 100%; margin: 0; padding: 1.6rem 2rem 7rem; }
 .page-head { display: flex; align-items: baseline; gap: 1rem; margin-bottom: 1rem; }
 .page-head h1 { margin: 0; font-size: 1.6rem; }
 .page-head .lock { color: var(--mute); font-size: .9rem; }
@@ -45,6 +47,17 @@ main.page { max-width: 1180px; width: 100%; margin: 0; padding: 1.6rem 2rem 4rem
 .tabs a { margin-bottom: -1px; padding: .5rem .9rem; border-bottom: 3px solid transparent; color: var(--mute); text-decoration: none; }
 .tabs a.on { border-color: var(--steel); color: var(--ink); font-weight: 600; }
 .tabs a em { margin-left: .3rem; padding: 0 .45rem; border-radius: 99px; background: var(--line2); font: normal .8rem var(--num); }
+
+/* save bar */
+.bar-save { position: fixed; left: 230px; right: 0; bottom: 0; z-index: 15; display: flex; align-items: center; flex-wrap: wrap; gap: .5rem 1rem; padding: .7rem 2rem; background: var(--sheet); border-top: 1px solid var(--line); box-shadow: 0 -6px 20px rgba(24, 34, 43, .06); }
+.bar-save .st { color: var(--mute); font-size: .9rem; }
+.bar-save .st.dirty { color: #8a6400; font-weight: 600; }
+.bar-save .err { flex: 1 1 20rem; color: var(--red); font-size: .88rem; }
+.bar-save .sp { margin-left: auto; }
+.bar-save button { margin: 0; }
+dialog { padding: 1.2rem 1.6rem; border: 1px solid var(--line); border-radius: 10px; background: var(--sheet); color: var(--ink); }
+dialog::backdrop { background: #18222b66; }
+.project.invalid { border-color: var(--red); }
 
 /* home */
 .home { max-width: 980px; display: grid; grid-template-columns: 1.25fr 1fr; gap: 2rem; }
@@ -166,6 +179,7 @@ input:disabled, select:disabled, textarea:disabled { background: var(--paper); -
   .home { grid-template-columns: 1fr; }
   main { padding: 0 1rem; }
   .edit { grid-template-columns: 1fr; }
+  .bar-save { left: 0; padding: .7rem 1rem; }
   .rail { position: static; height: auto; padding: .6rem 1rem 0; border: 0; }
   .rail h3 { display: none; }
   .rail [role="tablist"] { display: flex; flex-wrap: wrap; gap: .3rem; }

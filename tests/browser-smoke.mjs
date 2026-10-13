@@ -96,8 +96,10 @@ try {
   // phase <- direct child link is rejected, and save is blocked
   await project.locator('[data-entry="撰寫規格"] [data-field="predecessors"]').selectOption({ label: '設計階段' });
   await project.getByRole('alert').first().waitFor({ timeout: 5000 });
-  await s1.locator('[data-save]').click();
-  await page.getByText(/時程有誤，未儲存/).waitFor({ timeout: 5000 });
+  await page.locator('[data-save]').click();
+  await page.locator('[data-save-bar] [role="alert"]', { hasText: /時程有誤，未儲存/ }).waitFor({ timeout: 5000 });
+  assert.equal(await page.locator('[data-project-error]').count(), 1);
+  assert.equal(await page.locator('[data-rail-file="s1"] [data-dirty]').count(), 1);
   // valid link: milestone after task
   await project.locator('[data-entry="撰寫規格"] [data-field="predecessors"]').selectOption([]);
   await project.locator('[data-entry="上線"] [data-field="predecessors"]').selectOption({ label: '撰寫規格' });
@@ -108,10 +110,16 @@ try {
   await project.locator('[data-field="manual-work-id"]').fill('555');
   await project.locator('[data-manual-add]').click();
   await project.locator('[data-field="evidence-summary"]').last().fill('手動補充');
-  await s1.locator('[data-save]').click();
-  await page.getByText('已儲存。').waitFor({ timeout: 15000 });
+  await page.locator('[data-save]').click();
+  await page.getByText('已儲存第一課').waitFor({ timeout: 15000 });
+  assert.equal(await page.locator('[data-dirty]').count(), 0);
+  assert.equal(await page.locator('[data-save-bar] [role="alert"]').count(), 0);
+  assert.equal(await page.locator('[data-save-state]').innerText(), '所有變更已儲存');
 
   await page.reload();
+  await page.locator('[data-save-state="clean"]').waitFor({ timeout: 15000 });
+  assert.equal(await page.locator('[data-dirty]').count(), 0);
+  assert.equal(await page.locator('[data-save]').isDisabled(), true);
   const again = page.locator('[data-file="s1"] app-project-schedule').last();
   await again.locator('.gantt-row').first().waitFor({ timeout: 15000 });
   assert.equal(await again.locator('[data-field="project-title"]').inputValue(), '新平台');
@@ -133,6 +141,10 @@ try {
   assert.match(await again.locator('[data-health]').innerText(), /逾期 1 項\s*完成 0\/2/);
   await again.locator('[data-entry="撰寫規格"] [data-field="actualEnd"]').fill('2026-10-12');
   assert.match(await again.locator('[data-health]').innerText(), /曾延後 3 項/);
+  // the edit shows a dirty dot on its rail file and in the save bar
+  assert.equal(await page.locator('[data-rail-file="s1"] [data-dirty]').getAttribute('aria-label'), '有未儲存變更');
+  assert.equal(await page.locator('[data-rail-file="s2"] [data-dirty]').count(), 0);
+  assert.equal(await page.locator('[data-save-state]').innerText(), '● 有未儲存變更');
   // tab counts follow the draft; switching tab keeps the edit; switching rail file keeps a shared tab
   assert.equal(await page.locator('[data-tab="projects"] em').innerText(), '1');
   await page.locator('[data-tab="personnel"]').click();
@@ -140,12 +152,23 @@ try {
   await page.locator('[data-rail-file="s2"]').click();
   await page.waitForURL(/#\/weeks\/2026-W41\/s2\/personnel$/);
   assert.match(await page.locator('[data-readonly-note]').innerText(), /🔒 唯讀.*第二課課長/);
-  assert.equal(await page.locator('[data-file="s2"] [data-save]').count(), 0);
+  assert.equal(await page.locator('[data-save]').count(), 0);
+  assert.equal(await page.locator('[data-rail-file="s1"] [data-dirty]').count(), 1);
   assert.equal(await page.locator('[data-file="s2"] [data-add="personnel"]').count(), 0);
   await page.locator('[data-rail-file="s1"]').click();
   await page.locator('[data-tab="projects"]').click();
   assert.equal(await page.locator('[data-file="s1"] [data-field="project-title"]').inputValue(), '新平台');
   assert.equal(await page.locator('[data-file="s1"] [data-entry="撰寫規格"] [data-field="actualEnd"]').inputValue(), '2026-10-12');
+  // leaving the editor with unsaved changes asks first; Esc stays, confirming discards
+  await page.locator('[data-nav="home"]').click();
+  await page.locator('[data-leave-dialog]').waitFor({ state: 'visible', timeout: 5000 });
+  await page.keyboard.press('Escape');
+  await page.locator('[data-leave-dialog]').waitFor({ state: 'hidden', timeout: 5000 });
+  assert.match(page.url(), /#\/weeks\/2026-W41\/s1\/projects$/);
+  assert.equal(await page.locator('[data-rail-file="s1"] [data-dirty]').count(), 1);
+  await page.locator('[data-nav="home"]').click();
+  await page.locator('[data-leave-confirm]').click();
+  await page.waitForURL(/#\/$/, { timeout: 15000 });
   // deep links open the named file and tab; unknown file/tab bounce home with a toast
   await page.goto(base + '/#/weeks/2026-W41/cross/decisions');
   await page.locator('[data-tab="decisions"][aria-selected="true"]').waitFor({ timeout: 15000 });
@@ -160,7 +183,7 @@ try {
   await page.goto(base + '/#/weeks/2026-W41/cross');
   await page.waitForURL(/#\/weeks\/2026-W41\/cross\/summary$/);
   assert.match(await page.locator('[data-readonly-note]').innerText(), /部級主管/);
-  assert.equal(await page.locator('[data-file="cross"] [data-save]').count(), 0);
+  assert.equal(await page.locator('[data-save]').count(), 0);
   assert.equal(await page.locator('[data-file="cross"] [data-field="managementSummary"]').isDisabled(), true);
 
   // division head edits cross and it persists
@@ -174,13 +197,37 @@ try {
   await guyPage.goto(url);
   await guyPage.waitForURL(/#\/weeks\/2026-W41\/cross\/summary$/);
   const cross = guyPage.locator('[data-file="cross"]');
+  await guyPage.locator('[data-save-state="clean"]').waitFor({ timeout: 15000 });
+  assert.equal(await guyPage.locator('[data-save]').isDisabled(), true);
   await cross.locator('[data-field="managementSummary"]').fill('本週有一項風險。');
+  assert.equal(await guyPage.locator('[data-rail-file="cross"] [data-dirty]').count(), 1);
+  // Tab from the field reaches the save button
+  let reached = false;
+  for (let i = 0; i < 40 && !reached; i++) {
+    await guyPage.keyboard.press('Tab');
+    reached = await guyPage.evaluate(() => document.activeElement?.matches('[data-save]'));
+  }
+  assert.ok(reached, 'Tab reaches save');
+  // a failed save keeps the draft and the dirty dot, and reports in the save bar
+  await guyPage.route('**/api/weeks/2026-W41/cross', r => r.request().method() === 'PUT' ? r.fulfill({ status: 500, contentType: 'application/json', body: JSON.stringify({ error: 'boom' }) }) : r.continue());
+  await guyPage.locator('[data-save]').click();
+  await guyPage.locator('[data-save-bar] [role="alert"]', { hasText: '儲存失敗：boom' }).waitFor({ timeout: 5000 });
+  assert.equal(await guyPage.locator('[data-rail-file="cross"] [data-dirty]').count(), 1);
+  assert.equal(await cross.locator('[data-field="managementSummary"]').inputValue(), '本週有一項風險。');
+  await guyPage.unroute('**/api/weeks/2026-W41/cross');
+  await guyPage.locator('[data-save]').click();
+  await guyPage.getByText('已儲存跨課').waitFor({ timeout: 15000 });
+  assert.equal(await guyPage.locator('[data-dirty]').count(), 0);
+  assert.equal(await guyPage.locator('[data-save-bar] [role="alert"]').count(), 0);
+  await cross.locator('[data-field="managementSummary"]').fill('本週有一項風險。 ');
+  await cross.locator('[data-field="managementSummary"]').fill('本週有一項風險。');
+  assert.equal(await guyPage.locator('[data-save-state]').innerText(), '所有變更已儲存');
   await guyPage.locator('[data-tab="decisions"]').click();
   await cross.locator('[data-add-decision]').click();
   assert.equal(await guyPage.locator('[data-tab="decisions"] em').innerText(), '1');
   await cross.locator('[data-field="decision-description"]').last().fill('是否延後上線');
-  await cross.locator('[data-save]').click();
-  await guyPage.getByText('已儲存。').waitFor({ timeout: 15000 });
+  await guyPage.locator('[data-save]').click();
+  await guyPage.locator('[data-save-state="clean"]').waitFor({ timeout: 15000 });
   await guyPage.locator('[data-rail-file="s1"]').click();
   assert.equal(await guyPage.locator('[data-file="s1"] [data-add-project]').count(), 0);
   await guyPage.goto(url);
@@ -211,7 +258,19 @@ try {
   await guyPage.locator('.weeklist a[href="#/weeks/2026-W42"]').waitFor({ timeout: 15000 });
   const w42 = await (await fetch(base + '/api/weeks/2026-W42', { headers: { Authorization: `Bearer ${jwt}` } })).json();
   assert.deepEqual(w42.s1, { section: 's1', week: '2026-W42' });
-  // week pill keeps file and tab
+  // week pill keeps file and tab; with unsaved changes it asks first
+  await guyPage.goto(base + '/#/weeks/2026-W41/cross/summary');
+  await guyPage.locator('[data-file="cross"] [data-field="managementSummary"]').waitFor({ timeout: 15000 });
+  await guyPage.locator('[data-save-state="clean"]').waitFor({ timeout: 15000 });
+  await guyPage.locator('[data-file="cross"] [data-field="managementSummary"]').fill('未儲存的修改');
+  await guyPage.locator('[data-week-pill]', { hasText: 'W42' }).click();
+  await guyPage.locator('[data-leave-dialog]').waitFor({ state: 'visible', timeout: 5000 });
+  await guyPage.keyboard.press('Escape');
+  await guyPage.locator('[data-leave-dialog]').waitFor({ state: 'hidden', timeout: 5000 });
+  assert.match(guyPage.url(), /#\/weeks\/2026-W41\/cross\/summary$/);
+  await guyPage.locator('[data-week-pill]', { hasText: 'W42' }).click();
+  await guyPage.locator('[data-leave-confirm]').click();
+  await guyPage.waitForURL(/#\/weeks\/2026-W42\/cross\/summary$/, { timeout: 15000 });
   await guyPage.goto(base + '/#/weeks/2026-W41/s2/personnel');
   await guyPage.locator('[data-week-pill]', { hasText: 'W42' }).click();
   await guyPage.waitForURL(/#\/weeks\/2026-W42\/s2\/personnel$/, { timeout: 15000 });

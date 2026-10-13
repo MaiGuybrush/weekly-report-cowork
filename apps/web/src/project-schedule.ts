@@ -38,7 +38,7 @@ export function scheduleErrors(project: SectionItem) {
   imports: [FormsModule, Gantt, ProjectHeader],
   template: `
     <!-- the app refreshes views manually (no zone events), so re-render after any edit bubbling up -->
-    <div class="project" [attr.data-project]="project().id" (input)="changes.detectChanges()" (change)="changes.detectChanges()" (click)="changes.detectChanges()">
+    <div class="project" [class.invalid]="evaluated().errors.length > 0" [attr.data-project-error]="evaluated().errors.length > 0 ? '' : null" [attr.data-project]="project().id" (input)="changes.detectChanges()" (change)="changes.detectChanges()" (click)="changes.detectChanges()">
       <app-project-header [project]="project()" [editable]="editable()" />
 
       @for (e of project().schedule; track e.id) {

@@ -1,4 +1,4 @@
-import { ChangeDetectorRef, Component, inject, input, output } from "@angular/core";
+import { ChangeDetectorRef, Component, inject, input } from "@angular/core";
 import { FormsModule } from "@angular/forms";
 import type { CrossFile } from "./report-types";
 
@@ -24,7 +24,6 @@ import type { CrossFile } from "./report-types";
         }
         @if (editable()) { <button type="button" data-add-decision (click)="addDecision()">新增待決策事項</button> }
       }
-      @if (editable()) { <p><button type="button" data-save (click)="save.emit()">儲存</button></p> }
     </section>`,
 })
 export class CrossEditor {
@@ -34,7 +33,6 @@ export class CrossEditor {
   /** "summary" or "decisions". */
   tab = input.required<string>();
   editable = input(false);
-  save = output<void>();
 
   addDecision() {
     this.cross().pendingDecisions.push({ id: crypto.randomUUID(), description: "" });

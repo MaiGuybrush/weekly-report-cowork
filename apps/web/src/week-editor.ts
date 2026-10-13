@@ -1,8 +1,9 @@
-import { ChangeDetectorRef, Component, inject, OnInit } from "@angular/core";
+import { ChangeDetectorRef, Component, ElementRef, HostListener, inject, OnInit, viewChild } from "@angular/core";
 import { HttpClient } from "@angular/common/http";
-import { ActivatedRoute, Router, RouterLink } from "@angular/router";
+import { ActivatedRoute, CanDeactivateFn, Router, RouterLink } from "@angular/router";
 import { firstValueFrom } from "rxjs";
 import { CrossEditor } from "./cross-editor";
+import { isDirty, snapshotOf } from "./dirty-state";
 import { EDIT_FILES, tabsOf } from "./edit-nav";
 import { FileView } from "./file-view";
 import { cleanSchedule, scheduleErrors } from "./project-schedule";
@@ -11,6 +12,9 @@ import { ShellState } from "./shell-state";
 
 const TAB_LABELS: Record<string, string> = { projects: "專案", ...SECTION_LABELS, summary: "管理摘要", decisions: "待決策事項" };
 const RAIL_LABELS: Record<string, string> = { ...FILE_LABELS, cross: "跨課" };
+
+/** Changing week or leaving the editor asks first when a file has unsaved changes; switching file or tab never does. */
+export const leaveGuard: CanDeactivateFn<WeekEditor> = (editor, _route, _state, next) => editor.confirmLeave(next.url);
 
 @Component({
   standalone: true,
@@ -21,11 +25,11 @@ const RAIL_LABELS: Record<string, string> = { ...FILE_LABELS, cross: "跨課" };
         <div role="tablist" aria-orientation="vertical" aria-label="課別">
           @for (f of EDIT_FILES; track f) {
             <a role="tab" [attr.data-rail-file]="f" [routerLink]="['/weeks', week, f, tabFor(f)]" [class.on]="f === file"
-              [attr.aria-selected]="f === file" [attr.aria-current]="f === file ? 'page' : null">{{ RAIL_LABELS[f] }}@if (!canEditFile(f)) { <span class="ro">唯讀</span> }</a>
+              [attr.aria-selected]="f === file" [attr.aria-current]="f === file ? 'page' : null">{{ RAIL_LABELS[f] }}@if (!canEditFile(f)) { <span class="ro">唯讀</span> }@if (dirty(f)) { <span class="dot" data-dirty role="img" aria-label="有未儲存變更"></span> }</a>
           }
         </div>
       </aside>
-      <main class="page">
+      <main class="page" (input)="error = ''" (change)="error = ''">
         <div class="page-head">
           <h1>{{ RAIL_LABELS[file] }}</h1>
           @if (!canEditFile(file)) { <span class="lock" data-readonly-note>🔒 唯讀。這一頁由{{ file === "cross" ? "部級主管" : RAIL_LABELS[file] + "課長" }}編輯。</span> }
@@ -37,15 +41,31 @@ const RAIL_LABELS: Record<string, string> = { ...FILE_LABELS, cross: "跨課" };
               [attr.aria-selected]="t === tab" [attr.aria-current]="t === tab ? 'page' : null">{{ TAB_LABELS[t] }}@if (count(t) !== null) { <em>{{ count(t) }}</em> }</a>
           }
         </div>
-        @if (message) { <p class="message" role="status">{{ message }}</p> }
         @if (!loaded) {
           <p role="status">載入中…</p>
         } @else if (file === "cross") {
-          <app-cross-editor [cross]="cross" [tab]="tab" [editable]="canEditCross()" (save)="saveCross()" />
+          <app-cross-editor [cross]="cross" [tab]="tab" [editable]="canEditCross()" />
         } @else {
-          <app-file-view [file]="file" [tab]="tab" [week]="week" [data]="fileData(file)" [editable]="canEdit(file)" (save)="save(file)" />
+          <app-file-view [file]="file" [tab]="tab" [week]="week" [data]="fileData(file)" [editable]="canEdit(file)" />
         }
       </main>
+      @if (canEditFile(file) || canEditCross()) {
+        <div class="bar-save" data-save-bar>
+          <span class="st" [class.dirty]="dirty(file)" [attr.data-save-state]="dirty(file) ? 'dirty' : 'clean'">{{ dirty(file) ? "● 有未儲存變更" : "所有變更已儲存" }}</span>
+          @if (error && errorFile === file) { <span class="err" role="alert">{{ error }}</span> }
+          <span class="sp"></span>
+          @if (canEditFile(file)) {
+            <button type="button" data-save [disabled]="!dirty(file)" (click)="file === 'cross' ? saveCross() : save(file)">儲存{{ RAIL_LABELS[file] }}</button>
+          }
+        </div>
+      }
+      <dialog #leave data-leave-dialog aria-label="離開確認">
+        <form method="dialog">
+          <p>有未儲存變更，確定要離開？離開後這些變更會遺失。</p>
+          <button value="stay" autofocus>留在此頁</button>
+          <button value="leave" data-leave-confirm>離開並捨棄</button>
+        </form>
+      </dialog>
     </div>`,
 })
 export class WeekEditor implements OnInit {
@@ -63,7 +83,11 @@ export class WeekEditor implements OnInit {
   tab = "";
   loaded = false;
   data: Record<string, Partial<SectionFile & CrossFile>> = {};
-  message = "";
+  error = "";
+  errorFile = "";
+  /** Per-file snapshot of what was last loaded or saved; a file is dirty when its draft differs. */
+  private saved: Record<string, string> = {};
+  private leaveDialog = viewChild.required<ElementRef<HTMLDialogElement>>("leave");
   get me() { return this.state.me(); }
   get cross(): CrossFile {
     const c = (this.data["cross"] ??= {}) as Partial<CrossFile>;
@@ -79,7 +103,7 @@ export class WeekEditor implements OnInit {
       this.tab = p.get("tab")!;
       if (p.get("week") !== this.week) {
         this.week = p.get("week")!;
-        this.message = "";
+        this.error = "";
         void this.load();
       }
     });
@@ -92,7 +116,40 @@ export class WeekEditor implements OnInit {
     if (week !== this.week) return;
     for (const items of Object.values(data).map((d) => d.items ?? [])) for (const i of items) i.details ??= {};
     this.data = data;
+    this.saved = Object.fromEntries(EDIT_FILES.map((f) => [f, snapshotOf(this.payload(f))]));
     this.loaded = true;
+    this.changes.detectChanges();
+  }
+
+  /** What a save would send for the file, defaults filled so a never-touched file equals its snapshot. */
+  private payload(file: string) {
+    const d = this.data[file];
+    return file === "cross" ? { managementSummary: d?.managementSummary ?? "", pendingDecisions: d?.pendingDecisions ?? [] } : { items: d?.items ?? [] };
+  }
+  dirty = (file: string) => this.loaded && isDirty(this.payload(file), this.saved[file]);
+  private anyDirty = () => EDIT_FILES.some(this.dirty);
+
+  confirmLeave(nextUrl: string): boolean | Promise<boolean> {
+    const base = `/weeks/${this.week}`;
+    const path = nextUrl.split(/[?#]/)[0];
+    if (path === base || path.startsWith(`${base}/`) || !this.anyDirty()) return true;
+    const dialog = this.leaveDialog().nativeElement;
+    if (dialog.open) return false;
+    dialog.returnValue = "";
+    return new Promise((resolve) => {
+      dialog.addEventListener("close", () => resolve(dialog.returnValue === "leave"), { once: true });
+      dialog.showModal();
+    });
+  }
+
+  @HostListener("window:beforeunload", ["$event"])
+  warnOnClose(event: BeforeUnloadEvent) {
+    if (this.anyDirty()) event.preventDefault();
+  }
+
+  private fail(file: string, message: string) {
+    this.error = message;
+    this.errorFile = file;
     this.changes.detectChanges();
   }
 
@@ -116,30 +173,29 @@ export class WeekEditor implements OnInit {
       const entry = await firstValueFrom(this.http.post<{ week: string; version: number }>(`/api/weeks/${this.week}/publications`, {}));
       await this.router.navigate(["/publications", entry.week, entry.version]);
     } catch (e: any) {
-      this.message = `發布失敗：${e?.error?.error ?? ""}`;
-      this.changes.detectChanges();
+      this.fail(this.file, `發布失敗：${e?.error?.error ?? ""}`);
     }
   }
 
   async save(file: string) {
     const items = (this.data[file]?.items ?? []).map((i) => (i.schedule ? { ...i, schedule: cleanSchedule(i.schedule) } : i));
     const errors = items.flatMap(scheduleErrors);
-    if (errors.length) {
-      this.message = `時程有誤，未儲存：${errors.join("；")}`;
-      this.changes.detectChanges();
-      return;
-    }
+    if (errors.length) return this.fail(file, `時程有誤，未儲存：${errors.join("；")}`);
     const body: SectionFile = { week: this.week, section: file, items };
     await this.put(file, body);
   }
 
   private async put(file: string, body: SectionFile | CrossFile) {
+    const week = this.week;
+    const sent = snapshotOf(this.payload(file));
+    this.error = "";
     try {
-      await firstValueFrom(this.http.put(`/api/weeks/${this.week}/${file}`, body));
-      this.message = "已儲存。";
+      await firstValueFrom(this.http.put(`/api/weeks/${week}/${file}`, body));
     } catch (e: any) {
-      this.message = `儲存失敗：${e?.error?.error ?? ""}`;
+      return this.fail(file, `儲存失敗：${e?.error?.error ?? ""}`);
     }
+    if (week === this.week) this.saved[file] = sent;
+    this.state.flash(`已儲存${RAIL_LABELS[file]}`);
     this.changes.detectChanges();
   }
 }

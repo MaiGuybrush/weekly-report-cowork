@@ -1,7 +1,7 @@
 import { Component } from "@angular/core";
 import { Routes } from "@angular/router";
 import { Home } from "./home";
-import { WeekEditor } from "./week-editor";
+import { WeekEditor, leaveGuard } from "./week-editor";
 import { PublicationPage } from "./publication-page";
 import { editorGuard } from "./auth";
 import { Shell } from "./shell";
@@ -21,9 +21,9 @@ export const routes: Routes = [
     children: [
       { path: "", component: Home },
       // the short forms never render: editGuard redirects them to the full URL
-      { path: "weeks/:week", component: WeekEditor, canActivate: [editGuard] },
-      { path: "weeks/:week/:file", component: WeekEditor, canActivate: [editGuard] },
-      { path: "weeks/:week/:file/:tab", component: WeekEditor, canActivate: [editGuard] },
+      { path: "weeks/:week", component: WeekEditor, canActivate: [editGuard], canDeactivate: [leaveGuard] },
+      { path: "weeks/:week/:file", component: WeekEditor, canActivate: [editGuard], canDeactivate: [leaveGuard] },
+      { path: "weeks/:week/:file/:tab", component: WeekEditor, canActivate: [editGuard], canDeactivate: [leaveGuard] },
       { path: "publications/:week/:version", component: PublicationPage, canActivate: [weekGuard] },
     ],
   },

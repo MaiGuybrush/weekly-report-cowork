@@ -1,4 +1,4 @@
-import { ChangeDetectorRef, Component, computed, inject, input, output } from "@angular/core";
+import { ChangeDetectorRef, Component, computed, inject, input } from "@angular/core";
 import { FormsModule } from "@angular/forms";
 import { ProjectSchedule } from "./project-schedule";
 import { type NonProjectSection, type SectionFile, type SectionItem } from "./report-types";
@@ -37,7 +37,6 @@ import { type NonProjectSection, type SectionFile, type SectionItem } from "./re
         }
         @if (editable()) { <button type="button" [attr.data-add]="tab()" (click)="add(key())">新增項目</button> }
       }
-      @if (editable()) { <p><button type="button" data-save (click)="save.emit()">儲存</button></p> }
     </section>`,
 })
 export class FileView {
@@ -50,7 +49,6 @@ export class FileView {
   /** Mutated in place; the parent owns it and serialises it on save. */
   data = input.required<Partial<SectionFile>>();
   editable = input(false);
-  save = output<void>();
 
   itemsOf = (section: string): SectionItem[] => (this.data().items ?? []).filter((i) => i.section === section);
 
