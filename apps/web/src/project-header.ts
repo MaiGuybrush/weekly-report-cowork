@@ -1,5 +1,6 @@
 import { Component, input } from "@angular/core";
 import { FormsModule } from "@angular/forms";
+import { localToday } from "./gantt-model";
 import { projectHealth } from "./project-health";
 import type { SectionItem } from "./report-types";
 
@@ -44,7 +45,7 @@ export class ProjectHeader {
   readonly SECTIONS = SECTIONS;
 
   // recomputed every check so in-place edits show immediately; cheap (one pass over the schedule)
-  health = () => projectHealth(this.project().schedule);
+  health = () => projectHealth(this.project().schedule ?? [], localToday());
 
   participantNames = () => SECTIONS.filter((s) => this.has(s[0])).map((s) => s[1]).join("、");
   has = (s: string) => !!this.project().participants?.includes(s);

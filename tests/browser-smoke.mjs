@@ -3,7 +3,7 @@ import { createServer } from 'node:http';
 import { createServer as createTcpServer } from 'node:net';
 import { generateKeyPairSync, sign } from 'node:crypto';
 import { spawn, execFileSync } from 'node:child_process';
-import { cpSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { cpSync, mkdirSync, mkdtempSync, rmSync } from 'node:fs';
 import { once } from 'node:events';
 import { pathToFileURL } from 'node:url';
 import { tmpdir } from 'node:os';
@@ -11,6 +11,9 @@ import { join, resolve } from 'node:path';
 
 const root = resolve(import.meta.dirname, '..');
 const { chromium } = await import(process.env.PLAYWRIGHT_MODULE || pathToFileURL(join(root, 'apps/web/node_modules/playwright/index.mjs')).href);
+const shots = process.env.SMOKE_SCREENSHOTS || join(root, 'tests/screenshots');
+mkdirSync(shots, { recursive: true });
+const shot = (p, name) => p.screenshot({ path: join(shots, `${name}.png`), fullPage: true });
 const temporary = mkdtempSync(join(tmpdir(), 'weeks-smoke-'));
 const git = (cwd, ...args) => execFileSync('git', args, { cwd, encoding: 'utf8' });
 const remote = join(temporary, 'remote.git');
@@ -71,9 +74,13 @@ try {
   assert.equal(await page.locator('[data-rail-file="s1"] .ro').count(), 0);
   for (const f of ['s2', 's3', 'cross']) assert.equal(await page.locator(`[data-rail-file="${f}"] .ro`).innerText(), '唯讀', f);
   assert.equal(await page.locator('[data-readonly-note]').count(), 0);
+  // empty project list: dashed guidance for an editor, plain note for read-only viewers
+  assert.match(await s1.locator('[data-empty]').innerText(), /新增專案/);
+  await shot(page, '01-editor-empty');
   assert.equal(await page.locator('[data-shell]').count(), 1);
   assert.match(await page.locator('[data-shell] .who').innerText(), /Head One\s*課長/);
   await s1.locator('[data-add-project]').click();
+  assert.equal(await s1.locator('[data-empty]').count(), 0);
   const project = s1.locator('app-project-schedule').last();
   await project.locator('[data-field="project-title"]').fill('新平台');
   await project.locator('[data-field="project-owner"]').fill('王小明');
@@ -177,6 +184,7 @@ try {
   await page.locator('[data-tab="projects"]').click();
   await again.locator('.gantt-row').first().waitFor({ timeout: 15000 });
   await again.locator('.btn-phase-expand').click();
+  await shot(page, '02-editor-project');
   assert.match(await again.locator('.gantt-evidence-chip').innerText(), /2/);
   // health pill (today fixed at 2026-10-12): task past its plan end is overdue; finishing it late turns it into a slip
   assert.match(await again.locator('[data-health]').innerText(), /逾期 1 項\s*完成 0\/2/);
@@ -195,6 +203,7 @@ try {
   assert.match(await page.locator('[data-readonly-note]').innerText(), /🔒 唯讀.*第二課課長/);
   assert.equal(await page.locator('[data-save]').count(), 0);
   assert.equal(await page.locator('[data-rail-file="s1"] [data-dirty]').count(), 1);
+  await shot(page, '03-editor-readonly');
   assert.equal(await page.locator('[data-file="s2"] [data-add="personnel"]').count(), 0);
   assert.equal(await page.locator('[data-file="s2"] [data-add-ref-link]').count(), 0);
   await page.locator('[data-rail-file="s1"]').click();
@@ -204,6 +213,7 @@ try {
   // leaving the editor with unsaved changes asks first; Esc stays, confirming discards
   await page.locator('[data-nav="home"]').click();
   await page.locator('[data-leave-dialog]').waitFor({ state: 'visible', timeout: 5000 });
+  await shot(page, '04-leave-dialog');
   await page.keyboard.press('Escape');
   await page.locator('[data-leave-dialog]').waitFor({ state: 'hidden', timeout: 5000 });
   assert.match(page.url(), /#\/weeks\/2026-W41\/s1\/projects$/);
@@ -227,6 +237,18 @@ try {
   assert.match(await page.locator('[data-readonly-note]').innerText(), /部級主管/);
   assert.equal(await page.locator('[data-save]').count(), 0);
   assert.equal(await page.locator('[data-file="cross"] [data-field="managementSummary"]').isDisabled(), true);
+  await shot(page, '05-cross-readonly');
+  // read-only empty list says so without offering an add button
+  await page.goto(base + '/#/weeks/2026-W41/s3/projects');
+  assert.equal(await page.locator('[data-file="s3"] [data-empty]').innerText(), '尚無專案');
+  // 860px breakpoint: no horizontal scroll and the rail still switches files
+  await page.setViewportSize({ width: 800, height: 900 });
+  assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth), 'no horizontal scroll at 800px');
+  await page.locator('[data-toast], .toast').waitFor({ state: 'detached', timeout: 10000 }).catch(() => {});
+  await shot(page, '06-narrow');
+  await page.locator('[data-rail-file="s2"]').click();
+  await page.waitForURL(/#\/weeks\/2026-W41\/s2\/projects$/);
+  await page.setViewportSize({ width: 1280, height: 720 });
 
   // division head edits cross and it persists
   const guyJwt = token('G');
@@ -241,6 +263,7 @@ try {
   const cross = guyPage.locator('[data-file="cross"]');
   await guyPage.locator('[data-save-state="clean"]').waitFor({ timeout: 15000 });
   assert.equal(await guyPage.locator('[data-save]').isDisabled(), true);
+  await shot(guyPage, '07-cross-summary');
   await cross.locator('[data-field="managementSummary"]').fill('本週有一項風險。');
   assert.equal(await guyPage.locator('[data-rail-file="cross"] [data-dirty]').count(), 1);
   // Tab from the field reaches the save button
@@ -265,6 +288,8 @@ try {
   await cross.locator('[data-field="managementSummary"]').fill('本週有一項風險。');
   assert.equal(await guyPage.locator('[data-save-state]').innerText(), '所有變更已儲存');
   await guyPage.locator('[data-tab="decisions"]').click();
+  assert.match(await cross.locator('[data-empty]').innerText(), /新增待決策事項/);
+  await shot(guyPage, '08-cross-decisions-empty');
   await cross.locator('[data-add-decision]').click();
   assert.equal(await guyPage.locator('[data-tab="decisions"] em').innerText(), '1');
   await cross.locator('[data-field="decision-description"]').last().fill('是否延後上線');
@@ -283,6 +308,7 @@ try {
   await page.locator('[data-role-hint]').waitFor({ timeout: 15000 });
   assert.equal(await page.locator('[data-shell]').count(), 1);
   assert.match(await page.locator('[data-role-hint]').innerText(), /編輯第一課的專案與各分項[\s\S]*其他課與跨課內容唯讀/);
+  await shot(page, '09-home-head');
   assert.equal(await page.locator('[data-create-week]').count(), 0);
   await page.goto(base + '/#/weeks/2026-W99');
   await page.getByText('找不到該週').waitFor({ timeout: 15000 });
@@ -294,6 +320,7 @@ try {
   assert.match(await guyPage.locator('[data-role-hint]').innerText(), /編輯管理摘要與待決策事項[\s\S]*發布本週正式版[\s\S]*建立下週/);
   assert.match(await guyPage.locator('[data-shell] .who').innerText(), /部級/);
   assert.equal(await guyPage.locator('[data-no-publication]').innerText(), '尚無正式版');
+  await shot(guyPage, '10-home-division-empty');
   assert.equal(await guyPage.locator('[data-nav="pub"]').count(), 0);
   assert.deepEqual(await guyPage.locator('[data-week-status]').allInnerTexts(), ['草稿']);
   await guyPage.locator('[data-create-week]').click();
@@ -341,6 +368,7 @@ try {
   await guyPage.route('**/api/weeks/2026-W41/publications', async r => { posts++; await new Promise(x => setTimeout(x, 800)); await r.continue(); });
   await guyPage.locator('[data-publish]').click();
   await guyPage.locator('[data-publish-dialog]').waitFor({ state: 'visible', timeout: 5000 });
+  await shot(guyPage, '11-publish-dialog');
   assert.match(await guyPage.locator('[data-publish-dialog]').innerText(), /發布 2026-W41 為 v1？發布後無法修改/);
   await guyPage.keyboard.press('Escape');
   await guyPage.locator('[data-publish-dialog]').waitFor({ state: 'hidden', timeout: 5000 });
@@ -371,6 +399,7 @@ try {
   assert.equal(await guyPage.locator('[data-file="s1"] [data-source-links] a').getAttribute('href'), 'https://example.com/notice');
   assert.equal(await guyPage.locator('[data-file="s2"] [data-impact-line]').innerText(), '交接：交接給同課同仁；影響：無；下一步：補人（2026-10-05 生效）');
   assert.equal(await guyPage.locator('[data-old-version]').count(), 0);
+  await shot(guyPage, '12-publication');
   // printing hides the top bar and the document controls
   await guyPage.emulateMedia({ media: 'print' });
   assert.equal(await guyPage.locator('[data-shell]').isHidden(), true);
@@ -400,6 +429,7 @@ try {
   await guyPage.locator('[data-latest-publication]').waitFor({ timeout: 15000 });
   assert.match(await guyPage.locator('[data-latest-publication]').innerText(), /2026-W41 v2 · \d\d\/\d\d 發布/);
   assert.deepEqual(await guyPage.locator('[data-week-status]').allInnerTexts(), ['草稿', '已發布 v2']);
+  await shot(guyPage, '13-home-published');
   await guyPage.locator('[data-nav="pub"]').click();
   await guyPage.waitForURL(/#\/publications\/2026-W41\/2$/, { timeout: 15000 });
   // a newer week publishes: dropdown groups weeks newest first with versions newest first; older versions get the pill
@@ -417,6 +447,7 @@ try {
   await guyPage.locator('[data-version-select]').selectOption('2026-W41/2');
   await guyPage.waitForURL(/#\/publications\/2026-W41\/2$/, { timeout: 15000 });
   await guyPage.locator('[data-old-version]').waitFor({ timeout: 15000 });
+  await shot(guyPage, '14-publication-old-version');
   console.log('browser smoke passed');
 } catch (error) {
   console.error(logs);

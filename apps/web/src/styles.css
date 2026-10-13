@@ -204,9 +204,9 @@ input:disabled, select:disabled, textarea:disabled { background: var(--paper); -
   .top { flex-wrap: wrap; gap: .5rem; }
   .home { grid-template-columns: 1fr; }
   main { padding: 0 1rem; }
-  .edit { grid-template-columns: 1fr; }
+  .edit { grid-template-columns: 1fr; grid-template-rows: auto 1fr; }
   .bar-save { left: 0; padding: .7rem 1rem; }
-  .rail { position: static; height: auto; padding: .6rem 1rem 0; border: 0; }
+  .rail { position: static; height: auto; overflow: visible; padding: .6rem 1rem 0; border: 0; }
   .rail h3 { display: none; }
   .rail [role="tablist"] { display: flex; flex-wrap: wrap; gap: .3rem; }
   main.page { padding: 1rem 1rem 3rem; }

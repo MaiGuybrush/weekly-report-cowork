@@ -1,9 +1,9 @@
-import { localToday, type GanttEntry } from "./gantt-model";
+import type { GanttEntry } from "./gantt-model";
 
 export type ProjectHealth = { status: "ok" | "warn" | "bad"; text: string; progress: string };
 
 /** Summary of one project's schedule; cancelled entries are ignored, milestones don't count toward 完成 x/y. */
-export function projectHealth(schedule: Pick<GanttEntry, "kind" | "state" | "planEnd" | "actualEnd" | "planDate" | "actualDate">[] = [], today = localToday()): ProjectHealth {
+export function projectHealth(schedule: Pick<GanttEntry, "kind" | "state" | "planEnd" | "actualEnd" | "planDate" | "actualDate">[], today: string): ProjectHealth {
   const live = schedule.filter((e) => e.state !== "cancelled");
   let late = 0;
   let slipped = 0;

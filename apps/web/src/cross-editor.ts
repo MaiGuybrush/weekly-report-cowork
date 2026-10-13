@@ -21,6 +21,8 @@ import type { CrossFile } from "./report-types";
               <input type="date" [(ngModel)]="d.newDueDate" [disabled]="!editable()" /></label>
             @if (editable()) { <button type="button" (click)="removeDecision(d)">刪除</button> }
           </div>
+        } @empty {
+          <div class="empty" data-empty>{{ editable() ? "尚無待決策事項，按下方「新增待決策事項」開始。" : "尚無待決策事項" }}</div>
         }
         @if (editable()) { <button type="button" data-add-decision (click)="addDecision()">新增待決策事項</button> }
       }

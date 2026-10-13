@@ -19,6 +19,8 @@ export function pruneRefLinks(item: SectionItem) {
         @for (p of itemsOf("projects"); track p.id) {
           <app-project-schedule [week]="week()" [project]="p" [editable]="editable()" />
           @if (editable()) { <button type="button" (click)="remove(p)">刪除專案</button> }
+        } @empty {
+          <div class="empty" data-empty>{{ editable() ? "尚無專案，按下方「新增專案」開始。" : "尚無專案" }}</div>
         }
         @if (editable()) { <button type="button" data-add-project (click)="addProject()">新增專案</button> }
       } @else {
@@ -52,6 +54,8 @@ export function pruneRefLinks(item: SectionItem) {
             </div>
             @if (editable()) { <button type="button" (click)="remove(item)">刪除</button> }
           </div>
+        } @empty {
+          <div class="empty" data-empty>{{ editable() ? "尚無項目，按下方「新增項目」開始。" : "尚無項目" }}</div>
         }
         @if (editable()) { <button type="button" [attr.data-add]="tab()" (click)="add(key())">新增項目</button> }
       }
