@@ -16,18 +16,19 @@ import { PredecessorOption, selectAllIds, summarizeSelection, toggleId } from ".
   standalone: true,
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
-    <div class="pre-container" [class.pre-disabled]="disabled()">
+    <div class="pre-container" [class.pre-disabled]="disabled()" (focusout)="onFocusOut($event)">
       <div
         class="pre-trigger"
         role="button"
         [attr.tabindex]="disabled() ? -1 : 0"
+        aria-haspopup="dialog"
         [attr.aria-expanded]="isOpen()"
         [attr.aria-label]="ariaLabel()"
         [attr.aria-disabled]="disabled()"
         [attr.data-state]="isOpen() ? 'open' : 'closed'"
         (click)="toggleDropdown()"
-        (keydown.enter)="toggleDropdown()"
-        (keydown.space)="toggleDropdown(); $event.preventDefault()">
+        (keydown.enter)="onTriggerKey($event)"
+        (keydown.space)="onTriggerKey($event)">
         @if (summary().names.length) {
           <span class="pre-pills">
             @for (n of summary().names; track $index) { <span class="pre-pill">{{ n }}</span> }
@@ -40,7 +41,7 @@ import { PredecessorOption, selectAllIds, summarizeSelection, toggleId } from ".
       </div>
 
       @if (isOpen()) {
-        <div class="pre-popup" role="dialog" (click)="$event.stopPropagation()">
+        <div class="pre-popup" role="dialog" [attr.aria-label]="ariaLabel()" (click)="$event.stopPropagation()">
           <div class="pre-tools">
             <button type="button" class="pre-all-btn" (click)="onSelectAll()">全選</button>
             <button type="button" class="pre-clear-btn" (click)="onClear()">全部清除</button>
@@ -80,6 +81,16 @@ export class PredecessorSelect {
     this.isOpen.update((v) => !v);
   }
 
+  onTriggerKey(event: Event) {
+    event.preventDefault();
+    this.toggleDropdown();
+  }
+
+  onFocusOut(event: FocusEvent) {
+    const next = event.relatedTarget as Node | null;
+    if (next && !this.elementRef.nativeElement.contains(next)) this.isOpen.set(false);
+  }
+
   onToggle(id: string) {
     if (this.disabled()) return;
     this.selected.set(toggleId(this.selected(), id));
@@ -104,6 +115,8 @@ export class PredecessorSelect {
 
   @HostListener("keydown.escape")
   onEscapeKey() {
+    if (!this.isOpen()) return;
     this.isOpen.set(false);
+    this.elementRef.nativeElement.querySelector(".pre-trigger")?.focus();
   }
 }

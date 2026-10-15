@@ -273,7 +273,7 @@ input:disabled, select:disabled, textarea:disabled { background: var(--paper); -
 .drp-grid { display: grid; grid-template-columns: repeat(7, 1fr); gap: 2px; }
 .drp-day { aspect-ratio: 1; display: inline-flex; align-items: center; justify-content: center; width: 100%; margin: 0; padding: 0; border: 0; border-radius: 4px; background: transparent; font-family: var(--num); font-size: .88rem; color: var(--ink); cursor: pointer; transition: background .12s, color .12s; }
 .drp-day:hover { background: var(--line2); }
-.drp-day.drp-other-month { opacity: .35; }
+.drp-day.drp-other-month { opacity: .5; }
 .drp-day.drp-today { font-weight: 700; text-decoration: underline; text-decoration-color: var(--steel); }
 .drp-day.drp-in-range, .drp-day.drp-in-hover { background: var(--steel-t); color: var(--steel-d); border-radius: 0; }
 .drp-day.drp-selected-start { background: var(--steel) !important; color: #fff !important; font-weight: 700; border-top-left-radius: 4px; border-bottom-left-radius: 4px; }
@@ -331,4 +331,6 @@ input:disabled, select:disabled, textarea:disabled { background: var(--paper); -
   .drp-popup { max-width: calc(100vw - 3rem); }
 }
 .entry .drp-quick-today-btn { display: none; }
+.entry .drp-icon { display: none; }
+.entry .drp-trigger { gap: .3rem; padding: .35rem .5rem; }
 .entry .drp-display-text { font-size: .85rem; }

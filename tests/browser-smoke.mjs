@@ -196,6 +196,55 @@ try {
   assert.match(await again.locator('[data-health]').innerText(), /逾期 1 項\s*完成 0\/2/);
   await pickRange(again.locator('[data-entry="撰寫規格"] [data-field="actualRange"]'), '2026-10-12', '2026-10-12');
   assert.match(await again.locator('[data-health]').innerText(), /曾延後 3 項/);
+  // picking a plan range redraws the gantt bar at once
+  const phasePlan = again.locator('.gantt-row-phase .plan-bar');
+  const barBefore = await phasePlan.getAttribute('style');
+  await pickRange(again.locator('[data-entry="設計階段"] [data-field="planRange"]'), '2026-10-01', '2026-10-27');
+  assert.notEqual(await phasePlan.getAttribute('style'), barBefore);
+  assert.equal(await again.locator('[data-entry="設計階段"] [data-field="planRange"] .drp-display-text').innerText(), '2026-10-01 ～ 2026-10-27');
+  // range picker: Enter opens, hint follows the first click, Esc closes and returns focus to the trigger
+  const rangeBox = again.locator('[data-entry="撰寫規格"] [data-field="planRange"]');
+  const rangeTrigger = rangeBox.locator('.drp-trigger');
+  await rangeTrigger.focus();
+  await page.keyboard.press('Enter');
+  assert.equal(await rangeTrigger.getAttribute('aria-expanded'), 'true');
+  assert.equal(await rangeBox.locator('.drp-popup').getAttribute('aria-label'), '計畫起訖');
+  await rangeBox.locator('[data-date="2026-10-05"]').click();
+  assert.match(await rangeBox.locator('.drp-hint').innerText(), /請點選迄日/);
+  assert.equal(await rangeBox.locator('[data-date="2026-10-05"]').getAttribute('aria-pressed'), 'true');
+  await page.keyboard.press('Escape');
+  assert.equal(await rangeBox.locator('.drp-popup').count(), 0);
+  assert.equal(await rangeTrigger.getAttribute('aria-expanded'), 'false');
+  assert.ok(await rangeTrigger.evaluate(el => el === document.activeElement), 'Esc returns focus to the date trigger');
+  assert.equal(await rangeBox.locator('.drp-display-text').innerText(), '2026-10-02 ～ 2026-10-10', 'aborted pick leaves the value alone');
+  // finishing a pick closes the popup and keeps focus on the trigger; tabbing away closes it too
+  await page.keyboard.press('Enter');
+  await rangeBox.locator('[data-date="2026-10-06"]').click();
+  await rangeBox.locator('[data-date="2026-10-09"]').click();
+  assert.equal(await rangeBox.locator('.drp-popup').count(), 0);
+  assert.ok(await rangeTrigger.evaluate(el => el === document.activeElement), 'completed pick returns focus to the date trigger');
+  assert.equal(await rangeBox.locator('.drp-display-text').innerText(), '2026-10-06 ～ 2026-10-09');
+  await page.keyboard.press('Enter');
+  await page.keyboard.press('Shift+Tab');
+  assert.equal(await rangeBox.locator('.drp-popup').count(), 0, 'focus leaving closes the popup');
+  // predecessor select: checking adds a pill, the dependency shows in the entry, Esc closes and returns focus
+  const preBox = again.locator('[data-entry="上線"] [data-field="predecessors"]');
+  const preTrigger = preBox.locator('.pre-trigger');
+  await preTrigger.focus();
+  await page.keyboard.press('Enter');
+  assert.equal(await preTrigger.getAttribute('aria-haspopup'), 'dialog');
+  assert.equal(await preBox.locator('.pre-option', { hasText: '撰寫規格' }).locator('input').isChecked(), true);
+  assert.equal(await preBox.locator('.pre-option', { hasText: '設計階段' }).locator('input').isChecked(), false);
+  await preBox.locator('.pre-option', { hasText: '設計階段' }).locator('input').check();
+  assert.equal(await preBox.locator('.pre-pill').count(), 2);
+  await preBox.locator('.pre-option', { hasText: '設計階段' }).locator('input').uncheck();
+  assert.deepEqual(await preBox.locator('.pre-pill').allInnerTexts(), ['撰寫規格']);
+  await page.keyboard.press('Escape');
+  assert.equal(await preBox.locator('.pre-popup').count(), 0);
+  assert.ok(await preTrigger.evaluate(el => el === document.activeElement), 'Esc returns focus to the predecessor trigger');
+  await page.keyboard.press('Enter');
+  await page.keyboard.press('Shift+Tab');
+  assert.equal(await preBox.locator('.pre-popup').count(), 0, 'focus leaving closes the predecessor popup');
   // the edit shows a dirty dot on its rail file and in the save bar
   assert.equal(await page.locator('[data-rail-file="s1"] [data-dirty]').getAttribute('aria-label'), '有未儲存變更');
   assert.equal(await page.locator('[data-rail-file="s2"] [data-dirty]').count(), 0);

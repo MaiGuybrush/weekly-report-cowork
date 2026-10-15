@@ -32,18 +32,19 @@ const WEEKDAYS = ["日", "一", "二", "三", "四", "五", "六"];
   standalone: true,
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
-    <div class="drp-container" [class.drp-disabled]="disabled()">
+    <div class="drp-container" [class.drp-disabled]="disabled()" (focusout)="onFocusOut($event)">
       <!-- Trigger Box -->
       <div
         class="drp-trigger"
         role="button"
         tabindex="0"
+        aria-haspopup="dialog"
         [attr.aria-expanded]="isOpen()"
         [attr.aria-label]="ariaLabel()"
         [attr.data-state]="isOpen() ? 'open' : 'closed'"
         (click)="toggleDropdown()"
-        (keydown.enter)="toggleDropdown()"
-        (keydown.space)="toggleDropdown(); $event.preventDefault()">
+        (keydown.enter)="onTriggerKey($event)"
+        (keydown.space)="onTriggerKey($event)">
         <span class="drp-icon" aria-hidden="true">📅</span>
         <span class="drp-display-text" [class.drp-placeholder]="!hasValue()">
           {{ displayText() || placeholderText() }}
@@ -75,7 +76,7 @@ const WEEKDAYS = ["日", "一", "二", "三", "四", "五", "六"];
 
       <!-- Calendar Popup Dropdown -->
       @if (isOpen()) {
-        <div class="drp-popup" role="dialog" aria-modal="true" (click)="$event.stopPropagation()">
+        <div class="drp-popup" role="dialog" [attr.aria-label]="ariaLabel()" (click)="$event.stopPropagation()">
           <div class="drp-header">
             <button
               type="button"
@@ -116,6 +117,8 @@ const WEEKDAYS = ["日", "一", "二", "三", "四", "五", "六"];
                   type="button"
                   class="drp-day"
                   [attr.data-date]="day.dateString"
+                  [attr.aria-label]="day.dateString"
+                  [attr.aria-pressed]="isStart(day.dateString) || isEnd(day.dateString)"
                   [class.drp-other-month]="!day.isCurrentMonth"
                   [class.drp-today]="day.isToday"
                   [class.drp-selected-start]="isStart(day.dateString)"
@@ -235,9 +238,22 @@ export class DateRangePicker {
     this.isOpen.set(true);
   }
 
-  closeDropdown() {
+  closeDropdown(restoreFocus = false) {
     this.isOpen.set(false);
     this.resetTransientState();
+    if (restoreFocus) this.elementRef.nativeElement.querySelector(".drp-trigger")?.focus();
+  }
+
+  // Enter/Space on the nested today/clear buttons must not also toggle the popup
+  onTriggerKey(event: Event) {
+    if (event.target !== event.currentTarget) return;
+    event.preventDefault();
+    this.toggleDropdown();
+  }
+
+  onFocusOut(event: FocusEvent) {
+    const next = event.relatedTarget as Node | null;
+    if (next && !this.elementRef.nativeElement.contains(next)) this.closeDropdown();
   }
 
   onPrevMonth() {
@@ -292,7 +308,7 @@ export class DateRangePicker {
         this.startDate.set(result.startDate);
         this.endDate.set(result.endDate);
       }
-      this.closeDropdown();
+      this.closeDropdown(true);
     } else {
       this.isSelectingRange.set(true);
       this.pendingStart.set(result.startDate);
@@ -360,7 +376,7 @@ export class DateRangePicker {
   @HostListener("keydown.escape")
   onEscapeKey() {
     if (this.isOpen()) {
-      this.closeDropdown();
+      this.closeDropdown(true);
     }
   }
 }
