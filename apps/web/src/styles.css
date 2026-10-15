@@ -247,3 +247,38 @@ input:disabled, select:disabled, textarea:disabled { background: var(--paper); -
 .ref-link-row input:nth-child(2) { flex: 1 1 auto; }
 [data-evidence-toggle] { padding: 0 .6rem; border-radius: 99px; background: var(--line2); color: var(--mute); font-size: .8rem; }
 .evidence-panel { background: var(--steel-t); border-color: var(--plan); }
+
+/* date range picker */
+.drp-container { position: relative; display: block; width: 100%; }
+.drp-container.drp-disabled { opacity: .6; pointer-events: none; }
+.drp-trigger { display: flex; align-items: center; gap: .5rem; min-height: 2.2rem; padding: .35rem .6rem; border: 1px solid var(--line); border-radius: 6px; background: #fff; cursor: pointer; user-select: none; transition: border-color .15s, box-shadow .15s; }
+.drp-trigger:hover { border-color: var(--steel); }
+.drp-trigger:focus-visible { outline: 2px solid var(--steel); outline-offset: 1px; }
+.drp-icon { font-size: .88rem; opacity: .7; line-height: 1; }
+.drp-display-text { flex: 1; font-family: var(--num); font-size: .92rem; color: var(--ink); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; text-align: left; }
+.drp-display-text.drp-placeholder { color: var(--mute); font-family: var(--txt); font-size: .88rem; }
+.drp-actions { display: inline-flex; align-items: center; gap: .3rem; margin-left: auto; }
+.drp-quick-today-btn { padding: .1rem .45rem; margin: 0; font-size: .75rem; border: 1px solid var(--line); border-radius: 4px; background: var(--sheet); color: var(--steel); line-height: 1.3; cursor: pointer; transition: background .15s, border-color .15s; }
+.drp-quick-today-btn:hover { background: var(--steel-t); border-color: var(--steel); }
+.drp-clear-btn { display: inline-flex; align-items: center; justify-content: center; width: 1.3rem; height: 1.3rem; margin: 0; padding: 0; border: 0; border-radius: 50%; background: var(--line2); color: var(--mute); font-size: .75rem; line-height: 1; cursor: pointer; transition: background .15s, color .15s; }
+.drp-clear-btn:hover { background: var(--red-t); color: var(--red); }
+.drp-popup { position: absolute; top: calc(100% + 4px); left: 0; z-index: 60; width: 280px; padding: .75rem; background: var(--sheet); border: 1px solid var(--line); border-radius: 8px; box-shadow: 0 10px 25px rgba(24, 34, 43, .12); }
+.drp-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: .6rem; gap: .3rem; }
+.drp-month-title { font-weight: 600; font-size: .95rem; color: var(--ink); text-align: center; flex: 1; }
+.drp-nav-btn { display: inline-flex; align-items: center; justify-content: center; width: 1.8rem; height: 1.8rem; padding: 0; margin: 0; border: 1px solid var(--line); border-radius: 4px; background: #fff; font-size: 1.1rem; line-height: 1; cursor: pointer; color: var(--ink); }
+.drp-nav-btn:hover { background: var(--steel-t); border-color: var(--steel); }
+.drp-today-btn { padding: .2rem .5rem; margin: 0; font-size: .78rem; border: 1px solid var(--line); border-radius: 4px; background: #fff; cursor: pointer; color: var(--steel); }
+.drp-today-btn:hover { background: var(--steel-t); border-color: var(--steel); }
+.drp-weekdays { display: grid; grid-template-columns: repeat(7, 1fr); text-align: center; font-size: .75rem; color: var(--mute); margin-bottom: .3rem; }
+.drp-grid { display: grid; grid-template-columns: repeat(7, 1fr); gap: 2px; }
+.drp-day { aspect-ratio: 1; display: inline-flex; align-items: center; justify-content: center; width: 100%; margin: 0; padding: 0; border: 0; border-radius: 4px; background: transparent; font-family: var(--num); font-size: .88rem; color: var(--ink); cursor: pointer; transition: background .12s, color .12s; }
+.drp-day:hover { background: var(--line2); }
+.drp-day.drp-other-month { opacity: .35; }
+.drp-day.drp-today { font-weight: 700; text-decoration: underline; text-decoration-color: var(--steel); }
+.drp-day.drp-in-range, .drp-day.drp-in-hover { background: var(--steel-t); color: var(--steel-d); border-radius: 0; }
+.drp-day.drp-selected-start { background: var(--steel) !important; color: #fff !important; font-weight: 700; border-top-left-radius: 4px; border-bottom-left-radius: 4px; }
+.drp-day.drp-selected-end { background: var(--steel) !important; color: #fff !important; font-weight: 700; border-top-right-radius: 4px; border-bottom-right-radius: 4px; }
+.drp-day.drp-selected-start.drp-selected-end { border-radius: 4px !important; }
+.drp-footer { display: flex; align-items: center; justify-content: center; margin-top: .6rem; padding-top: .4rem; border-top: 1px solid var(--line2); }
+.drp-hint { font-size: .78rem; color: var(--mute); }
+
