@@ -2,8 +2,10 @@ import { ChangeDetectorRef, Component, inject, input } from "@angular/core";
 import { HttpClient } from "@angular/common/http";
 import { FormsModule } from "@angular/forms";
 import { firstValueFrom } from "rxjs";
+import { DateRangePicker } from "./date-range-picker";
 import { Gantt } from "./gantt";
 import { ProjectHeader } from "./project-header";
+import { PredecessorSelect } from "./predecessor-select";
 import { cancelEntry, evaluateSchedule, reactivateEntry, type ScheduleInput } from "./schedule-rules";
 import type { ExternalDependency, ScheduleEntry, SectionItem } from "./report-types";
 
@@ -11,8 +13,6 @@ const KEYS: (keyof ScheduleEntry)[] = [
   "id", "kind", "name", "owner", "phaseId", "state", "planStart", "planEnd",
   "actualStart", "actualEnd", "planDate", "actualDate", "predecessors", "evidenceLinks",
 ];
-const RANGE_FIELDS = [["planStart", "計畫開始"], ["planEnd", "計畫結束"], ["actualStart", "實際開始"], ["actualEnd", "實際結束"]];
-const DATE_FIELDS = [["planDate", "計畫日期"], ["actualDate", "實際日期"]];
 const KIND_LABELS = { phase: "階段", task: "關鍵任務", milestone: "里程碑" };
 
 /** Only contract fields reach the JSON: derived successors / warnings / externalNotices never do. */
@@ -35,7 +35,7 @@ export function scheduleErrors(project: SectionItem) {
 @Component({
   selector: "app-project-schedule",
   standalone: true,
-  imports: [FormsModule, Gantt, ProjectHeader],
+  imports: [FormsModule, Gantt, ProjectHeader, DateRangePicker, PredecessorSelect],
   template: `
     <!-- the app refreshes views manually (no zone events), so re-render after any edit bubbling up -->
     <div class="project" [class.doc-project]="document()" [class.invalid]="evaluated().errors.length > 0" [attr.data-project-error]="evaluated().errors.length > 0 ? '' : null" [attr.data-project]="project().id" (input)="changes.detectChanges()" (change)="changes.detectChanges()" (click)="changes.detectChanges()">
@@ -46,61 +46,72 @@ export function scheduleErrors(project: SectionItem) {
         <summary>時程明細（{{ project().schedule?.length || 0 }} 項）</summary>
         @for (e of project().schedule; track e.id) {
           <div class="entry" [attr.data-entry]="e.name" [class.cancelled]="e.state === 'cancelled'">
-            <strong>{{ KIND_LABELS[e.kind] }}</strong>
-            <label>名稱 <input data-field="entry-name" [(ngModel)]="e.name" [disabled]="!editable() || e.state === 'cancelled'" /></label>
-            @if (e.kind === 'task') {
-              <label>負責人/單位 <input [(ngModel)]="e.owner" [disabled]="!editable()" /></label>
-              <label>所屬階段
-                <select [(ngModel)]="e.phaseId" [disabled]="!editable() || e.state === 'cancelled'">
-                  <option [ngValue]="null">（無）</option>
-                  @for (p of phases(); track p.id) { <option [ngValue]="p.id">{{ p.name }}</option> }
-                </select></label>
-            }
-            @if (e.state !== 'cancelled') {
-              <label>狀態
-                <select [(ngModel)]="e.state" [disabled]="!editable()">
-                  @for (s of statesOf(e.kind); track s[0]) { <option [value]="s[0]">{{ s[1] }}</option> }
-                </select></label>
-            }
-            @for (f of e.kind === 'milestone' ? DATE_FIELDS : RANGE_FIELDS; track f[0]) {
-              <label>{{ f[1] }}
-                <input type="date" [attr.data-field]="f[0]" [ngModel]="$any(e)[f[0]]" (ngModelChange)="$any(e)[f[0]] = $event || null" [disabled]="!editable() || e.state === 'cancelled'" /></label>
-            }
-            @if (e.state !== 'cancelled') {
-              <label>前置項目
-                <select multiple data-field="predecessors" [(ngModel)]="e.predecessors" [disabled]="!editable()">
-                  @for (o of others(e); track o.id) { <option [value]="o.id">{{ o.name }}</option> }
-                </select></label>
-            }
-            @for (msg of entryErrors(e.id); track msg) { <p class="error" role="alert">{{ msg }}</p> }
-            @if (editable() && e.kind === 'task' && e.state !== 'cancelled') {
-              <button type="button" data-evidence-toggle (click)="toggleEvidence(e.id)">📎 {{ e.evidenceLinks?.length || 0 }}</button>
-              @if (evidenceOpen === e.id) {
-                <div class="evidence-panel" data-evidence-panel>
-                  @for (l of e.evidenceLinks; track l.workId) {
-                    <div class="evidence-link">
-                      <span>#{{ l.workId }}</span>
-                      <input data-field="evidence-summary" placeholder="摘要" [(ngModel)]="l.summary" />
-                      <button type="button" (click)="unlink(e, l.workId)">移除</button>
-                    </div>
+            <div class="entry-row r1" [class.is-task]="e.kind === 'task'">
+              <strong class="entry-kind" [attr.data-kind]="e.kind">{{ KIND_LABELS[e.kind] }}</strong>
+              <label>名稱 <input data-field="entry-name" [(ngModel)]="e.name" [disabled]="!editable() || e.state === 'cancelled'" /></label>
+              @if (e.kind === 'task') {
+                <label>所屬階段
+                  <select [(ngModel)]="e.phaseId" [disabled]="!editable() || e.state === 'cancelled'">
+                    <option [ngValue]="null">（無）</option>
+                    @for (p of phases(); track p.id) { <option [ngValue]="p.id">{{ p.name }}</option> }
+                  </select></label>
+                <label>負責人/單位 <input [(ngModel)]="e.owner" [disabled]="!editable()" /></label>
+              }
+              @if (e.state !== 'cancelled') {
+                <label>狀態
+                  <select [(ngModel)]="e.state" [disabled]="!editable()">
+                    @for (s of statesOf(e.kind); track s[0]) { <option [value]="s[0]">{{ s[1] }}</option> }
+                  </select></label>
+              }
+            </div>
+            <div class="entry-row r2">
+              @if (e.kind === 'milestone') {
+                <div class="f"><span class="f-label">計畫日期</span>
+                  <app-date-range-picker mode="single" data-field="planDate" ariaLabel="計畫日期" [value]="e.planDate ?? null" (valueChange)="e.planDate = $event" [disabled]="!editable() || e.state === 'cancelled'" /></div>
+                <div class="f"><span class="f-label">實際日期</span>
+                  <app-date-range-picker mode="single" data-field="actualDate" ariaLabel="實際日期" [value]="e.actualDate ?? null" (valueChange)="e.actualDate = $event" [disabled]="!editable() || e.state === 'cancelled'" /></div>
+              } @else {
+                <div class="f"><span class="f-label">計畫起訖</span>
+                  <app-date-range-picker data-field="planRange" ariaLabel="計畫起訖" [(startDate)]="e.planStart" [(endDate)]="e.planEnd" [disabled]="!editable() || e.state === 'cancelled'" /></div>
+                <div class="f"><span class="f-label">實際起訖</span>
+                  <app-date-range-picker data-field="actualRange" ariaLabel="實際起訖" [(startDate)]="e.actualStart" [(endDate)]="e.actualEnd" [disabled]="!editable() || e.state === 'cancelled'" /></div>
+              }
+              @if (e.state !== 'cancelled') {
+                <div class="f"><span class="f-label">前置項目</span>
+                  <app-predecessor-select data-field="predecessors" [options]="optionsFor(e)" [selected]="e.predecessors ?? NONE" (selectedChange)="e.predecessors = $event" [disabled]="!editable()" /></div>
+              }
+              @if (editable()) {
+                <div class="entry-actions">
+                  @if (e.kind === 'task' && e.state !== 'cancelled') {
+                    <button type="button" data-evidence-toggle (click)="toggleEvidence(e.id)">📎 {{ e.evidenceLinks?.length || 0 }}</button>
                   }
-                  @for (w of unlinked(e); track w.workId) {
-                    <div class="evidence-candidate" [attr.data-work]="w.workId">
-                      <button type="button" data-pick (click)="link(e, w.workId)">挑選</button>
-                      #{{ w.workId }} {{ w.workContent }}（{{ w.ownerName }}・{{ w.status }}）
-                      @for (c of w.subItems; track c.workId) { <small>　└ #{{ c.workId }} {{ c.workContent }}</small> }
-                    </div>
-                  }
-                  <label>手動輸入 workId <input type="number" data-field="manual-work-id" [(ngModel)]="manualId" /></label>
-                  <button type="button" data-manual-add [disabled]="!manualId" (click)="link(e, manualId!); manualId = null">加入</button>
+                  @if (e.state === 'cancelled') { <button type="button" (click)="reactivate(e.id)">重新啟用</button> }
+                  @else { <button type="button" (click)="cancel(e.id)">取消項目</button> }
+                  <button type="button" (click)="remove(e.id)">刪除</button>
                 </div>
               }
+            </div>
+            @if (editable() && e.kind === 'task' && e.state !== 'cancelled' && evidenceOpen === e.id) {
+              <div class="evidence-panel" data-evidence-panel>
+                @for (l of e.evidenceLinks; track l.workId) {
+                  <div class="evidence-link">
+                    <span>#{{ l.workId }}</span>
+                    <input data-field="evidence-summary" placeholder="摘要" [(ngModel)]="l.summary" />
+                    <button type="button" (click)="unlink(e, l.workId)">移除</button>
+                  </div>
+                }
+                @for (w of unlinked(e); track w.workId) {
+                  <div class="evidence-candidate" [attr.data-work]="w.workId">
+                    <button type="button" data-pick (click)="link(e, w.workId)">挑選</button>
+                    #{{ w.workId }} {{ w.workContent }}（{{ w.ownerName }}・{{ w.status }}）
+                    @for (c of w.subItems; track c.workId) { <small>　└ #{{ c.workId }} {{ c.workContent }}</small> }
+                  </div>
+                }
+                <label>手動輸入 workId <input type="number" data-field="manual-work-id" [(ngModel)]="manualId" /></label>
+                <button type="button" data-manual-add [disabled]="!manualId" (click)="link(e, manualId!); manualId = null">加入</button>
+              </div>
             }
-            @if (editable()) {
-              @if (e.state === 'cancelled') { <button type="button" (click)="reactivate(e.id)">重新啟用</button> }
-              @else { <button type="button" (click)="cancel(e.id)">取消項目</button> }
-              <button type="button" (click)="remove(e.id)">刪除</button>
-            }
+            @for (msg of entryErrors(e.id); track msg) { <p class="error" role="alert">{{ msg }}</p> }
           </div>
         }
         @if (editable()) {
@@ -169,8 +180,7 @@ export class ProjectSchedule {
   document = input(false);
   readonly KIND_LABELS = KIND_LABELS;
   readonly KINDS = ["phase", "task", "milestone"] as const;
-  readonly RANGE_FIELDS = RANGE_FIELDS;
-  readonly DATE_FIELDS = DATE_FIELDS;
+  readonly NONE: string[] = [];
 
   // ngModel mutates entries in place, so memoize on content: a fresh array per check would trip NG0100.
   private memo?: { key: string; value: ReturnType<typeof evaluateSchedule> };
@@ -182,6 +192,16 @@ export class ProjectSchedule {
   };
   phases = () => (this.project().schedule ?? []).filter((e) => e.kind === "phase" && e.state !== "cancelled");
   others = (e: ScheduleEntry) => (this.project().schedule ?? []).filter((o) => o.id !== e.id && o.state !== "cancelled");
+  // option arrays are input bindings, so keep identity stable until names/ids actually change (NG0100).
+  private optionCache = new Map<string, { key: string; value: ScheduleEntry[] }>();
+  optionsFor(e: ScheduleEntry) {
+    const value = this.others(e);
+    const key = JSON.stringify(value.map((o) => [o.id, o.name]));
+    const hit = this.optionCache.get(e.id);
+    if (hit?.key === key) return hit.value;
+    this.optionCache.set(e.id, { key, value });
+    return value;
+  }
   entryErrors = (id: string) => {
     const entries = this.project().schedule ?? [];
     const name = (x: string) => entries.find((e) => e.id === x)?.name || x;

@@ -84,32 +84,38 @@ try {
   const project = s1.locator('app-project-schedule').last();
   await project.locator('[data-field="project-title"]').fill('新平台');
   await project.locator('[data-field="project-owner"]').fill('王小明');
+  // date pickers open on the month of today (fixed 2026-10) or of the current start; all dates here are in October
+  const pickRange = async (loc, a, b) => { await loc.locator('.drp-trigger').click(); await loc.locator(`[data-date="${a}"]`).click(); if (b) await loc.locator(`[data-date="${b}"]`).click(); };
+  const setPre = async (entry, names) => {
+    const sel = project.locator(`[data-entry="${entry}"] [data-field="predecessors"]`);
+    await sel.locator('.pre-trigger').click();
+    await sel.locator('.pre-clear-btn').click();
+    for (const n of names) await sel.locator('.pre-option', { hasText: n }).locator('input').check();
+    await page.keyboard.press('Escape');
+  };
   const addEntry = async (kind, name) => {
     await project.locator(`[data-add-entry="${kind}"]`).click();
     await project.locator('[data-field="entry-name"]').last().fill(name);
   };
   await addEntry('phase', '設計階段');
-  await project.locator('[data-field="planStart"]').last().fill('2026-10-01');
-  await project.locator('[data-field="planEnd"]').last().fill('2026-10-20');
-  await project.locator('[data-field="actualStart"]').last().fill('2026-10-01');
-  await project.locator('[data-field="actualEnd"]').last().fill('2026-10-22');
+  await pickRange(project.locator('[data-field="planRange"]').last(), '2026-10-01', '2026-10-20');
+  await pickRange(project.locator('[data-field="actualRange"]').last(), '2026-10-01', '2026-10-22');
   await addEntry('task', '撰寫規格');
   await project.locator('[data-entry="撰寫規格"] select').first().selectOption({ label: '設計階段' });
-  await project.locator('[data-field="planStart"]').last().fill('2026-10-02');
-  await project.locator('[data-field="planEnd"]').last().fill('2026-10-10');
+  await pickRange(project.locator('[data-field="planRange"]').last(), '2026-10-02', '2026-10-10');
   await addEntry('milestone', '上線');
-  await project.locator('[data-field="planDate"]').last().fill('2026-10-30');
-  await project.locator('[data-field="actualDate"]').last().fill('2026-10-31');
+  await pickRange(project.locator('[data-field="planDate"]').last(), '2026-10-30');
+  await pickRange(project.locator('[data-field="actualDate"]').last(), '2026-10-31');
   // phase <- direct child link is rejected, and save is blocked
-  await project.locator('[data-entry="撰寫規格"] [data-field="predecessors"]').selectOption({ label: '設計階段' });
+  await setPre('撰寫規格', ['設計階段']);
   await project.getByRole('alert').first().waitFor({ timeout: 5000 });
   await page.locator('[data-save]').click();
   await page.locator('[data-save-bar] [role="alert"]', { hasText: /時程有誤，未儲存/ }).waitFor({ timeout: 5000 });
   assert.equal(await page.locator('[data-project-error]').count(), 1);
   assert.equal(await page.locator('[data-rail-file="s1"] [data-dirty]').count(), 1);
   // valid link: milestone after task
-  await project.locator('[data-entry="撰寫規格"] [data-field="predecessors"]').selectOption([]);
-  await project.locator('[data-entry="上線"] [data-field="predecessors"]').selectOption({ label: '撰寫規格' });
+  await setPre('撰寫規格', []);
+  await setPre('上線', ['撰寫規格']);
   // pick an engineer work item with a summary, plus a manual one
   await project.locator('[data-entry="撰寫規格"] [data-evidence-toggle]').click();
   await project.locator('[data-work="101"] [data-pick]').click();
@@ -188,7 +194,7 @@ try {
   assert.match(await again.locator('.gantt-evidence-chip').innerText(), /2/);
   // health pill (today fixed at 2026-10-12): task past its plan end is overdue; finishing it late turns it into a slip
   assert.match(await again.locator('[data-health]').innerText(), /逾期 1 項\s*完成 0\/2/);
-  await again.locator('[data-entry="撰寫規格"] [data-field="actualEnd"]').fill('2026-10-12');
+  await pickRange(again.locator('[data-entry="撰寫規格"] [data-field="actualRange"]'), '2026-10-12', '2026-10-12');
   assert.match(await again.locator('[data-health]').innerText(), /曾延後 3 項/);
   // the edit shows a dirty dot on its rail file and in the save bar
   assert.equal(await page.locator('[data-rail-file="s1"] [data-dirty]').getAttribute('aria-label'), '有未儲存變更');
@@ -209,7 +215,7 @@ try {
   await page.locator('[data-rail-file="s1"]').click();
   await page.locator('[data-tab="projects"]').click();
   assert.equal(await page.locator('[data-file="s1"] [data-field="project-title"]').inputValue(), '新平台');
-  assert.equal(await page.locator('[data-file="s1"] [data-entry="撰寫規格"] [data-field="actualEnd"]').inputValue(), '2026-10-12');
+  assert.equal(await page.locator('[data-file="s1"] [data-entry="撰寫規格"] [data-field="actualRange"] .drp-display-text').innerText(), '2026-10-12 ～ 2026-10-12');
   // leaving the editor with unsaved changes asks first; Esc stays, confirming discards
   await page.locator('[data-nav="home"]').click();
   await page.locator('[data-leave-dialog]').waitFor({ state: 'visible', timeout: 5000 });
