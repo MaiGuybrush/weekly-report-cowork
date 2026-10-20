@@ -1,4 +1,4 @@
-import { ChangeDetectorRef, Component, inject, input, signal } from "@angular/core";
+import { ChangeDetectorRef, Component, ElementRef, inject, input, signal } from "@angular/core";
 import { HttpClient } from "@angular/common/http";
 import { FormsModule } from "@angular/forms";
 import { firstValueFrom } from "rxjs";
@@ -53,7 +53,7 @@ export function scheduleErrors(project: SectionItem) {
           <thead><tr><th>類型</th><th>名稱</th><th>負責</th><th>狀態</th><th>進度</th><th>計畫起訖</th><th>實際起訖</th><th>前置項目</th><th>操作</th></tr></thead>
           <tbody>
             @for (e of rows(); track e.id) {
-              <tr class="entry" [attr.data-entry]="e.name" [class.cancelled]="e.state === 'cancelled'" [class.is-child]="e.kind === 'task' && !!e.phaseId">
+              <tr class="entry" [attr.data-entry]="e.name" [attr.data-entry-id]="e.id" [class.cancelled]="e.state === 'cancelled'" [class.is-child]="e.kind === 'task' && !!e.phaseId">
                 <td class="kind-cell">
                   @if (e.kind === 'phase' && hasChildren(e.id)) {
                     <button type="button" class="grid-phase-toggle" [attr.aria-expanded]="isOpen(e.id)" [attr.aria-label]="isOpen(e.id) ? '收合此階段任務' : '展開此階段任務'" (click)="togglePhase(e.id)">{{ isOpen(e.id) ? '▼' : '▶' }}</button>
@@ -102,6 +102,7 @@ export function scheduleErrors(project: SectionItem) {
                       @if (e.kind === 'task' && e.state !== 'cancelled') {
                         <button type="button" data-evidence-toggle (click)="toggleEvidence(e.id)">📎 {{ e.evidenceLinks?.length || 0 }}</button>
                       }
+                      @if (e.kind === 'phase' && e.state !== 'cancelled') { <button type="button" data-add-task (click)="addTask(e.id)">＋任務</button> }
                       @if (e.state === 'cancelled') { <button type="button" (click)="reactivate(e.id)">重新啟用</button> }
                       @else { <button type="button" (click)="cancel(e.id)">取消項目</button> }
                       <button type="button" (click)="remove(e.id)">刪除</button>
@@ -190,6 +191,7 @@ export function scheduleErrors(project: SectionItem) {
 export class ProjectSchedule {
   protected changes = inject(ChangeDetectorRef);
   private http = inject(HttpClient);
+  private host = inject<ElementRef<HTMLElement>>(ElementRef);
   project = input.required<SectionItem>();
   week = input("");
   evidenceOpen: string | null = null;
@@ -266,10 +268,19 @@ export class ProjectSchedule {
   }
   unlink(e: ScheduleEntry, workId: number) { e.evidenceLinks = e.evidenceLinks?.filter((l) => l.workId !== workId); }
 
-  add(kind: ScheduleEntry["kind"]) {
+  add(kind: ScheduleEntry["kind"], phaseId: string | null = null) {
     const p = this.project();
     const blank = { planStart: null, planEnd: null, actualStart: null, actualEnd: null };
-    (p.schedule ??= []).push({ ...blank, id: crypto.randomUUID(), kind, name: "", state: kind === "milestone" ? "pending" : "open", predecessors: [] });
+    const id = crypto.randomUUID();
+    (p.schedule ??= []).push({ ...blank, id, kind, name: "", state: kind === "milestone" ? "pending" : "open", predecessors: [], ...(kind === "task" && { phaseId }) });
+    return id;
+  }
+  /** Adds a task under the phase, opens the phase and focuses the new name field. */
+  addTask(phaseId: string) {
+    const id = this.add("task", phaseId);
+    if (!this.isOpen(phaseId)) this.togglePhase(phaseId);
+    this.changes.detectChanges();
+    this.host.nativeElement.querySelector<HTMLInputElement>(`[data-entry-id="${id}"] [data-field="entry-name"]`)?.focus();
   }
   cancel(id: string) { this.replace(cancelEntry((this.project().schedule ?? []).map(toInput), id)); }
   reactivate(id: string) { this.replace(reactivateEntry((this.project().schedule ?? []).map(toInput), id)); }

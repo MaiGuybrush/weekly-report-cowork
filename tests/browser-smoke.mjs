@@ -221,6 +221,17 @@ try {
   assert.equal(await again.locator('.gantt-row-task').count(), 0, 'and in the gantt');
   await again.locator('.gantt .btn-phase-expand').click();
   assert.equal(await grid.locator('tbody tr[data-entry]').count(), 3, 'gantt arrow reopens the grid');
+  // 「＋任務」: collapsed phase opens, new blank task sits under it with its name focused
+  await grid.locator('.grid-phase-toggle').click();
+  await grid.locator('[data-entry="設計階段"] [data-add-task]').click();
+  assert.deepEqual(await grid.locator('tbody tr[data-entry]').evaluateAll(rs => rs.map(r => r.dataset.entry)), ['設計階段', '撰寫規格', '', '上線'], 'new task lands at the end of its phase, phase reopened');
+  const fresh = grid.locator('tr[data-entry=""]');
+  assert.equal(await fresh.locator('select[aria-label="所屬階段"] option:checked').innerText(), '設計階段');
+  assert.equal(await fresh.locator('select[aria-label="狀態"] option:checked').innerText(), '開放');
+  assert.equal(await fresh.locator('[data-field="planRange"] .drp-display-text').innerText(), '選擇起訖區間', 'dates blank');
+  assert.ok(await fresh.locator('[data-field="entry-name"]').evaluate(el => el === document.activeElement), 'new name field focused');
+  await fresh.getByRole('button', { name: '刪除' }).click();
+  assert.equal(await grid.locator('tbody tr[data-entry]').count(), 3);
   // picking a plan range redraws the gantt bar at once
   const phasePlan = again.locator('.gantt-row-phase .plan-bar');
   const barBefore = await phasePlan.getAttribute('style');
