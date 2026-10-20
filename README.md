@@ -106,6 +106,8 @@ pnpm --dir apps/web start
 
 ## 驗證
 
+單一入口（型別檢查、全部單元測試、前端建置）：`pnpm --dir apps/web check`。完整驗證如下：
+
 ```powershell
 dotnet build apps/api/WeeklyReport.Api.csproj
 pnpm --dir apps/web build

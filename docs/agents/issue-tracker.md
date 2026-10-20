@@ -12,6 +12,10 @@
 | UAC SSO 啟動與回跳流程 | [map](../../.scratch/uac-sso-initialization/map.md) | `.scratch/uac-sso-initialization/issues/NN-*.md` |
 | 執行時 API 設定 | [map](../../.scratch/runtime-api-config/map.md) | `.scratch/runtime-api-config/issues/NN-*.md` |
 
+其他系列同樣放在 `.scratch/<系列>/`，索引為該目錄的 `map.md`，票據為 `issues/NN-*.md`。
+
+關閉票據：把核取清單的 `- [ ]` 全改 `- [x]`，並將 `**Status:**` 改為 `done`。
+
 1. 使用使用者提供的完整路徑或系列名稱與票號。檔名以兩位數編號開頭，例如「project-schedule-redesign issues #1」對應 `01-phase-schedule-and-revisions.md`。
 2. 若只給 `#NN`，先查看分支名稱、提交訊息及上述索引；有多個系列符合時，請使用者指定系列，勿自行選一張票。
 3. 讀取該票的 **What to build**、核取清單、阻擋票，以及索引連到的規格。審查規格符合度時以票據要求為準；相關設計文件提供背景。
