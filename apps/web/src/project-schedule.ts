@@ -43,7 +43,7 @@ export function scheduleErrors(project: SectionItem) {
     <div class="project" [class.doc-project]="document()" [class.invalid]="evaluated().errors.length > 0" [attr.data-project-error]="evaluated().errors.length > 0 ? '' : null" [attr.data-project]="project().id" (input)="changes.detectChanges()" (change)="changes.detectChanges()" (click)="changes.detectChanges()">
       <app-project-header [project]="project()" [editable]="editable()" [document]="document()" />
 
-      <app-gantt [entries]="evaluated().entries" [phasesOpen]="!document()" [(expandTasks)]="expandTasks" [(phaseToggles)]="phaseToggles" />
+      <app-gantt [entries]="evaluated().entries" [phasesOpen]="!document()" [selectedId]="selectedId()" (entrySelected)="selectFromGantt($event)" [(expandTasks)]="expandTasks" [(phaseToggles)]="phaseToggles" />
 
       @if (!document()) {
       <details class="sched" open>
@@ -53,7 +53,7 @@ export function scheduleErrors(project: SectionItem) {
           <thead><tr><th>類型</th><th>名稱</th><th>負責</th><th>狀態</th><th>進度</th><th>計畫起訖</th><th>實際起訖</th><th>前置項目</th><th>操作</th></tr></thead>
           <tbody>
             @for (e of rows(); track e.id) {
-              <tr class="entry" [attr.data-entry]="e.name" [attr.data-entry-id]="e.id" [class.cancelled]="e.state === 'cancelled'" [class.is-child]="e.kind === 'task' && !!e.phaseId">
+              <tr class="entry" [attr.data-entry]="e.name" [attr.data-entry-id]="e.id" [class.cancelled]="e.state === 'cancelled'" [class.is-child]="e.kind === 'task' && !!e.phaseId" [class.row-selected]="e.id === selectedId()" (click)="selectFromGrid($event, e.id)">
                 <td class="kind-cell">
                   @if (e.kind === 'phase' && hasChildren(e.id)) {
                     <button type="button" class="grid-phase-toggle" [attr.aria-expanded]="isOpen(e.id)" [attr.aria-label]="isOpen(e.id) ? '收合此階段任務' : '展開此階段任務'" (click)="togglePhase(e.id)">{{ isOpen(e.id) ? '▼' : '▶' }}</button>
@@ -208,6 +208,18 @@ export class ProjectSchedule {
   expandTasks = signal(false);
   phaseToggles = signal<ReadonlySet<string>>(new Set());
   isOpen = (phaseId: string) => isPhaseOpen({ expandTasks: this.expandTasks(), defaultOpen: !this.document(), toggled: this.phaseToggles() }, phaseId);
+  /** One highlighted entry, shared by the gantt row and the grid row. */
+  selectedId = signal<string | null>(null);
+  selectFromGrid(ev: Event, id: string) {
+    if (!(ev.target as HTMLElement).closest("input, select, button, textarea, app-date-range-picker, app-predecessor-select")) this.selectedId.set(id);
+  }
+  selectFromGantt(id: string) {
+    this.selectedId.set(id);
+    const entry = (this.project().schedule ?? []).find((e) => e.id === id);
+    if (entry?.kind === "task" && entry.phaseId && !this.isOpen(entry.phaseId)) this.togglePhase(entry.phaseId);
+    this.changes.detectChanges();
+    this.host.nativeElement.querySelector(`tr[data-entry-id="${id}"]`)?.scrollIntoView({ block: "nearest" });
+  }
   rows = () => gridRows(this.project().schedule ?? [], this.isOpen);
   hasChildren = (phaseId: string) => hasChildTasks(this.project().schedule ?? [], phaseId, true);
   togglePhase(phaseId: string) {

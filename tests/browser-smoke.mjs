@@ -232,6 +232,16 @@ try {
   assert.ok(await fresh.locator('[data-field="entry-name"]').evaluate(el => el === document.activeElement), 'new name field focused');
   await fresh.getByRole('button', { name: '刪除' }).click();
   assert.equal(await grid.locator('tbody tr[data-entry]').count(), 3);
+  // gantt <-> grid linking: one highlighted row, both directions
+  await again.locator('.gantt-row-task').first().click();
+  assert.equal(await grid.locator('tr.row-selected').getAttribute('data-entry'), '撰寫規格', 'gantt click highlights grid row');
+  await grid.locator('[data-entry="上線"] .kind-cell').click();
+  assert.equal(await again.locator('.gantt-row-selected').count(), 1);
+  assert.equal(await again.locator('.gantt-row-selected .gantt-name').innerText(), '上線', 'grid click highlights gantt row');
+  await grid.locator('[data-entry="撰寫規格"] [data-field="entry-name"]').click();
+  assert.equal(await again.locator('.gantt-row-selected .gantt-name').innerText(), '上線', 'clicking an input does not move the highlight');
+  await again.locator('.gantt-row-task').first().click();
+  assert.equal(await grid.locator('tr.row-selected').count(), 1, 'switching keeps a single highlight');
   // picking a plan range redraws the gantt bar at once
   const phasePlan = again.locator('.gantt-row-phase .plan-bar');
   const barBefore = await phasePlan.getAttribute('style');

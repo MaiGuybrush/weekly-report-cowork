@@ -74,6 +74,8 @@ import { progressText } from "./project-progress";
             [class.gantt-row-milestone]="entry.kind === 'milestone'"
             [class.gantt-row-phase]="entry.kind === 'phase'"
             [class.gantt-row-cancelled]="entry.state === 'cancelled'"
+            [class.gantt-row-selected]="entry.id === selectedId()"
+            [attr.data-gantt-id]="entry.id"
             (click)="entrySelected.emit(entry.id)">
             <div class="gantt-meta">
               @if (entry.kind === 'phase' && hasChildren(entry.id)) {
@@ -160,6 +162,8 @@ export class Gantt {
   meetingDate = input<string>();
   /** Emits the id of the clicked entry. */
   entrySelected = output<string>();
+  /** Row highlighted by the parent (from a gantt or grid click). */
+  selectedId = input<string | null>(null);
 
   /** Expand state is owned by the parent when a grid shares it; see isPhaseOpen for what `toggled` means. */
   expandTasks = model(false);
