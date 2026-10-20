@@ -189,7 +189,6 @@ try {
   await page.locator('[data-save-state="clean"]').waitFor({ timeout: 15000 });
   await page.locator('[data-tab="projects"]').click();
   await again.locator('.gantt-row').first().waitFor({ timeout: 15000 });
-  await again.locator('.btn-phase-expand').click();
   await shot(page, '02-editor-project');
   assert.match(await again.locator('.gantt-evidence-chip').innerText(), /2/);
   // health pill (today fixed at 2026-10-12): task past its plan end is overdue; finishing it late turns it into a slip
@@ -208,6 +207,20 @@ try {
   assert.match(await again.locator('.gantt-row-task .gantt-progress').innerText(), /40%/);
   await spec.locator('select').nth(1).selectOption('open');
   assert.equal(await spec.locator('[data-field="entry-progress"]').count(), 0);
+  // schedule grid: gantt sits above it, it scrolls on its own with a sticky header, phases open by default and share state with the gantt
+  const grid = again.locator('[data-schedule-grid]');
+  const ganttBox = await again.locator('.gantt').boundingBox();
+  assert.ok(ganttBox.y + ganttBox.height <= (await grid.boundingBox()).y, 'gantt above grid');
+  assert.deepEqual(await grid.locator('thead th').allInnerTexts(), ['類型', '名稱', '負責', '狀態', '進度', '計畫起訖', '實際起訖', '前置項目', '操作']);
+  assert.deepEqual(await grid.locator('tbody tr[data-entry]').evaluateAll(rs => rs.map(r => r.dataset.entry)), ['設計階段', '撰寫規格', '上線']);
+  const scroll = await grid.evaluate(el => ({ overflow: getComputedStyle(el).overflow, max: getComputedStyle(el).maxHeight, th: getComputedStyle(el.querySelector('th')).position, wide: getComputedStyle(el).overflowX }));
+  assert.deepEqual([scroll.overflow, scroll.th, scroll.wide], ['auto', 'sticky', 'auto']);
+  assert.ok(parseFloat(scroll.max) <= page.viewportSize().height / 2 + 1, 'max height about half the viewport');
+  await grid.locator('.grid-phase-toggle').click();
+  assert.equal(await grid.locator('tbody tr[data-entry]').count(), 2, 'collapsed phase hides its tasks in the grid');
+  assert.equal(await again.locator('.gantt-row-task').count(), 0, 'and in the gantt');
+  await again.locator('.gantt .btn-phase-expand').click();
+  assert.equal(await grid.locator('tbody tr[data-entry]').count(), 3, 'gantt arrow reopens the grid');
   // picking a plan range redraws the gantt bar at once
   const phasePlan = again.locator('.gantt-row-phase .plan-bar');
   const barBefore = await phasePlan.getAttribute('style');

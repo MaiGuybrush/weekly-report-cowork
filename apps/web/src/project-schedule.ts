@@ -1,9 +1,10 @@
-import { ChangeDetectorRef, Component, inject, input } from "@angular/core";
+import { ChangeDetectorRef, Component, inject, input, signal } from "@angular/core";
 import { HttpClient } from "@angular/common/http";
 import { FormsModule } from "@angular/forms";
 import { firstValueFrom } from "rxjs";
 import { DateRangePicker } from "./date-range-picker";
 import { Gantt } from "./gantt";
+import { gridRows, hasChildTasks, isPhaseOpen } from "./gantt-model";
 import { ProjectHeader } from "./project-header";
 import { PredecessorSelect } from "./predecessor-select";
 import { clampProgress, liveTasksOf, progressText } from "./project-progress";
@@ -42,86 +43,99 @@ export function scheduleErrors(project: SectionItem) {
     <div class="project" [class.doc-project]="document()" [class.invalid]="evaluated().errors.length > 0" [attr.data-project-error]="evaluated().errors.length > 0 ? '' : null" [attr.data-project]="project().id" (input)="changes.detectChanges()" (change)="changes.detectChanges()" (click)="changes.detectChanges()">
       <app-project-header [project]="project()" [editable]="editable()" [document]="document()" />
 
+      <app-gantt [entries]="evaluated().entries" [phasesOpen]="!document()" [(expandTasks)]="expandTasks" [(phaseToggles)]="phaseToggles" />
+
       @if (!document()) {
       <details class="sched" open>
         <summary>時程明細（{{ project().schedule?.length || 0 }} 項）</summary>
-        @for (e of project().schedule; track e.id) {
-          <div class="entry" [attr.data-entry]="e.name" [class.cancelled]="e.state === 'cancelled'">
-            <div class="entry-row r1" [class.is-task]="e.kind === 'task'">
-              <strong class="entry-kind" [attr.data-kind]="e.kind">{{ KIND_LABELS[e.kind] }}</strong>
-              <label>名稱 <input data-field="entry-name" [(ngModel)]="e.name" [disabled]="!editable() || e.state === 'cancelled'" /></label>
-              @if (e.kind === 'task') {
-                <label>所屬階段
-                  <select [(ngModel)]="e.phaseId" [disabled]="!editable() || e.state === 'cancelled'">
-                    <option [ngValue]="null">（無）</option>
-                    @for (p of phases(); track p.id) { <option [ngValue]="p.id">{{ p.name }}</option> }
-                  </select></label>
-                <label>負責人/單位 <input [(ngModel)]="e.owner" [disabled]="!editable()" /></label>
-              }
-              @if (e.state !== 'cancelled') {
-                <label>狀態
-                  <select [ngModel]="e.state" (ngModelChange)="setState(e, $event)" [disabled]="!editable()">
-                    @for (s of statesOf(e.kind); track s[0]) { <option [value]="s[0]">{{ s[1] }}</option> }
-                  </select></label>
-                @if (e.kind !== 'milestone') {
-                  <label>進度
-                    @if (editable() && e.state === 'in-progress' && !hasLiveChildren(e)) {
-                      <input type="number" min="0" max="100" step="1" data-field="entry-progress" [ngModel]="e.progress ?? null" (ngModelChange)="e.progress = clamp($event)" />
-                    } @else { <span class="num" data-progress-text>{{ progressOf(e) }}</span> }
-                  </label>
-                }
-              }
-            </div>
-            <div class="entry-row r2">
-              @if (e.kind === 'milestone') {
-                <div class="f"><span class="f-label">計畫日期</span>
-                  <app-date-range-picker mode="single" data-field="planDate" ariaLabel="計畫日期" [value]="e.planDate ?? null" (valueChange)="e.planDate = $event" [disabled]="!editable() || e.state === 'cancelled'" /></div>
-                <div class="f"><span class="f-label">實際日期</span>
-                  <app-date-range-picker mode="single" data-field="actualDate" ariaLabel="實際日期" [value]="e.actualDate ?? null" (valueChange)="e.actualDate = $event" [disabled]="!editable() || e.state === 'cancelled'" /></div>
-              } @else {
-                <div class="f"><span class="f-label">計畫起訖</span>
-                  <app-date-range-picker data-field="planRange" ariaLabel="計畫起訖" [(startDate)]="e.planStart" [(endDate)]="e.planEnd" [disabled]="!editable() || e.state === 'cancelled'" /></div>
-                <div class="f"><span class="f-label">實際起訖</span>
-                  <app-date-range-picker data-field="actualRange" ariaLabel="實際起訖" [(startDate)]="e.actualStart" [(endDate)]="e.actualEnd" [disabled]="!editable() || e.state === 'cancelled'" /></div>
-              }
-              @if (e.state !== 'cancelled') {
-                <div class="f"><span class="f-label">前置項目</span>
-                  <app-predecessor-select data-field="predecessors" [options]="optionsFor(e)" [selected]="e.predecessors ?? NONE" (selectedChange)="e.predecessors = $event" [disabled]="!editable()" /></div>
-              }
-              @if (editable()) {
-                <div class="entry-actions">
-                  @if (e.kind === 'task' && e.state !== 'cancelled') {
-                    <button type="button" data-evidence-toggle (click)="toggleEvidence(e.id)">📎 {{ e.evidenceLinks?.length || 0 }}</button>
+        <div class="grid-scroll" data-schedule-grid>
+        <table class="grid sched-grid">
+          <thead><tr><th>類型</th><th>名稱</th><th>負責</th><th>狀態</th><th>進度</th><th>計畫起訖</th><th>實際起訖</th><th>前置項目</th><th>操作</th></tr></thead>
+          <tbody>
+            @for (e of rows(); track e.id) {
+              <tr class="entry" [attr.data-entry]="e.name" [class.cancelled]="e.state === 'cancelled'" [class.is-child]="e.kind === 'task' && !!e.phaseId">
+                <td class="kind-cell">
+                  @if (e.kind === 'phase' && hasChildren(e.id)) {
+                    <button type="button" class="grid-phase-toggle" [attr.aria-expanded]="isOpen(e.id)" [attr.aria-label]="isOpen(e.id) ? '收合此階段任務' : '展開此階段任務'" (click)="togglePhase(e.id)">{{ isOpen(e.id) ? '▼' : '▶' }}</button>
                   }
-                  @if (e.state === 'cancelled') { <button type="button" (click)="reactivate(e.id)">重新啟用</button> }
-                  @else { <button type="button" (click)="cancel(e.id)">取消項目</button> }
-                  <button type="button" (click)="remove(e.id)">刪除</button>
-                </div>
+                  <strong class="entry-kind" [attr.data-kind]="e.kind">{{ KIND_LABELS[e.kind] }}</strong>
+                </td>
+                <td class="name-cell">
+                  <input data-field="entry-name" aria-label="名稱" [(ngModel)]="e.name" [disabled]="!editable() || e.state === 'cancelled'" />
+                  @if (e.kind === 'task') {
+                    <select aria-label="所屬階段" [(ngModel)]="e.phaseId" [disabled]="!editable() || e.state === 'cancelled'">
+                      <option [ngValue]="null">（無所屬階段）</option>
+                      @for (p of phases(); track p.id) { <option [ngValue]="p.id">{{ p.name }}</option> }
+                    </select>
+                  }
+                </td>
+                <td>@if (e.kind === 'task') { <input aria-label="負責人/單位" [(ngModel)]="e.owner" [disabled]="!editable()" /> }</td>
+                <td>
+                  @if (e.state !== 'cancelled') {
+                    <select aria-label="狀態" [ngModel]="e.state" (ngModelChange)="setState(e, $event)" [disabled]="!editable()">
+                      @for (s of statesOf(e.kind); track s[0]) { <option [value]="s[0]">{{ s[1] }}</option> }
+                    </select>
+                  } @else { <span class="num">已取消</span> }
+                </td>
+                <td>
+                  @if (e.kind !== 'milestone' && e.state !== 'cancelled') {
+                    @if (editable() && e.state === 'in-progress' && !hasLiveChildren(e)) {
+                      <input type="number" min="0" max="100" step="1" aria-label="進度" data-field="entry-progress" [ngModel]="e.progress ?? null" (ngModelChange)="e.progress = clamp($event)" />
+                    } @else { <span class="num" data-progress-text>{{ progressOf(e) }}</span> }
+                  }
+                </td>
+                @if (e.kind === 'milestone') {
+                  <td><app-date-range-picker mode="single" data-field="planDate" ariaLabel="計畫日期" [value]="e.planDate ?? null" (valueChange)="e.planDate = $event" [disabled]="!editable() || e.state === 'cancelled'" /></td>
+                  <td><app-date-range-picker mode="single" data-field="actualDate" ariaLabel="實際日期" [value]="e.actualDate ?? null" (valueChange)="e.actualDate = $event" [disabled]="!editable() || e.state === 'cancelled'" /></td>
+                } @else {
+                  <td><app-date-range-picker data-field="planRange" ariaLabel="計畫起訖" [(startDate)]="e.planStart" [(endDate)]="e.planEnd" [disabled]="!editable() || e.state === 'cancelled'" /></td>
+                  <td><app-date-range-picker data-field="actualRange" ariaLabel="實際起訖" [(startDate)]="e.actualStart" [(endDate)]="e.actualEnd" [disabled]="!editable() || e.state === 'cancelled'" /></td>
+                }
+                <td>
+                  @if (e.state !== 'cancelled') {
+                    <app-predecessor-select data-field="predecessors" [options]="optionsFor(e)" [selected]="e.predecessors ?? NONE" (selectedChange)="e.predecessors = $event" [disabled]="!editable()" />
+                  }
+                </td>
+                <td>
+                  @if (editable()) {
+                    <div class="entry-actions">
+                      @if (e.kind === 'task' && e.state !== 'cancelled') {
+                        <button type="button" data-evidence-toggle (click)="toggleEvidence(e.id)">📎 {{ e.evidenceLinks?.length || 0 }}</button>
+                      }
+                      @if (e.state === 'cancelled') { <button type="button" (click)="reactivate(e.id)">重新啟用</button> }
+                      @else { <button type="button" (click)="cancel(e.id)">取消項目</button> }
+                      <button type="button" (click)="remove(e.id)">刪除</button>
+                    </div>
+                  }
+                </td>
+              </tr>
+              @if (editable() && e.kind === 'task' && e.state !== 'cancelled' && evidenceOpen === e.id) {
+                <tr class="evidence-row"><td colspan="9">
+                  <div class="evidence-panel" data-evidence-panel>
+                    @for (l of e.evidenceLinks; track l.workId) {
+                      <div class="evidence-link">
+                        <span>#{{ l.workId }}</span>
+                        <input data-field="evidence-summary" placeholder="摘要" [(ngModel)]="l.summary" />
+                        <button type="button" (click)="unlink(e, l.workId)">移除</button>
+                      </div>
+                    }
+                    @for (w of unlinked(e); track w.workId) {
+                      <div class="evidence-candidate" [attr.data-work]="w.workId">
+                        <button type="button" data-pick (click)="link(e, w.workId)">挑選</button>
+                        #{{ w.workId }} {{ w.workContent }}（{{ w.ownerName }}・{{ w.status }}）
+                        @for (c of w.subItems; track c.workId) { <small>　└ #{{ c.workId }} {{ c.workContent }}</small> }
+                      </div>
+                    }
+                    <label>手動輸入 workId <input type="number" data-field="manual-work-id" [(ngModel)]="manualId" /></label>
+                    <button type="button" data-manual-add [disabled]="!manualId" (click)="link(e, manualId!); manualId = null">加入</button>
+                  </div>
+                </td></tr>
               }
-            </div>
-            @if (editable() && e.kind === 'task' && e.state !== 'cancelled' && evidenceOpen === e.id) {
-              <div class="evidence-panel" data-evidence-panel>
-                @for (l of e.evidenceLinks; track l.workId) {
-                  <div class="evidence-link">
-                    <span>#{{ l.workId }}</span>
-                    <input data-field="evidence-summary" placeholder="摘要" [(ngModel)]="l.summary" />
-                    <button type="button" (click)="unlink(e, l.workId)">移除</button>
-                  </div>
-                }
-                @for (w of unlinked(e); track w.workId) {
-                  <div class="evidence-candidate" [attr.data-work]="w.workId">
-                    <button type="button" data-pick (click)="link(e, w.workId)">挑選</button>
-                    #{{ w.workId }} {{ w.workContent }}（{{ w.ownerName }}・{{ w.status }}）
-                    @for (c of w.subItems; track c.workId) { <small>　└ #{{ c.workId }} {{ c.workContent }}</small> }
-                  </div>
-                }
-                <label>手動輸入 workId <input type="number" data-field="manual-work-id" [(ngModel)]="manualId" /></label>
-                <button type="button" data-manual-add [disabled]="!manualId" (click)="link(e, manualId!); manualId = null">加入</button>
-              </div>
+              @for (msg of entryErrors(e.id); track msg) { <tr class="error-row"><td colspan="9"><p class="error" role="alert">{{ msg }}</p></td></tr> }
             }
-            @for (msg of entryErrors(e.id); track msg) { <p class="error" role="alert">{{ msg }}</p> }
-          </div>
-        }
+          </tbody>
+        </table>
+        </div>
         @if (editable()) {
           <p>
             @for (k of KINDS; track k) { <button type="button" [attr.data-add-entry]="k" (click)="add(k)">新增{{ KIND_LABELS[k] }}</button> }
@@ -158,7 +172,6 @@ export function scheduleErrors(project: SectionItem) {
       </details>
       }
 
-      <app-gantt [entries]="evaluated().entries" />
       @if (document()) {
         @if (project().externalDependencies?.length) {
           <table class="grid doc-deliveries" data-deliveries-table>
@@ -189,6 +202,17 @@ export class ProjectSchedule {
   readonly KIND_LABELS = KIND_LABELS;
   readonly KINDS = ["phase", "task", "milestone"] as const;
   readonly NONE: string[] = [];
+  /** Phase open state is shared by the gantt and the grid; the editor opens phases by default, the document does not. */
+  expandTasks = signal(false);
+  phaseToggles = signal<ReadonlySet<string>>(new Set());
+  isOpen = (phaseId: string) => isPhaseOpen({ expandTasks: this.expandTasks(), defaultOpen: !this.document(), toggled: this.phaseToggles() }, phaseId);
+  rows = () => gridRows(this.project().schedule ?? [], this.isOpen);
+  hasChildren = (phaseId: string) => hasChildTasks(this.project().schedule ?? [], phaseId, true);
+  togglePhase(phaseId: string) {
+    const next = new Set(this.phaseToggles());
+    if (!next.delete(phaseId)) next.add(phaseId);
+    this.phaseToggles.set(next);
+  }
 
   // ngModel mutates entries in place, so memoize on content: a fresh array per check would trip NG0100.
   private memo?: { key: string; value: ReturnType<typeof evaluateSchedule> };

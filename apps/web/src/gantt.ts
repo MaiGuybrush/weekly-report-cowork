@@ -1,4 +1,4 @@
-import { Component, computed, input, output, signal } from "@angular/core";
+import { Component, computed, input, model, output, signal } from "@angular/core";
 import {
   GanttEntry,
   ganttDisplayEntries,
@@ -9,6 +9,7 @@ import {
   ganttTicks,
   ganttWidth,
   hasChildTasks,
+  isPhaseOpen,
   localToday,
   stateLabel,
   varianceBadgeClass,
@@ -160,9 +161,11 @@ export class Gantt {
   /** Emits the id of the clicked entry. */
   entrySelected = output<string>();
 
-  expandTasks = signal(false);
+  /** Expand state is owned by the parent when a grid shares it; see isPhaseOpen for what `toggled` means. */
+  expandTasks = model(false);
+  phaseToggles = model<ReadonlySet<string>>(new Set());
+  phasesOpen = input(false);
   showCancelled = signal(false);
-  private expandedPhases = signal<ReadonlySet<string>>(new Set());
 
   /** Browser date, not the report date: overdue and the today line follow the real clock. */
   today = computed(() => localToday());
@@ -173,7 +176,7 @@ export class Gantt {
     ganttDisplayEntries(this.entries(), {
       expandTasks: this.expandTasks(),
       showCancelled: this.showCancelled(),
-      expandedPhases: this.expandedPhases(),
+      expandedPhases: new Set(this.entries().filter((e) => this.isExpanded(e.id)).map((e) => e.id)),
     }),
   );
   todayPosition = computed(() => ganttPosition(this.range(), this.today()));
@@ -182,11 +185,11 @@ export class Gantt {
   position = (date: string | null | undefined) => ganttPosition(this.range(), date);
   width = (start: string | null | undefined, end: string | null | undefined) => ganttWidth(this.range(), start, end);
   hasChildren = (phaseId: string) => hasChildTasks(this.entries(), phaseId, this.showCancelled());
-  isExpanded = (phaseId: string) => this.expandTasks() || this.expandedPhases().has(phaseId);
+  isExpanded = (phaseId: string) => isPhaseOpen({ expandTasks: this.expandTasks(), defaultOpen: this.phasesOpen(), toggled: this.phaseToggles() }, phaseId);
   togglePhase(phaseId: string) {
-    const next = new Set(this.expandedPhases());
+    const next = new Set(this.phaseToggles());
     if (!next.delete(phaseId)) next.add(phaseId);
-    this.expandedPhases.set(next);
+    this.phaseToggles.set(next);
   }
 
   evidenceTitle = (e: GanttEntry) => (e.evidenceLinks ?? []).map((l) => `#${l.workId} ${l.summary}`.trim()).join("\n");

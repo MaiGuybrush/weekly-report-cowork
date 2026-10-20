@@ -79,6 +79,21 @@ export function ganttDisplayEntries(entries: GanttEntry[], view: GanttView) {
   return result;
 }
 
+/** Open-by-default views (the editor) list phases that were toggled as collapsed; closed-by-default views list the opened ones. */
+export type PhaseOpenState = { expandTasks: boolean; defaultOpen: boolean; toggled: ReadonlySet<string> };
+export const isPhaseOpen = (s: PhaseOpenState, phaseId: string) => s.expandTasks || s.defaultOpen !== s.toggled.has(phaseId);
+
+/** Grid order, same grouping as the gantt; cancelled entries stay in their group. Tasks of a missing phase count as direct. */
+export function gridRows<T extends GanttEntry>(entries: T[], isOpen: (phaseId: string) => boolean): T[] {
+  const phases = entries.filter((e) => e.kind === "phase");
+  const tasks = entries.filter((e) => e.kind === "task");
+  return [
+    ...phases.flatMap((p) => [p, ...(isOpen(p.id) ? tasks.filter((t) => t.phaseId === p.id) : [])]),
+    ...tasks.filter((t) => !phases.some((p) => p.id === t.phaseId)),
+    ...entries.filter((e) => e.kind === "milestone"),
+  ];
+}
+
 export function hasChildTasks(entries: GanttEntry[], phaseId: string, showCancelled: boolean) {
   return entries.some((e) => e.kind === "task" && e.phaseId === phaseId && (showCancelled || e.state !== "cancelled"));
 }

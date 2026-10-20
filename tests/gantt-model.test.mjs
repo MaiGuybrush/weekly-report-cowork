@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { ganttDisplayEntries, ganttMarks, ganttPosition, ganttRange, ganttTicks, ganttWidth, hasChildTasks, varianceBadgeClass, varianceText } from '../apps/web/src/gantt-model.ts';
+import { ganttDisplayEntries, ganttMarks, ganttPosition, ganttRange, ganttTicks, ganttWidth, gridRows, hasChildTasks, isPhaseOpen, varianceBadgeClass, varianceText } from '../apps/web/src/gantt-model.ts';
 
 const blank = { planStart: null, planEnd: null, actualStart: null, actualEnd: null };
 const entries = [
@@ -90,4 +90,20 @@ test('actual style: late when past plan end, striped while running', () => {
   const m = (o) => ({ ...blank, id: 'm', kind: 'milestone', name: 'M', state: 'achieved', planDate: '2026-10-10', ...o });
   assert.equal(cls(m({ actualDate: '2026-10-11' })), 'late');
   assert.equal(cls(m({ actualDate: '2026-10-10' })), '');
+});
+
+test('grid rows: phase, its tasks (cancelled stay), direct tasks, milestones; collapsed phase hides tasks', () => {
+  const all = [...entries, { ...blank, id: 'o1', kind: 'task', name: 'orphan', phaseId: 'gone', state: 'open' }];
+  const rows = (open) => gridRows(all, (id) => open.includes(id)).map((e) => e.id);
+  assert.deepEqual(rows(['p1']), ['p1', 't1', 't3', 't2', 'o1', 'm1']);
+  assert.deepEqual(rows([]), ['p1', 't2', 'o1', 'm1']);
+});
+
+test('phase open: default decides, a toggle flips it, expand-all wins', () => {
+  const v = (o) => ({ expandTasks: false, defaultOpen: false, toggled: new Set(), ...o });
+  assert.equal(isPhaseOpen(v(), 'p1'), false);
+  assert.equal(isPhaseOpen(v({ toggled: new Set(['p1']) }), 'p1'), true);
+  assert.equal(isPhaseOpen(v({ defaultOpen: true }), 'p1'), true);
+  assert.equal(isPhaseOpen(v({ defaultOpen: true, toggled: new Set(['p1']) }), 'p1'), false);
+  assert.equal(isPhaseOpen(v({ expandTasks: true, defaultOpen: true, toggled: new Set(['p1']) }), 'p1'), true);
 });

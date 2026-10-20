@@ -128,9 +128,7 @@ input:disabled, select:disabled, textarea:disabled { background: var(--paper); -
 .pill.mute { background: var(--line2); color: var(--mute); }
 
 /* editor blocks */
-.item, .project, .entry { background: var(--sheet); border: 1px solid var(--line); border-radius: 10px; padding: 1rem 1.2rem; margin-bottom: 1rem; }
-.entry { background: #fff; border-radius: 6px; padding: .6rem .9rem; margin-bottom: .6rem; }
-.entry.cancelled { opacity: .5; }
+.item, .project { background: var(--sheet); border: 1px solid var(--line); border-radius: 10px; padding: 1rem 1.2rem; margin-bottom: 1rem; }
 .evidence-panel { margin: .5rem 0; padding: .6rem .9rem; border: 1px dashed var(--line); border-radius: 6px; background: var(--paper); }
 .evidence-link, .evidence-candidate { display: flex; align-items: center; flex-wrap: wrap; gap: .5rem; padding: .25rem 0; border-bottom: 1px solid var(--line2); font-size: .88rem; }
 .evidence-link input { width: auto; flex: 1; margin: 0; }
@@ -305,33 +303,25 @@ input:disabled, select:disabled, textarea:disabled { background: var(--paper); -
 .pre-option input { width: auto; margin: 0; }
 .pre-empty { margin: .3rem; font-size: .8rem; color: var(--mute); }
 
-/* schedule entry: two-row responsive grid */
-.entry-row { display: grid; gap: .4rem .75rem; align-items: end; }
-.entry-row + .entry-row { margin-top: .5rem; }
-.entry-row label, .entry-row .f { margin: 0; min-width: 0; font-size: .78rem; color: var(--mute); }
-.entry-row .f-label { display: block; margin-bottom: .2rem; }
-.entry-row input, .entry-row select { margin-top: .2rem; padding: .3rem .5rem; font-size: .9rem; }
-.entry-row .f > app-date-range-picker, .entry-row .f > app-predecessor-select { display: block; }
-.r1 { grid-template-columns: auto minmax(0, 1fr) auto; }
-.r1.is-task { grid-template-columns: auto minmax(0, 2fr) repeat(3, minmax(0, 1fr)); }
-.entry-kind { align-self: center; padding: .1rem .5rem; border-radius: 4px; background: var(--line2); color: var(--mute); font-size: .78rem; white-space: nowrap; }
+/* schedule grid: one row per entry, own scrollbars, sticky header */
+.grid-scroll { max-height: 50vh; overflow: auto; border: 1px solid var(--line2); border-radius: 6px; }
+.sched-grid { width: 100%; min-width: 74rem; }
+.sched-grid th { position: sticky; top: 0; z-index: 2; background: var(--sheet); box-shadow: 0 1px 0 var(--line); }
+.sched-grid td { vertical-align: middle; }
+.sched-grid tr.cancelled { opacity: .5; filter: grayscale(1); }
+.sched-grid tr.is-child .kind-cell { padding-left: 1.4rem; }
+.sched-grid .name-cell { min-width: 12rem; }
+.sched-grid .name-cell select { margin-top: .2rem; }
+.kind-cell { white-space: nowrap; }
+.grid-phase-toggle { margin: 0 .3rem 0 0; padding: 0 .3rem; border: 0; background: transparent; color: var(--steel-d); cursor: pointer; }
+.entry-kind { padding: .1rem .5rem; border-radius: 4px; background: var(--line2); color: var(--mute); font-size: .78rem; white-space: nowrap; }
 .entry-kind[data-kind="phase"] { background: var(--steel-t); color: var(--steel-d); }
 .entry-kind[data-kind="milestone"] { background: var(--amber-t); color: #8a6400; }
-.r2 { grid-template-columns: repeat(3, minmax(0, 1fr)) auto; }
-.entry-actions { display: flex; align-items: center; gap: .3rem; grid-column: 4; }
+.entry-actions { display: flex; align-items: center; gap: .3rem; }
 .entry-actions button { margin: 0; white-space: nowrap; }
-.entry > .error { margin: .5rem 0 0; font-weight: 600; border-left: 3px solid var(--red); }
-@media (max-width: 860px) {
-  .r1.is-task { grid-template-columns: auto minmax(0, 1fr); }
-  .r1.is-task > label:first-of-type { grid-column: 1 / -1; }
-  .r2 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-  .entry-actions { grid-column: 1 / -1; flex-wrap: wrap; }
-}
-@media (max-width: 560px) {
-  .r1, .r1.is-task { grid-template-columns: minmax(0, 1fr); }
-  .r2 { grid-template-columns: minmax(0, 1fr); }
-  .drp-popup { max-width: calc(100vw - 3rem); }
-}
+.sched-grid .evidence-panel { margin: .2rem 0; }
+.sched-grid .error { margin: 0; font-weight: 600; border-left: 3px solid var(--red); }
+@media (max-width: 560px) { .drp-popup { max-width: calc(100vw - 3rem); } }
 .entry .drp-quick-today-btn { display: none; }
 .entry .drp-icon { display: none; }
 .entry .drp-trigger { gap: .3rem; padding: .35rem .5rem; }
