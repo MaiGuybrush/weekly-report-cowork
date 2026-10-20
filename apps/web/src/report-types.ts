@@ -23,6 +23,7 @@ export type ScheduleEntry = {
   planEnd: string | null;
   actualStart: string | null;
   actualEnd: string | null;
+  progress?: number | null;
   planDate?: string | null;
   actualDate?: string | null;
   predecessors?: string[];

@@ -183,6 +183,8 @@ input:disabled, select:disabled, textarea:disabled { background: var(--paper); -
 .gantt-track .actual { top: 1.05rem; background: var(--actual); }
 .gantt-track .actual.late { background: var(--red); }
 .gantt-track .actual.running { background-image: repeating-linear-gradient(135deg, rgba(255, 255, 255, .35) 0 4px, transparent 4px 8px); }
+.gantt-track .gantt-progress { position: absolute; top: .85rem; margin-left: .3rem; font-size: .7rem; font-weight: 400; color: var(--mute); white-space: nowrap; z-index: 1; }
+.gantt-track .gantt-progress.flip { transform: translateX(-100%); margin-left: -.3rem; }
 .gantt-row-phase .plan, .gantt-row-phase .actual { height: .6rem; }
 .milestone-marker, .milestone-target-marker { top: .55rem; width: .9rem; height: .9rem; transform: translateX(-50%) rotate(45deg); border: 2px solid var(--plan); }
 .milestone-target-marker { background: var(--sheet); }

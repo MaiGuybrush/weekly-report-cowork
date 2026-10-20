@@ -196,6 +196,18 @@ try {
   assert.match(await again.locator('[data-health]').innerText(), /逾期 1 項\s*完成 0\/2/);
   await pickRange(again.locator('[data-entry="撰寫規格"] [data-field="actualRange"]'), '2026-10-12', '2026-10-12');
   assert.match(await again.locator('[data-health]').innerText(), /曾延後 3 項/);
+  // progress: open reads 0%; in-progress starts blank ("—"), only then is the input available, and the header follows the phase
+  const spec = again.locator('[data-entry="撰寫規格"]');
+  assert.match(await again.locator('[data-overall-progress]').innerText(), /整體進度 0%/);
+  assert.equal(await spec.locator('[data-field="entry-progress"]').count(), 0);
+  await spec.locator('select').nth(1).selectOption('in-progress');
+  assert.equal(await spec.locator('[data-field="entry-progress"]').inputValue(), '');
+  assert.match(await again.locator('.gantt-row-task .gantt-progress').innerText(), /—/);
+  await spec.locator('[data-field="entry-progress"]').fill('40');
+  assert.match(await again.locator('[data-overall-progress]').innerText(), /整體進度 40%/);
+  assert.match(await again.locator('.gantt-row-task .gantt-progress').innerText(), /40%/);
+  await spec.locator('select').nth(1).selectOption('open');
+  assert.equal(await spec.locator('[data-field="entry-progress"]').count(), 0);
   // picking a plan range redraws the gantt bar at once
   const phasePlan = again.locator('.gantt-row-phase .plan-bar');
   const barBefore = await phasePlan.getAttribute('style');
@@ -447,6 +459,7 @@ try {
   assert.equal(await pub.locator('.gantt-row-phase .plan-bar').count(), 1);
   assert.equal(await pub.locator('.gantt-row-phase .actual-bar').count(), 1);
   assert.match(await pub.locator('[data-health]').innerText(), /逾期 1 項\s*完成 0\/2/);
+  assert.match(await pub.locator('[data-overall-progress]').innerText(), /整體進度 0%/);
   assert.match(await pub.locator('[data-deliveries-table]').innerText(), /伺服器採購\s+資訊採購組\s+2026-10-15\s+已交付/);
   await pub.locator('.btn-phase-expand').click();
   assert.match(await pub.locator('.gantt-evidence-chip').innerText(), /2/);

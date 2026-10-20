@@ -6,12 +6,13 @@ import { DateRangePicker } from "./date-range-picker";
 import { Gantt } from "./gantt";
 import { ProjectHeader } from "./project-header";
 import { PredecessorSelect } from "./predecessor-select";
+import { clampProgress, liveTasksOf, progressText } from "./project-progress";
 import { cancelEntry, evaluateSchedule, reactivateEntry, type ScheduleInput } from "./schedule-rules";
 import type { ExternalDependency, ScheduleEntry, SectionItem } from "./report-types";
 
 const KEYS: (keyof ScheduleEntry)[] = [
   "id", "kind", "name", "owner", "phaseId", "state", "planStart", "planEnd",
-  "actualStart", "actualEnd", "planDate", "actualDate", "predecessors", "evidenceLinks",
+  "progress", "actualStart", "actualEnd", "planDate", "actualDate", "predecessors", "evidenceLinks",
 ];
 const KIND_LABELS = { phase: "階段", task: "關鍵任務", milestone: "里程碑" };
 
@@ -59,9 +60,16 @@ export function scheduleErrors(project: SectionItem) {
               }
               @if (e.state !== 'cancelled') {
                 <label>狀態
-                  <select [(ngModel)]="e.state" [disabled]="!editable()">
+                  <select [ngModel]="e.state" (ngModelChange)="setState(e, $event)" [disabled]="!editable()">
                     @for (s of statesOf(e.kind); track s[0]) { <option [value]="s[0]">{{ s[1] }}</option> }
                   </select></label>
+                @if (e.kind !== 'milestone') {
+                  <label>進度
+                    @if (editable() && e.state === 'in-progress' && !hasLiveChildren(e)) {
+                      <input type="number" min="0" max="100" step="1" data-field="entry-progress" [ngModel]="e.progress ?? null" (ngModelChange)="e.progress = clamp($event)" />
+                    } @else { <span class="num" data-progress-text>{{ progressOf(e) }}</span> }
+                  </label>
+                }
               }
             </div>
             <div class="entry-row r2">
@@ -207,6 +215,14 @@ export class ProjectSchedule {
     const name = (x: string) => entries.find((e) => e.id === x)?.name || x;
     return this.evaluated().errors.filter((x) => x.entryId === id).map((x) => `前置項目「${name(x.predecessorId)}」：${x.message}`);
   };
+  clamp = clampProgress;
+  progressOf = (e: ScheduleEntry) => progressText(this.project().schedule ?? [], e);
+  hasLiveChildren = (e: ScheduleEntry) => e.kind === "phase" && liveTasksOf(this.project().schedule ?? [], e).length > 0;
+  setState(e: ScheduleEntry, state: ScheduleEntry["state"]) {
+    if (e.state === state) return;
+    e.state = state;
+    e.progress = undefined; // progress only means something while in progress; a new state starts blank
+  }
   statesOf = (kind: ScheduleEntry["kind"]) =>
     kind === "milestone" ? [["pending", "待達成"], ["achieved", "已達成"]] : [["open", "開放"], ["in-progress", "進行中"], ["completed", "完成"]];
 

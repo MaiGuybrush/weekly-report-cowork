@@ -14,6 +14,7 @@ import {
   varianceBadgeClass,
   varianceText,
 } from "./gantt-model";
+import { progressText } from "./project-progress";
 
 @Component({
   selector: "app-gantt",
@@ -136,6 +137,9 @@ import {
                     [style.left.%]="position(m.actualBar.start)"
                     [style.width.%]="width(m.actualBar.start, m.actualBar.end)"
                     [title]="tooltip(entry)"></i>
+                  @if (progressLabel(entry); as pct) {
+                    <b class="gantt-progress" data-progress [class.flip]="position(m.actualBar.end) > 85" [style.left.%]="position(m.actualBar.end)">{{ pct }}</b>
+                  }
                 }
               }
             </div>
@@ -186,6 +190,7 @@ export class Gantt {
   }
 
   evidenceTitle = (e: GanttEntry) => (e.evidenceLinks ?? []).map((l) => `#${l.workId} ${l.summary}`.trim()).join("\n");
+  progressLabel = (e: GanttEntry) => progressText(this.entries(), e);
   marks = ganttMarks;
   tooltip = ganttTooltip;
   stateLabel = stateLabel;

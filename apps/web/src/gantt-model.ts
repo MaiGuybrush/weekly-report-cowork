@@ -11,6 +11,7 @@ export type GanttEntry = {
   planDate?: string | null;
   actualDate?: string | null;
   state: "open" | "in-progress" | "completed" | "cancelled" | "pending" | "achieved";
+  progress?: number | null;
   warnings?: { message: string }[];
   externalNotices?: { message: string }[];
   evidenceLinks?: { workId: number; summary: string }[];

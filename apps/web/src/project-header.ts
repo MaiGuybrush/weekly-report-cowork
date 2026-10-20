@@ -2,6 +2,7 @@ import { Component, input } from "@angular/core";
 import { FormsModule } from "@angular/forms";
 import { localToday } from "./gantt-model";
 import { projectHealth } from "./project-health";
+import { projectProgressText } from "./project-progress";
 import type { SectionItem } from "./report-types";
 
 const SECTIONS = [["s1", "第一課"], ["s2", "第二課"], ["s3", "第三課"]];
@@ -18,6 +19,7 @@ const SECTIONS = [["s1", "第一課"], ["s2", "第二課"], ["s3", "第三課"]]
         <span [attr.data-health]="health().status">
           <span [class]="'pill ' + health().status">{{ health().text }}</span>
           <span class="pill mute num">{{ health().progress }}</span>
+          <span class="pill mute num" data-overall-progress>整體進度 {{ overall() }}</span>
         </span>
       </div>
     } @else {
@@ -34,6 +36,7 @@ const SECTIONS = [["s1", "第一課"], ["s2", "第二課"], ["s3", "第三課"]]
     <p [attr.data-health]="health().status">
       <span [class]="'pill ' + health().status">{{ health().text }}</span>
       <span class="pill mute num">{{ health().progress }}</span>
+      <span class="pill mute num" data-overall-progress>整體進度 {{ overall() }}</span>
     </p>
     }`,
 })
@@ -46,6 +49,8 @@ export class ProjectHeader {
 
   // recomputed every check so in-place edits show immediately; cheap (one pass over the schedule)
   health = () => projectHealth(this.project().schedule ?? [], localToday());
+
+  overall = () => projectProgressText(this.project().schedule ?? []);
 
   participantNames = () => SECTIONS.filter((s) => this.has(s[0])).map((s) => s[1]).join("、");
   has = (s: string) => !!this.project().participants?.includes(s);
