@@ -1,0 +1,19 @@
+name: ci
+on: [push, pull_request]
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with: { version: 10 }
+      - uses: actions/setup-node@v4
+        with: { node-version: 22 }
+      - uses: actions/setup-dotnet@v4
+        with: { dotnet-version: 9.0.x }
+      - run: pnpm --dir apps/web install --no-frozen-lockfile
+      - run: pnpm --dir apps/web check
+      - run: dotnet build apps/api/WeeklyReport.Api.csproj
+      - run: pnpm --dir apps/web smoke
+        env:
+          CHROME_PATH: /usr/bin/google-chrome

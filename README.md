@@ -106,7 +106,7 @@ pnpm --dir apps/web start
 
 ## 驗證
 
-單一入口（型別檢查、全部單元測試、前端建置）：`pnpm --dir apps/web check`。完整驗證如下：
+單一入口（型別檢查、全部單元測試、前端建置）：`pnpm --dir apps/web check`；瀏覽器煙霧測試：`pnpm --dir apps/web smoke`（需先建置前端與 API）。Git hook 於 commit 前跑 `check`，啟用一次：`git config core.hooksPath .githooks`。CI（`.github/workflows/ci.yml`）跑 `check` 與 smoke。完整驗證如下：
 
 ```powershell
 dotnet build apps/api/WeeklyReport.Api.csproj
