@@ -221,6 +221,10 @@ try {
   assert.equal(await again.locator('.gantt-row-task').count(), 0, 'and in the gantt');
   await again.locator('.gantt .btn-phase-expand').click();
   assert.equal(await grid.locator('tbody tr[data-entry]').count(), 3, 'gantt arrow reopens the grid');
+  // task rows keep the timeline column aligned with phase rows
+  const trackBox = async (sel) => again.locator(`${sel} .gantt-track`).first().evaluate(el => { const r = el.getBoundingClientRect(); return [Math.round(r.left), Math.round(r.width)]; });
+  assert.deepEqual(await trackBox('.gantt-row-task'), await trackBox('.gantt-row-phase'), 'task track aligned with phase track');
+  assert.deepEqual(await trackBox('.gantt-row-milestone'), await trackBox('.gantt-row-phase'), 'milestone track aligned with phase track');
   // 「＋任務」: collapsed phase opens, new blank task sits under it with its name focused
   await grid.locator('.grid-phase-toggle').click();
   await grid.locator('[data-entry="設計階段"] [data-add-task]').click();

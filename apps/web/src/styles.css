@@ -161,7 +161,8 @@ input:disabled, select:disabled, textarea:disabled { background: var(--paper); -
 .gantt-row:hover { background: var(--steel-t); }
 .gantt-row-selected, .gantt-row-selected:hover, .sched-grid tr.row-selected { background: var(--steel-t); box-shadow: inset 3px 0 0 var(--steel, #3b6b8a); }
 .gantt-row-phase { font-weight: 600; }
-.gantt-row-task { padding-left: 1.25rem; color: #34434c; }
+.gantt-row-task { color: #34434c; }
+.gantt-row-task .gantt-meta { padding-left: 1.25rem; }
 .gantt-row-cancelled { opacity: .5; }
 .gantt-row-cancelled .gantt-name { text-decoration: line-through; color: var(--mute); }
 .gantt-meta { display: flex; align-items: center; gap: .45rem; overflow: hidden; white-space: nowrap; }
