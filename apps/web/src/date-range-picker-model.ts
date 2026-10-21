@@ -43,6 +43,21 @@ export function formatDateDisplay(
   return `～ ${end}`;
 }
 
+/** mm-dd~mm-dd; yy-mm-dd~yy-mm-dd when not entirely within `today`'s year. */
+export function formatCompactDate(
+  start: string | null | undefined,
+  end: string | null | undefined,
+  mode: DatePickerMode = 'range',
+  today: string = getTodayIso()
+): string {
+  const dates = (mode === 'single' ? [start] : [start, end]).filter(Boolean) as string[];
+  if (!dates.length) return '—';
+  const thisYear = today.slice(0, 4);
+  const full = dates.some((d) => d.slice(0, 4) !== thisYear);
+  const f = (d: string | null | undefined) => (d ? (full ? d.slice(2) : d.slice(5)) : '');
+  return mode === 'single' ? f(start) : `${f(start)}~${f(end)}`;
+}
+
 export interface CalendarDay {
   dateString: string;
   year: number;

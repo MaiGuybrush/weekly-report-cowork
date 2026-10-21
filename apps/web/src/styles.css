@@ -328,3 +328,6 @@ input:disabled, select:disabled, textarea:disabled { background: var(--paper); -
 .entry .drp-icon { display: none; }
 .entry .drp-trigger { gap: .3rem; padding: .35rem .5rem; }
 .entry .drp-display-text { font-size: .85rem; }
+.drp-compact .drp-trigger { min-height: 0; padding: .2rem .35rem; border-color: transparent; background: transparent; }
+.drp-compact .drp-trigger:hover, .drp-compact .drp-trigger[data-state="open"] { border-color: var(--steel); background: #fff; }
+.drp-compact .drp-display-text { font-size: .85rem; }

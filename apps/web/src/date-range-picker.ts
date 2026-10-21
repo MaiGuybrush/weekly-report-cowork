@@ -14,6 +14,7 @@ import {
   DatePickerMode,
   applyDateSelection,
   clearSelection,
+  formatCompactDate,
   formatDateDisplay,
   generateCalendarMonth,
   getPreviewRange,
@@ -32,7 +33,7 @@ const WEEKDAYS = ["日", "一", "二", "三", "四", "五", "六"];
   standalone: true,
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
-    <div class="drp-container" [class.drp-disabled]="disabled()" (focusout)="onFocusOut($event)">
+    <div class="drp-container" [class.drp-disabled]="disabled()" [class.drp-compact]="compact()" (focusout)="onFocusOut($event)">
       <!-- Trigger Box -->
       <div
         class="drp-trigger"
@@ -42,15 +43,18 @@ const WEEKDAYS = ["日", "一", "二", "三", "四", "五", "六"];
         [attr.aria-expanded]="isOpen()"
         [attr.aria-label]="ariaLabel()"
         [attr.data-state]="isOpen() ? 'open' : 'closed'"
+        [attr.title]="compact() ? fullText() : null"
         (click)="toggleDropdown()"
         (keydown.enter)="onTriggerKey($event)"
         (keydown.space)="onTriggerKey($event)">
-        <span class="drp-icon" aria-hidden="true">📅</span>
+        @if (!compact()) {
+          <span class="drp-icon" aria-hidden="true">📅</span>
+        }
         <span class="drp-display-text" [class.drp-placeholder]="!hasValue()">
-          {{ displayText() || placeholderText() }}
+          @if (compact() && !isOpen()) { {{ compactText() }} } @else { {{ displayText() || placeholderText() }} }
         </span>
 
-        @if (!disabled()) {
+        @if (!disabled() && (!compact() || isOpen())) {
           <div class="drp-actions" (click)="$event.stopPropagation()">
             <button
               type="button"
@@ -157,6 +161,8 @@ export class DateRangePicker {
   endDate = model<string | null>(null);
   value = model<string | null>(null);
   disabled = input<boolean>(false);
+  /** Show `mm-dd~mm-dd` until the popup opens; full date in the tooltip. */
+  compact = input<boolean>(false);
   placeholder = input<string>("");
   ariaLabel = input<string>("選擇日期");
 
@@ -202,6 +208,13 @@ export class DateRangePicker {
   displayText = computed<string>(() => {
     return formatDateDisplay(this.effectiveStart(), this.effectiveEnd(), this.mode());
   });
+
+  compactText = computed<string>(() => {
+    const single = this.mode() === "single";
+    return formatCompactDate(single ? (this.value() ?? this.startDate()) : this.startDate(), single ? null : this.endDate(), this.mode());
+  });
+
+  fullText = computed<string>(() => this.displayText() || "—");
 
   calendar = computed(() => {
     return generateCalendarMonth(this.viewYear(), this.viewMonth());

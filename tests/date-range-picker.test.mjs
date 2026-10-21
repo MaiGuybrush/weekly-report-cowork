@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
   formatDateDisplay,
+  formatCompactDate,
   parseDateIso,
   formatDateIso,
   getTodayIso,
@@ -199,3 +200,16 @@ test('getPreviewRange: correctly orders preview endpoints regardless of hover di
 
 
 
+
+test('formatCompactDate: mm-dd, yy-mm-dd when not this year, partial, empty, single', () => {
+  const t = '2026-10-21';
+  assert.equal(formatCompactDate('2026-10-01', '2026-10-20', 'range', t), '10-01~10-20');
+  assert.equal(formatCompactDate('2026-12-20', '2027-01-05', 'range', t), '26-12-20~27-01-05');
+  assert.equal(formatCompactDate('2025-03-01', '2025-03-09', 'range', t), '25-03-01~25-03-09');
+  assert.equal(formatCompactDate('2026-10-01', null, 'range', t), '10-01~');
+  assert.equal(formatCompactDate(null, '2026-10-20', 'range', t), '~10-20');
+  assert.equal(formatCompactDate(null, null, 'range', t), '—');
+  assert.equal(formatCompactDate('2026-10-15', null, 'single', t), '10-15');
+  assert.equal(formatCompactDate('2025-10-15', null, 'single', t), '25-10-15');
+  assert.equal(formatCompactDate(null, null, 'single', t), '—');
+});

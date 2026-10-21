@@ -85,11 +85,11 @@ export function scheduleErrors(project: SectionItem) {
                   }
                 </td>
                 @if (e.kind === 'milestone') {
-                  <td><app-date-range-picker mode="single" data-field="planDate" ariaLabel="計畫日期" [value]="e.planDate ?? null" (valueChange)="e.planDate = $event" [disabled]="!editable() || e.state === 'cancelled'" /></td>
-                  <td><app-date-range-picker mode="single" data-field="actualDate" ariaLabel="實際日期" [value]="e.actualDate ?? null" (valueChange)="e.actualDate = $event" [disabled]="!editable() || e.state === 'cancelled'" /></td>
+                  <td><app-date-range-picker [compact]="true" mode="single" data-field="planDate" ariaLabel="計畫日期" [value]="e.planDate ?? null" (valueChange)="e.planDate = $event" [disabled]="!editable() || e.state === 'cancelled'" /></td>
+                  <td><app-date-range-picker [compact]="true" mode="single" data-field="actualDate" ariaLabel="實際日期" [value]="e.actualDate ?? null" (valueChange)="e.actualDate = $event" [disabled]="!editable() || e.state === 'cancelled'" /></td>
                 } @else {
-                  <td><app-date-range-picker data-field="planRange" ariaLabel="計畫起訖" [(startDate)]="e.planStart" [(endDate)]="e.planEnd" [disabled]="!editable() || e.state === 'cancelled'" /></td>
-                  <td><app-date-range-picker data-field="actualRange" ariaLabel="實際起訖" [(startDate)]="e.actualStart" [(endDate)]="e.actualEnd" [disabled]="!editable() || e.state === 'cancelled'" /></td>
+                  <td><app-date-range-picker [compact]="true" data-field="planRange" ariaLabel="計畫起訖" [(startDate)]="e.planStart" [(endDate)]="e.planEnd" [disabled]="!editable() || e.state === 'cancelled'" /></td>
+                  <td><app-date-range-picker [compact]="true" data-field="actualRange" ariaLabel="實際起訖" [(startDate)]="e.actualStart" [(endDate)]="e.actualEnd" [disabled]="!editable() || e.state === 'cancelled'" /></td>
                 }
                 <td>
                   @if (e.state !== 'cancelled') {

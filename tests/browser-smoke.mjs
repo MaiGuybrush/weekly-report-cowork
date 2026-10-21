@@ -232,7 +232,7 @@ try {
   const fresh = grid.locator('tr[data-entry=""]');
   assert.equal(await fresh.locator('select[aria-label="所屬階段"] option:checked').innerText(), '設計階段');
   assert.equal(await fresh.locator('select[aria-label="狀態"] option:checked').innerText(), '開放');
-  assert.equal(await fresh.locator('[data-field="planRange"] .drp-display-text').innerText(), '選擇起訖區間', 'dates blank');
+  assert.equal(await fresh.locator('[data-field="planRange"] .drp-display-text').innerText(), '—', 'dates blank');
   assert.ok(await fresh.locator('[data-field="entry-name"]').evaluate(el => el === document.activeElement), 'new name field focused');
   await fresh.getByRole('button', { name: '刪除' }).click();
   assert.equal(await grid.locator('tbody tr[data-entry]').count(), 3);
@@ -251,7 +251,7 @@ try {
   const barBefore = await phasePlan.getAttribute('style');
   await pickRange(again.locator('[data-entry="設計階段"] [data-field="planRange"]'), '2026-10-01', '2026-10-27');
   assert.notEqual(await phasePlan.getAttribute('style'), barBefore);
-  assert.equal(await again.locator('[data-entry="設計階段"] [data-field="planRange"] .drp-display-text').innerText(), '2026-10-01 ～ 2026-10-27');
+  assert.equal(await again.locator('[data-entry="設計階段"] [data-field="planRange"] .drp-display-text').innerText(), '10-01~10-27');
   // range picker: Enter opens, hint follows the first click, Esc closes and returns focus to the trigger
   const rangeBox = again.locator('[data-entry="撰寫規格"] [data-field="planRange"]');
   const rangeTrigger = rangeBox.locator('.drp-trigger');
@@ -266,14 +266,15 @@ try {
   assert.equal(await rangeBox.locator('.drp-popup').count(), 0);
   assert.equal(await rangeTrigger.getAttribute('aria-expanded'), 'false');
   assert.ok(await rangeTrigger.evaluate(el => el === document.activeElement), 'Esc returns focus to the date trigger');
-  assert.equal(await rangeBox.locator('.drp-display-text').innerText(), '2026-10-02 ～ 2026-10-10', 'aborted pick leaves the value alone');
+  assert.equal(await rangeBox.locator('.drp-display-text').innerText(), '10-02~10-10', 'aborted pick leaves the value alone');
   // finishing a pick closes the popup and keeps focus on the trigger; tabbing away closes it too
   await page.keyboard.press('Enter');
   await rangeBox.locator('[data-date="2026-10-06"]').click();
   await rangeBox.locator('[data-date="2026-10-09"]').click();
   assert.equal(await rangeBox.locator('.drp-popup').count(), 0);
   assert.ok(await rangeTrigger.evaluate(el => el === document.activeElement), 'completed pick returns focus to the date trigger');
-  assert.equal(await rangeBox.locator('.drp-display-text').innerText(), '2026-10-06 ～ 2026-10-09');
+  assert.equal(await rangeBox.locator('.drp-display-text').innerText(), '10-06~10-09');
+  assert.equal(await rangeTrigger.getAttribute('title'), '2026-10-06 ～ 2026-10-09', 'tooltip carries the full dates');
   await page.keyboard.press('Enter');
   await page.keyboard.press('Shift+Tab');
   assert.equal(await rangeBox.locator('.drp-popup').count(), 0, 'focus leaving closes the popup');
@@ -314,7 +315,7 @@ try {
   await page.locator('[data-rail-file="s1"]').click();
   await page.locator('[data-tab="projects"]').click();
   assert.equal(await page.locator('[data-file="s1"] [data-field="project-title"]').inputValue(), '新平台');
-  assert.equal(await page.locator('[data-file="s1"] [data-entry="撰寫規格"] [data-field="actualRange"] .drp-display-text').innerText(), '2026-10-12 ～ 2026-10-12');
+  assert.equal(await page.locator('[data-file="s1"] [data-entry="撰寫規格"] [data-field="actualRange"] .drp-display-text').innerText(), '10-12~10-12');
   // leaving the editor with unsaved changes asks first; Esc stays, confirming discards
   await page.locator('[data-nav="home"]').click();
   await page.locator('[data-leave-dialog]').waitFor({ state: 'visible', timeout: 5000 });
