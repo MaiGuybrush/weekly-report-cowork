@@ -100,12 +100,12 @@ export function scheduleErrors(project: SectionItem) {
                   @if (editable()) {
                     <div class="entry-actions">
                       @if (e.kind === 'task' && e.state !== 'cancelled') {
-                        <button type="button" data-evidence-toggle (click)="toggleEvidence(e.id)">📎 {{ e.evidenceLinks?.length || 0 }}</button>
+                        <button type="button" data-evidence-toggle title="佐證" aria-label="佐證" (click)="toggleEvidence(e.id)"><svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M10.5 5.5 6 10a1.4 1.4 0 0 0 2 2l5-5a3 3 0 0 0-4.2-4.2L4 7.6a4.6 4.6 0 0 0 6.5 6.5"/></svg><span class="num">{{ e.evidenceLinks?.length || 0 }}</span></button>
                       }
-                      @if (e.kind === 'phase' && e.state !== 'cancelled') { <button type="button" data-add-task (click)="addTask(e.id)">＋任務</button> }
-                      @if (e.state === 'cancelled') { <button type="button" (click)="reactivate(e.id)">重新啟用</button> }
-                      @else { <button type="button" (click)="cancel(e.id)">取消項目</button> }
-                      <button type="button" (click)="remove(e.id)">刪除</button>
+                      @if (e.kind === 'phase' && e.state !== 'cancelled') { <button type="button" data-add-task title="＋任務" aria-label="＋任務" (click)="addTask(e.id)"><svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M8 3v10M3 8h10"/></svg></button> }
+                      @if (e.state === 'cancelled') { <button type="button" title="重新啟用" aria-label="重新啟用" (click)="reactivate(e.id)"><svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 8a5 5 0 1 0 1.8-3.8M3 2.5v3h3"/></svg></button> }
+                      @else { <button type="button" title="取消項目" aria-label="取消項目" (click)="cancel(e.id)"><svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="8" cy="8" r="5.5"/><path d="m4 4 8 8"/></svg></button> }
+                      <button type="button" title="刪除" aria-label="刪除" (click)="remove(e.id)"><svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 4.5h10M6.5 4.5V3h3v1.5M4.5 4.5l.6 8.5h5.8l.6-8.5"/></svg></button>
                     </div>
                   }
                 </td>
