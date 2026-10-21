@@ -107,3 +107,19 @@ test('phase open: default decides, a toggle flips it, expand-all wins', () => {
   assert.equal(isPhaseOpen(v({ defaultOpen: true, toggled: new Set(['p1']) }), 'p1'), false);
   assert.equal(isPhaseOpen(v({ expandTasks: true, defaultOpen: true, toggled: new Set(['p1']) }), 'p1'), true);
 });
+
+test('moveTask: reorder, reassign, into phase, direct', async () => {
+  const { moveTask } = await import('../apps/web/src/gantt-model.ts');
+  const mk = (id, kind, phaseId) => ({ ...blank, id, kind, name: id, state: 'open', ...(kind === 'task' && { phaseId }) });
+  const list = [mk('p1', 'phase'), mk('p2', 'phase'), mk('a', 'task', 'p1'), mk('b', 'task', 'p1'), mk('c', 'task', 'p2'), mk('d', 'task', null), mk('m', 'milestone')];
+  const run = (id, dest) => moveTask(list, id, dest).map((e) => `${e.id}${e.phaseId ? '@' + e.phaseId : ''}`).join(',');
+  assert.equal(run('b', { before: 'a' }), 'p1,p2,b@p1,a@p1,c@p2,d,m');
+  assert.equal(run('a', { after: 'b' }), 'p1,p2,b@p1,a@p1,c@p2,d,m');
+  assert.equal(run('a', { before: 'c' }), 'p1,p2,b@p1,a@p2,c@p2,d,m');
+  assert.equal(run('a', { intoPhase: 'p2' }), 'p1,p2,b@p1,c@p2,a@p2,d,m');
+  assert.equal(run('a', { intoPhase: 'p1' }), 'p1,p2,b@p1,a@p1,c@p2,d,m');
+  assert.equal(run('a', { direct: true }), 'p1,p2,b@p1,c@p2,d,a,m');
+  assert.equal(run('a', { before: 'd' }), 'p1,p2,b@p1,c@p2,a,d,m');
+  assert.equal(run('a', { before: 'a' }), 'p1,p2,a@p1,b@p1,c@p2,d,m');
+  assert.equal(list[2].phaseId, 'p1', 'input not mutated');
+});

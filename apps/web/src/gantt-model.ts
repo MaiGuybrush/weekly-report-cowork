@@ -156,3 +156,32 @@ export function ganttTooltip(entry: GanttEntry) {
 export function stateLabel(state: GanttEntry["state"]) {
   return ({ open: "開放", "in-progress": "進行中", completed: "完成", cancelled: "取消", pending: "待達成", achieved: "已達成" } as Record<string, string>)[state] ?? state;
 }
+
+export type TaskDrop = { before: string } | { after: string } | { intoPhase: string } | { direct: true };
+
+/** Moves one task by reordering the array and reassigning its phase; grid and gantt both derive order from the array. */
+export function moveTask<T extends GanttEntry>(entries: T[], taskId: string, drop: TaskDrop): T[] {
+  const task = entries.find((e) => e.id === taskId);
+  if (!task || task.kind !== "task") return entries;
+  const rest = entries.filter((e) => e !== task);
+  const index = (pred: (e: T) => boolean) => rest.map(pred).lastIndexOf(true);
+  const isPhase = (id?: string | null) => rest.some((e) => e.kind === "phase" && e.id === id);
+  let phaseId: string | null;
+  let at: number;
+  if ("direct" in drop) {
+    phaseId = null;
+    const last = index((e) => e.kind === "task" && !isPhase(e.phaseId));
+    at = last >= 0 ? last + 1 : rest.length;
+  } else if ("intoPhase" in drop) {
+    phaseId = drop.intoPhase;
+    const last = index((e) => e.kind === "task" && e.phaseId === phaseId);
+    at = (last >= 0 ? last : rest.findIndex((e) => e.id === phaseId)) + 1;
+  } else {
+    const targetId = "before" in drop ? drop.before : drop.after;
+    const target = rest.findIndex((e) => e.id === targetId);
+    if (target < 0) return entries;
+    phaseId = rest[target].phaseId && isPhase(rest[target].phaseId) ? rest[target].phaseId! : null;
+    at = "before" in drop ? target : target + 1;
+  }
+  return [...rest.slice(0, at), { ...task, phaseId }, ...rest.slice(at)];
+}

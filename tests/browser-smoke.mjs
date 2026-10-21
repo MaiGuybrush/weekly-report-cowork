@@ -100,8 +100,8 @@ try {
   await addEntry('phase', '設計階段');
   await pickRange(project.locator('[data-field="planRange"]').last(), '2026-10-01', '2026-10-20');
   await pickRange(project.locator('[data-field="actualRange"]').last(), '2026-10-01', '2026-10-22');
-  await addEntry('task', '撰寫規格');
-  await project.locator('[data-entry="撰寫規格"] select').first().selectOption({ label: '設計階段' });
+  await project.locator('[data-entry="設計階段"] [data-add-task]').click();
+  await project.locator('[data-field="entry-name"]').last().fill('撰寫規格');
   await pickRange(project.locator('[data-field="planRange"]').last(), '2026-10-02', '2026-10-10');
   await addEntry('milestone', '上線');
   await pickRange(project.locator('[data-field="planDate"]').last(), '2026-10-30');
@@ -199,13 +199,13 @@ try {
   const spec = again.locator('[data-entry="撰寫規格"]');
   assert.match(await again.locator('[data-overall-progress]').innerText(), /整體進度 0%/);
   assert.equal(await spec.locator('[data-field="entry-progress"]').count(), 0);
-  await spec.locator('select').nth(1).selectOption('in-progress');
+  await spec.locator('select[aria-label="狀態"]').selectOption('in-progress');
   assert.equal(await spec.locator('[data-field="entry-progress"]').inputValue(), '');
   assert.match(await again.locator('.gantt-row-task .gantt-progress').innerText(), /—/);
   await spec.locator('[data-field="entry-progress"]').fill('40');
   assert.match(await again.locator('[data-overall-progress]').innerText(), /整體進度 40%/);
   assert.match(await again.locator('.gantt-row-task .gantt-progress').innerText(), /40%/);
-  await spec.locator('select').nth(1).selectOption('open');
+  await spec.locator('select[aria-label="狀態"]').selectOption('open');
   assert.equal(await spec.locator('[data-field="entry-progress"]').count(), 0);
   // schedule grid: gantt sits above it, it scrolls on its own with a sticky header, phases open by default and share state with the gantt
   const grid = again.locator('[data-schedule-grid]');
@@ -230,10 +230,32 @@ try {
   await grid.locator('[data-entry="設計階段"] [data-add-task]').click();
   assert.deepEqual(await grid.locator('tbody tr[data-entry]').evaluateAll(rs => rs.map(r => r.dataset.entry)), ['設計階段', '撰寫規格', '', '上線'], 'new task lands at the end of its phase, phase reopened');
   const fresh = grid.locator('tr[data-entry=""]');
-  assert.equal(await fresh.locator('select[aria-label="所屬階段"] option:checked').innerText(), '設計階段');
+  assert.equal(await grid.locator('select[aria-label="所屬階段"]').count(), 0, 'no phase dropdown; drag replaces it');
+  assert.ok(await fresh.evaluate(el => el.classList.contains('is-child')), 'new task belongs to the phase');
   assert.equal(await fresh.locator('select[aria-label="狀態"] option:checked').innerText(), '開放');
   assert.equal(await fresh.locator('[data-field="planRange"] .drp-display-text').innerText(), '—', 'dates blank');
   assert.ok(await fresh.locator('[data-field="entry-name"]').evaluate(el => el === document.activeElement), 'new name field focused');
+  // drag: reorder inside a phase, move to project-direct, move onto a collapsed phase; gantt follows
+  const names = () => grid.locator('tbody tr[data-entry]').evaluateAll(rs => rs.map(r => r.dataset.entry));
+  const ganttNames = () => again.locator('.gantt-row .gantt-name').allInnerTexts();
+  const handle = fresh.locator('.drag-handle');
+  await handle.dragTo(grid.locator('[data-entry="撰寫規格"]'), { targetPosition: { x: 20, y: 3 } });
+  assert.deepEqual(await names(), ['設計階段', '', '撰寫規格', '上線'], 'dropped on upper half: inserted before');
+  assert.deepEqual((await ganttNames()).filter(n => n !== '設計階段' && n !== '上線'), ['', '撰寫規格'], 'gantt order matches');
+  await fresh.locator('.drag-handle').dragTo(grid.locator('[data-entry="撰寫規格"]'), { targetPosition: { x: 20, y: 30 } });
+  assert.deepEqual(await names(), ['設計階段', '撰寫規格', '', '上線'], 'dropped on lower half: inserted after');
+  await fresh.locator('.drag-handle').dragTo(grid.locator('[data-entry="設計階段"]'));
+  assert.deepEqual(await names(), ['設計階段', '撰寫規格', '', '上線'], 'dropped on phase: last child');
+  await fresh.locator('.drag-handle').hover();
+  await page.mouse.down();
+  await page.mouse.move(0, 0, { steps: 5 });
+  await grid.locator('[data-drop-direct]').hover();
+  await page.mouse.up();
+  assert.ok(!(await fresh.evaluate(el => el.classList.contains('is-child'))), 'moved to project-direct');
+  await grid.locator('.grid-phase-toggle').click();
+  await fresh.locator('.drag-handle').dragTo(grid.locator('[data-entry="設計階段"]'));
+  assert.deepEqual(await names(), ['設計階段', '撰寫規格', '', '上線'], 'collapsed phase opens on drop');
+  assert.ok(await fresh.evaluate(el => el.classList.contains('is-child')));
   await fresh.getByRole('button', { name: '刪除' }).click();
   assert.equal(await grid.locator('tbody tr[data-entry]').count(), 3);
   // gantt <-> grid linking: one highlighted row, both directions

@@ -4,7 +4,7 @@ import { FormsModule } from "@angular/forms";
 import { firstValueFrom } from "rxjs";
 import { DateRangePicker } from "./date-range-picker";
 import { Gantt } from "./gantt";
-import { gridRows, hasChildTasks, isPhaseOpen } from "./gantt-model";
+import { gridRows, hasChildTasks, isPhaseOpen, moveTask, type TaskDrop } from "./gantt-model";
 import { ProjectHeader } from "./project-header";
 import { PredecessorSelect } from "./predecessor-select";
 import { clampProgress, liveTasksOf, progressText } from "./project-progress";
@@ -53,8 +53,9 @@ export function scheduleErrors(project: SectionItem) {
           <thead><tr><th>類型</th><th>名稱</th><th>負責</th><th>狀態</th><th>進度</th><th>計畫起訖</th><th>實際起訖</th><th>前置項目</th><th>操作</th></tr></thead>
           <tbody>
             @for (e of rows(); track e.id) {
-              <tr class="entry" [attr.data-entry]="e.name" [attr.data-entry-id]="e.id" [class.cancelled]="e.state === 'cancelled'" [class.is-child]="e.kind === 'task' && !!e.phaseId" [class.row-selected]="e.id === selectedId()" (click)="selectFromGrid($event, e.id)">
+              <tr class="entry" [attr.data-entry]="e.name" [attr.data-entry-id]="e.id" [class.cancelled]="e.state === 'cancelled'" [class.is-child]="e.kind === 'task' && !!e.phaseId" [class.row-selected]="e.id === selectedId()" [class.drag-src]="e.id === dragId()" [class.drop-before]="hint()?.id === e.id && hint()?.pos === 'before'" [class.drop-after]="hint()?.id === e.id && hint()?.pos === 'after'" [class.drop-into]="hint()?.id === e.id && hint()?.pos === 'into'" (click)="selectFromGrid($event, e.id)" (dragover)="dragOver($event, e)" (dragleave)="hint.set(null)" (drop)="dropOn($event, e)">
                 <td class="kind-cell">
+                  @if (e.kind === 'task' && editable()) { <span class="drag-handle" draggable="true" title="拖拉調整歸屬與順序" aria-label="拖拉調整歸屬與順序" (dragstart)="dragStart($event, e.id)" (dragend)="dragEnd()">⋮⋮</span> }
                   @if (e.kind === 'phase' && hasChildren(e.id)) {
                     <button type="button" class="grid-phase-toggle" [attr.aria-expanded]="isOpen(e.id)" [attr.aria-label]="isOpen(e.id) ? '收合此階段任務' : '展開此階段任務'" (click)="togglePhase(e.id)">{{ isOpen(e.id) ? '▼' : '▶' }}</button>
                   }
@@ -62,12 +63,6 @@ export function scheduleErrors(project: SectionItem) {
                 </td>
                 <td class="name-cell">
                   <input data-field="entry-name" aria-label="名稱" [(ngModel)]="e.name" [disabled]="!editable() || e.state === 'cancelled'" />
-                  @if (e.kind === 'task') {
-                    <select aria-label="所屬階段" [(ngModel)]="e.phaseId" [disabled]="!editable() || e.state === 'cancelled'">
-                      <option [ngValue]="null">（無所屬階段）</option>
-                      @for (p of phases(); track p.id) { <option [ngValue]="p.id">{{ p.name }}</option> }
-                    </select>
-                  }
                 </td>
                 <td>@if (e.kind === 'task') { <input aria-label="負責人/單位" [(ngModel)]="e.owner" [disabled]="!editable()" /> }</td>
                 <td>
@@ -136,6 +131,7 @@ export function scheduleErrors(project: SectionItem) {
             }
           </tbody>
         </table>
+        @if (dragId()) { <div class="drop-direct" [class.drop-over]="hint()?.id === 'direct'" data-drop-direct (dragover)="directOver($event)" (dragleave)="hint.set(null)" (drop)="dropDirect($event)">拖到這裡：專案直屬</div> }
         </div>
         @if (editable()) {
           <p>
@@ -220,6 +216,51 @@ export class ProjectSchedule {
     this.changes.detectChanges();
     this.host.nativeElement.querySelector(`tr[data-entry-id="${id}"]`)?.scrollIntoView({ block: "nearest" });
   }
+  /** Task drag: only the handle drags; rows and the bottom zone are drop targets. */
+  dragId = signal<string | null>(null);
+  hint = signal<{ id: string; pos: "before" | "after" | "into" } | null>(null);
+  dragStart(ev: DragEvent, id: string) {
+    ev.dataTransfer?.setData("text/plain", id);
+    const row = (ev.target as HTMLElement).closest("tr");
+    if (row) ev.dataTransfer?.setDragImage(row, 0, 0);
+    this.dragId.set(id);
+    this.changes.detectChanges();
+  }
+  dragEnd() { this.dragId.set(null); this.hint.set(null); this.changes.detectChanges(); }
+  private dropFor(ev: DragEvent, e: ScheduleEntry): { drop: TaskDrop; pos: "before" | "after" | "into" } | null {
+    const src = this.dragId();
+    if (!src || src === e.id) return null;
+    if (e.kind === "phase") return e.state === "cancelled" ? null : { drop: { intoPhase: e.id }, pos: "into" };
+    if (e.kind !== "task") return null;
+    const owner = (this.project().schedule ?? []).find((x) => x.id === e.phaseId);
+    if (owner?.state === "cancelled") return null; // a cancelled phase cannot receive tasks
+    const r = (ev.currentTarget as HTMLElement).getBoundingClientRect();
+    const pos = ev.clientY < r.top + r.height / 2 ? "before" : "after";
+    return { drop: pos === "before" ? { before: e.id } : { after: e.id }, pos };
+  }
+  dragOver(ev: DragEvent, e: ScheduleEntry) {
+    const d = this.dropFor(ev, e);
+    if (!d) return;
+    ev.preventDefault();
+    const cur = this.hint();
+    if (cur?.id !== e.id || cur.pos !== d.pos) { this.hint.set({ id: e.id, pos: d.pos }); this.changes.detectChanges(); }
+  }
+  dropOn(ev: DragEvent, e: ScheduleEntry) {
+    const d = this.dropFor(ev, e);
+    if (d) { ev.preventDefault(); this.applyDrop(d.drop); }
+  }
+  directOver(ev: DragEvent) { ev.preventDefault(); this.hint.set({ id: "direct", pos: "into" }); this.changes.detectChanges(); }
+  dropDirect(ev: DragEvent) { ev.preventDefault(); this.applyDrop({ direct: true }); }
+  private applyDrop(drop: TaskDrop) {
+    const id = this.dragId()!;
+    this.replace(moveTask(this.project().schedule ?? [], id, drop));
+    const moved = (this.project().schedule ?? []).find((e) => e.id === id);
+    if (moved?.phaseId && !this.isOpen(moved.phaseId)) this.togglePhase(moved.phaseId);
+    this.dragEnd();
+    this.selectedId.set(id);
+    this.changes.detectChanges();
+    this.host.nativeElement.querySelector(`tr[data-entry-id="${id}"]`)?.scrollIntoView({ block: "nearest" });
+  }
   rows = () => gridRows(this.project().schedule ?? [], this.isOpen);
   hasChildren = (phaseId: string) => hasChildTasks(this.project().schedule ?? [], phaseId, true);
   togglePhase(phaseId: string) {
@@ -236,7 +277,6 @@ export class ProjectSchedule {
     if (this.memo?.key !== key) this.memo = { key, value: evaluateSchedule((p.schedule ?? []).map(toInput), toDeliveries(p)) };
     return this.memo.value;
   };
-  phases = () => (this.project().schedule ?? []).filter((e) => e.kind === "phase" && e.state !== "cancelled");
   others = (e: ScheduleEntry) => (this.project().schedule ?? []).filter((o) => o.id !== e.id && o.state !== "cancelled");
   // option arrays are input bindings, so keep identity stable until names/ids actually change (NG0100).
   private optionCache = new Map<string, { key: string; value: ScheduleEntry[] }>();

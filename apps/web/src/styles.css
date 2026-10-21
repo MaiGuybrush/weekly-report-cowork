@@ -319,6 +319,13 @@ input:disabled, select:disabled, textarea:disabled { background: var(--paper); -
 .entry-kind { padding: .1rem .5rem; border-radius: 4px; background: var(--line2); color: var(--mute); font-size: .78rem; white-space: nowrap; }
 .entry-kind[data-kind="phase"] { background: var(--steel-t); color: var(--steel-d); }
 .entry-kind[data-kind="milestone"] { background: var(--amber-t); color: #8a6400; }
+.drag-handle { cursor: grab; margin-right: .3rem; color: var(--steel-d); user-select: none; letter-spacing: -.2em; }
+.sched-grid tr.drag-src { opacity: .4; }
+.sched-grid tr.drop-before { box-shadow: inset 0 2px 0 var(--steel, #3b6b8a); }
+.sched-grid tr.drop-after { box-shadow: inset 0 -2px 0 var(--steel, #3b6b8a); }
+.sched-grid tr.drop-into { background: var(--steel-t); box-shadow: inset 0 0 0 2px var(--steel, #3b6b8a); }
+.drop-direct { margin: .4rem 0; padding: .6rem; border: 2px dashed var(--line); text-align: center; color: var(--steel-d); }
+.drop-direct.drop-over { background: var(--steel-t); border-color: var(--steel, #3b6b8a); }
 .entry-actions { display: flex; align-items: center; gap: .3rem; }
 .entry-actions button { margin: 0; white-space: nowrap; }
 .sched-grid .evidence-panel { margin: .2rem 0; }
