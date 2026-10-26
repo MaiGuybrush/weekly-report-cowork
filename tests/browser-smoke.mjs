@@ -211,7 +211,7 @@ try {
   const grid = again.locator('[data-schedule-grid]');
   const ganttBox = await again.locator('.gantt').boundingBox();
   assert.ok(ganttBox.y + ganttBox.height <= (await grid.boundingBox()).y, 'gantt above grid');
-  assert.deepEqual(await grid.locator('thead th').allInnerTexts(), ['類型', '名稱', '負責', '狀態', '進度', '計畫起訖', '實際起訖', '前置項目', '操作']);
+  assert.deepEqual(await grid.locator('thead th').allInnerTexts(), ['類型', '名稱', '負責', '狀態', '進度', '計畫起訖', '實際起訖', '預估完工', '前置項目', '操作']);
   assert.deepEqual(await grid.locator('tbody tr[data-entry]').evaluateAll(rs => rs.map(r => r.dataset.entry)), ['設計階段', '撰寫規格', '上線']);
   const scroll = await grid.evaluate(el => ({ overflow: getComputedStyle(el).overflow, max: getComputedStyle(el).maxHeight, th: getComputedStyle(el.querySelector('th')).position, wide: getComputedStyle(el).overflowX }));
   assert.deepEqual([scroll.overflow, scroll.th, scroll.wide], ['auto', 'sticky', 'auto']);
@@ -242,7 +242,8 @@ try {
   await handle.dragTo(grid.locator('[data-entry="撰寫規格"]'), { targetPosition: { x: 20, y: 3 } });
   assert.deepEqual(await names(), ['設計階段', '', '撰寫規格', '上線'], 'dropped on upper half: inserted before');
   assert.deepEqual((await ganttNames()).filter(n => n !== '設計階段' && n !== '上線'), ['', '撰寫規格'], 'gantt order matches');
-  await fresh.locator('.drag-handle').dragTo(grid.locator('[data-entry="撰寫規格"]'), { targetPosition: { x: 20, y: 30 } });
+  const specRow = grid.locator('[data-entry="撰寫規格"]');
+  await fresh.locator('.drag-handle').dragTo(specRow, { targetPosition: { x: 20, y: (await specRow.boundingBox()).height - 3 } });
   assert.deepEqual(await names(), ['設計階段', '撰寫規格', '', '上線'], 'dropped on lower half: inserted after');
   await fresh.locator('.drag-handle').dragTo(grid.locator('[data-entry="設計階段"]'));
   assert.deepEqual(await names(), ['設計階段', '撰寫規格', '', '上線'], 'dropped on phase: last child');
