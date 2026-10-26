@@ -32,14 +32,6 @@ public static class WeekEndpoints
             return Results.Json(result);
         });
 
-        app.MapGet("/api/weeks/{week}/engineer-work", (HttpContext ctx, DataRepo repo, string week) =>
-        {
-            if (!DataRepo.ValidWeek(week)) return Results.BadRequest(new { error = "invalid week" });
-            var user = (User)ctx.Items["user"]!;
-            if (user.Role != "Division" && user.Role != "Head") return Results.StatusCode(403);
-            return repo.ReadEngineerWork(week) is { } text ? Results.Content(text, "application/json; charset=utf-8") : Results.NotFound();
-        });
-
         app.MapGet("/api/weeks/{week}/engineer/{section}", (HttpContext ctx, DataRepo repo, string week, string section) =>
         {
             if (!DataRepo.ValidWeek(week) || !DataRepo.ValidFile(section) || section == "cross") return Results.BadRequest(new { error = "invalid week or section" });

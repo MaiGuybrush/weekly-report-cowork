@@ -48,7 +48,7 @@ API 設定位於 `apps/api/appsettings.json`（可用環境變數覆寫，例如
 - `Access:Users`：角色名單。部級主管 `Role` 為 `Division`；三位課長 `Role` 為 `Head`，並需指定 `Section`（`s1`、`s2`、`s3`）。名單外的帳號一律回 403。
 - `DataRepo:Path`：資料 repo 的本機工作目錄（內含 `weeks/<週>/{s1,s2,s3,cross}.json` 與 `publications/`）。目錄尚未是 git repo 時，若設定 `DataRepo:Remote` 會自動 clone，否則 `git init`。
 - `DataRepo:Remote`：選用，資料 repo 的遠端；設定後每次儲存、發布與建立下週都會 push。
-- `EngineerWork:Path`：工程師工作彙整目錄，位於資料 repo 之外。檔名需以 `_yyMMdd.json` 結尾（例如 `CIM3_ENG_WeeklyReport_261001.json`）；週報取檔名日期落在該週的最新一份。
+- 工程師工作彙整由課長在「工程師進度」頁籤上傳，檔名需以 `_yyMMdd.json` 結尾（例如 `CIM3_ENG_WeeklyReport_261001.json`），依檔名日期歸入該週，寫入資料 repo 的 `weeks/<週>/engineer-<課別>.json`。
 - `Cors:AllowedOrigins`：跨來源部署時列出 Web 來源。
 
 服務帳號的 git 憑證（SSH 金鑰或 credential helper）放在伺服器環境，由執行 API 的帳號持有，不放入設定檔或 repo；課長不直接接觸 git。
@@ -75,7 +75,6 @@ UAC 登入需企業內網與可用的 `CertificateKey` 或 refresh token。
 
    ```powershell
    $env:DataRepo__Path = "C:	empweekly-data"          # 不存在會自動 git init
-   $env:EngineerWork__Path = "C:	empengineer-work"    # 放 *_yyMMdd.json，可複製 docs/CIM3_ENG_WeeklyReport_261001.json
    $env:JwksUrl = "http://localhost:5090/.well-known/jwks.json"
    ```
 

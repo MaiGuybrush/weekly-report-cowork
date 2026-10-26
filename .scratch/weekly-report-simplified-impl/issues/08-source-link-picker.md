@@ -10,7 +10,7 @@
 
 **Blocked by:** [04 專案時程編輯與甘特圖](04-project-schedule-in-section-file.md)
 
-**Status:** ready-for-agent
+**Status:** ready-for-agent（已被 [工程師工作上傳與挑選](../../engineer-work-intake/map.md) 系列取代：不再只挑頂層、摘要選填、資料改存資料 repo、無手動輸入 `workId`）
 
 - [x] 測試資料：縮小版的工程師工作彙整樣本
 - [x] HTTP 煙霧測試：依週次取到正確檔案；同週多檔取最新；無檔回 404；檔名不符慣例的檔案被忽略

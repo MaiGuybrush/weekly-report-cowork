@@ -10,7 +10,7 @@
 
 範圍內：時程模型（階段、關鍵任務、重要里程碑、相依關係、取消與重新啟用）與甘特圖全部保留（[移除範圍確認](../.scratch/weekly-report-simplified/issues/02-scope-cut-list.md)）。
 
-範圍外（已移除）：項目級鎖定、共同編輯、應用內修訂紀錄、時程變更紀錄、eCIM 自動與手動同步、候選挑選、欄位來源追蹤與人工覆寫。歷史改由 git 保存。來源連結改為課長手動輸入，不從 eCIM 預填。
+範圍外（已移除）：項目級鎖定、共同編輯、應用內修訂紀錄、時程變更紀錄、eCIM 自動與手動同步、候選挑選、欄位來源追蹤與人工覆寫。歷史改由 git 保存。來源連結改為課長從上傳的工程師工作彙整挑選，單一 `workId` 綁定，規則見 [工程師工作上傳與挑選規格](engineer-work-intake-spec.md)。
 
 不含實作程式碼，也不含既有資料的遷移（系統尚未發布）。
 
@@ -69,4 +69,4 @@ publications/
 - 部署：如現況，後端同一程序託管靜態前端，未知路徑 fallback 至 `index.html`。
 - 草稿讀取與 git 寫入：後端讀資料 repo 的本機工作目錄，以 git CLI 執行 `add/commit/tag/push`，服務帳號憑證由伺服器環境提供（[git 寫入方式](../.scratch/weekly-report-simplified/issues/07-git-write-interface.md)）。
 - 週報 JSON 結構：專案、里程碑、階段、關鍵任務沿用 `ScheduleEntry` 欄位，移除 `history`、`version`、`continuityId`；`evidenceLinks` 改為課長手填；取消沿用 `state`，重新啟用改回原狀態；相依只存 `predecessors`，`successors` 由程式推導（[JSON 結構與部署](../.scratch/weekly-report-simplified/issues/06-json-shape-and-deployment.md)）。
-- 工程師工作彙整 JSON：來源連結以頂層項目的 `workId` 為挑選單位，課長存 `workId` 與手寫摘要；子項目不單獨挑選，僅於摘要中提及（06）。
+- 工程師工作彙整 JSON：課長上傳後存入資料 repo；任一層級的工作皆可挑選，項目或關鍵任務綁定單一 `workId`，摘要選填（見 [工程師工作上傳與挑選規格](engineer-work-intake-spec.md)）。

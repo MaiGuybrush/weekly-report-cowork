@@ -28,25 +28,6 @@ public sealed partial class DataRepo(IConfiguration config)
     // Path is built only from a validated week and a whitelisted file name.
     string PathOf(string week, string file) => !ValidWeek(week) || !ValidFile(file) ? throw new ArgumentException("invalid week or file") : Path.Combine(Root, "weeks", week, file + ".json");
 
-    [GeneratedRegex(@"_([0-9]{6})\.json\z")]
-    private static partial Regex EngineerWorkName();
-
-    /// <summary>Engineer-work file (server directory, outside the repo) whose name date falls in the week; latest wins.</summary>
-    public string? ReadEngineerWork(string week)
-    {
-        var dir = config["EngineerWork:Path"];
-        if (string.IsNullOrWhiteSpace(dir) || !Directory.Exists(dir) || !ValidWeek(week)) return null;
-        var monday = ISOWeek.ToDateTime(int.Parse(week[..4]), int.Parse(week[6..]), DayOfWeek.Monday);
-        var best = Directory.GetFiles(dir)
-            .Select(f => (file: f, m: EngineerWorkName().Match(Path.GetFileName(f))))
-            .Where(x => x.m.Success)
-            .Select(x => (x.file, ok: DateTime.TryParseExact(x.m.Groups[1].Value, "yyMMdd", CultureInfo.InvariantCulture, DateTimeStyles.None, out var d), date: d))
-            .Where(x => x.ok && x.date >= monday && x.date < monday.AddDays(7))
-            .OrderByDescending(x => x.date).ThenByDescending(x => x.file, StringComparer.Ordinal)
-            .FirstOrDefault();
-        return best.file is null ? null : File.ReadAllText(best.file);
-    }
-
     string EngineerPath(string week, string section) => !ValidWeek(week) || !ValidFile(section) || section == "cross" ? throw new ArgumentException("invalid week or section") : Path.Combine(Root, "weeks", week, $"engineer-{section}.json");
 
     public string? ReadEngineer(string week, string section)
