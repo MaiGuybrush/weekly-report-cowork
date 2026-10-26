@@ -1,7 +1,7 @@
 import type { NonProjectSection } from "./report-types";
 
 export const EDIT_FILES = ["s1", "s2", "s3", "cross"];
-const SECTION_TABS: (NonProjectSection | "projects")[] = ["projects", "incidents", "operations", "personnel", "technology", "appendix"];
+const SECTION_TABS: (NonProjectSection | "projects" | "engineer")[] = ["projects", "incidents", "operations", "personnel", "technology", "appendix", "engineer"];
 
 export const tabsOf = (file: string): string[] => (file === "cross" ? ["summary", "decisions"] : SECTION_TABS);
 

@@ -446,6 +446,19 @@ try {
   await guyPage.locator('[data-tab="decisions"]').click();
   assert.equal(await guyPage.locator('[data-file="cross"] [data-field="decision-description"]').last().inputValue(), '是否延後上線');
 
+  // engineer progress page: head uploads a bad-section file (rejected with reason), then a good one and sees the tree
+  await page.goto(base + '/#/weeks/2026-W41/s1/engineer');
+  const eng = page.locator('[data-engineer-progress]');
+  await eng.locator('[data-empty]').waitFor({ timeout: 15000 });
+  await eng.locator('[data-engineer-upload]').setInputFiles(join(root, 'tests/fixtures/engineer-intake/CIM2_ENG_WeeklyReport_261014_SEC2.json'));
+  await eng.locator('[data-engineer-error]').waitFor({ timeout: 15000 });
+  await eng.locator('[data-engineer-upload]').setInputFiles(join(root, 'tests/fixtures/engineer-intake/CIM2_ENG_WeeklyReport_261007_SEC1.json'));
+  await eng.locator('[data-engineer]').first().waitFor({ timeout: 15000 });
+  assert.equal(await eng.locator('[data-work="102"]').count(), 1);
+  assert.equal(await eng.locator('[data-work="100"] > [data-long]').count(), 1);
+  assert.equal(await eng.locator('[data-work="200"] > [data-rms]').count(), 1);
+  assert.equal(await page.locator('[data-tab="engineer"] em').count(), 0);
+
   // section head home: hint without create button; unknown week bounces home with a toast
   await page.goto(base + '/#/');
   await page.locator('[data-role-hint]').waitFor({ timeout: 15000 });

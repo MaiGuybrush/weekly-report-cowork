@@ -40,6 +40,35 @@ public static class WeekEndpoints
             return repo.ReadEngineerWork(week) is { } text ? Results.Content(text, "application/json; charset=utf-8") : Results.NotFound();
         });
 
+        app.MapGet("/api/weeks/{week}/engineer/{section}", (HttpContext ctx, DataRepo repo, string week, string section) =>
+        {
+            if (!DataRepo.ValidWeek(week) || !DataRepo.ValidFile(section) || section == "cross") return Results.BadRequest(new { error = "invalid week or section" });
+            var user = (User)ctx.Items["user"]!;
+            if (!(user.Role == "Division" || (user.Role == "Head" && user.Section == section))) return Results.StatusCode(403);
+            if (!repo.Configured) return Results.StatusCode(503);
+            return repo.ReadEngineer(week, section) is { } text ? Results.Content(text, "application/json; charset=utf-8") : Results.NotFound();
+        });
+
+        app.MapPost("/api/engineer-work", async (HttpContext ctx, DataRepo repo, string filename) =>
+        {
+            var user = (User)ctx.Items["user"]!;
+            if (user.Role != "Head" || user.Section is null) return Results.StatusCode(403);
+            if (!repo.Configured) return Results.StatusCode(503);
+            if (ctx.Request.ContentLength > MaxBytes * 8) return Results.StatusCode(413);
+            if (EngineerUpload.WeekOfFilename(filename) is not { } week) return Results.BadRequest(new { error = "檔名需為 *_yyMMdd[_後綴].json" });
+            using var buffer = new MemoryStream();
+            await ctx.Request.Body.CopyToAsync(buffer);
+            if (buffer.Length > MaxBytes * 8) return Results.StatusCode(413);
+            JsonObject? body;
+            try { body = JsonNode.Parse(buffer.ToArray()) as JsonObject; }
+            catch (JsonException) { body = null; }
+            if (body is null) return Results.BadRequest(new { error = "檔案不是 JSON 物件" });
+            if (EngineerUpload.Problem(body) is { } problem) return Results.BadRequest(new { error = problem });
+            if (Str(body["target_section"]) != user.Section) return Results.BadRequest(new { error = $"檔案屬於 {Str(body["target_section"])}，與登入課別 {user.Section} 不符" });
+            try { return await repo.WriteEngineer(week, user.Section, body, user.EmpNo) is { } reason ? Results.Json(new { error = reason }, statusCode: 409) : Results.Json(new { week }, statusCode: 201); }
+            catch (GitException e) { return Results.Json(new { error = e.Message }, statusCode: 500); }
+        });
+
         app.MapPost("/api/weeks/{week}/publications", async (HttpContext ctx, DataRepo repo, string week) =>
         {
             if (!DataRepo.ValidWeek(week)) return Results.BadRequest(new { error = "invalid week" });

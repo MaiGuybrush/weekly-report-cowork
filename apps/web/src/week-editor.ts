@@ -5,13 +5,14 @@ import { firstValueFrom } from "rxjs";
 import { CrossEditor } from "./cross-editor";
 import { isDirty, snapshotOf } from "./dirty-state";
 import { EDIT_FILES, tabsOf } from "./edit-nav";
+import { EngineerProgress } from "./engineer-progress";
 import { FileView, pruneRefLinks } from "./file-view";
 import { cleanSchedule, scheduleErrors } from "./project-schedule";
 import { FILE_LABELS, SECTION_LABELS, type CrossFile, type SectionFile } from "./report-types";
 import { ShellState } from "./shell-state";
 import { weekStatus } from "./week-status";
 
-const TAB_LABELS: Record<string, string> = { projects: "專案", ...SECTION_LABELS, summary: "管理摘要", decisions: "待決策事項" };
+const TAB_LABELS: Record<string, string> = { projects: "專案", ...SECTION_LABELS, engineer: "工程師進度", summary: "管理摘要", decisions: "待決策事項" };
 const RAIL_LABELS: Record<string, string> = { ...FILE_LABELS, cross: "跨課" };
 
 /** Changing week or leaving the editor asks first when a file has unsaved changes; switching file or tab never does. */
@@ -19,7 +20,7 @@ export const leaveGuard: CanDeactivateFn<WeekEditor> = (editor, _route, _state, 
 
 @Component({
   standalone: true,
-  imports: [FileView, CrossEditor, RouterLink],
+  imports: [EngineerProgress, FileView, CrossEditor, RouterLink],
   template: `<div class="edit">
       <aside class="rail">
         <h3>{{ week }}</h3>
@@ -45,6 +46,8 @@ export const leaveGuard: CanDeactivateFn<WeekEditor> = (editor, _route, _state, 
           <p role="status">載入中…</p>
         } @else if (file === "cross") {
           <app-cross-editor [cross]="cross" [tab]="tab" [editable]="canEditCross()" />
+        } @else if (tab === "engineer") {
+          <app-engineer-progress [week]="week" [file]="file" [editable]="canEdit(file)" />
         } @else {
           <app-file-view [file]="file" [tab]="tab" [week]="week" [data]="fileData(file)" [editable]="canEdit(file)" />
         }
@@ -171,6 +174,7 @@ export class WeekEditor implements OnInit {
   count(tab: string): number | null {
     if (!this.loaded) return null;
     if (this.file === "cross") return tab === "decisions" ? this.cross.pendingDecisions.length : null;
+    if (tab === "engineer") return null;
     return this.data[this.file]?.items?.filter((i) => i.section === tab).length ?? 0;
   }
 

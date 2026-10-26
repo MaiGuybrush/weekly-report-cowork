@@ -358,3 +358,8 @@ input:disabled, select:disabled, textarea:disabled { background: var(--paper); -
 .drp-compact .drp-trigger { min-height: 0; padding: .2rem .35rem; border-color: transparent; background: transparent; }
 .drp-compact .drp-trigger:hover, .drp-compact .drp-trigger[data-state="open"] { border-color: var(--steel); background: #fff; }
 .drp-compact .drp-display-text { font-size: .85rem; }
+.work-tree, .work-tree ul { margin: .2rem 0; padding-left: 1.2rem; list-style: none; }
+.work-tree li { margin: .25rem 0; }
+.work-tree em { margin-left: .4rem; padding: 0 .4rem; border-radius: 4px; background: var(--amber-t); font-style: normal; font-size: .8rem; }
+.work-tree [data-rms] { background: var(--steel-t); }
+.work-tree [data-absent-note] { background: var(--line2); color: var(--mute); }

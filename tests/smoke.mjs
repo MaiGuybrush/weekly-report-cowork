@@ -3,7 +3,7 @@ import { createServer } from 'node:http';
 import { createServer as createTcpServer } from 'node:net';
 import { generateKeyPairSync, sign } from 'node:crypto';
 import { spawn, execFileSync } from 'node:child_process';
-import { cpSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { cpSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { once } from 'node:events';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
@@ -40,6 +40,12 @@ api.stderr.on('data', c => logs = (logs + c).slice(-10000));
 const base = `http://127.0.0.1:${port}`;
 const b64 = v => Buffer.from(JSON.stringify(v)).toString('base64url');
 const token = empNo => { const p = `${b64({ alg: 'RS256' })}.${b64({ empNo, exp: Math.floor(Date.now() / 1000) + 3600 })}`; return `${p}.${sign('RSA-SHA256', Buffer.from(p), privateKey).toString('base64url')}`; };
+const intake = name => readFileSync(join(root, 'tests/fixtures/engineer-intake', name), 'utf8');
+async function upload(user, name, text = intake(name)) {
+  const response = await fetch(`${base}/api/engineer-work?filename=${encodeURIComponent(name)}`, { method: 'POST', headers: { Authorization: `Bearer ${token(user)}` }, body: text });
+  const t = await response.text();
+  return { status: response.status, body: t ? JSON.parse(t) : null };
+}
 async function call(path, user, method = 'GET', body) {
   const response = await fetch(base + path, { method, headers: { Authorization: `Bearer ${token(user)}`, ...(body ? { 'Content-Type': 'application/json' } : {}) }, body: body ? JSON.stringify(body) : undefined });
   const text = await response.text();
@@ -116,6 +122,31 @@ try {
   assert.equal((await call('/api/weeks/2026-W40/engineer-work', 'G')).body.results.alice.items[0].workId, 1);
   assert.equal((await call('/api/weeks/2026-W42/engineer-work', 'H1')).status, 404);
   assert.equal((await call('/api/weeks/2026-42/engineer-work', 'H1')).status, 400);
+  // engineer intake (W42 exists after the create above)
+  assert.equal((await upload('G', 'CIM2_ENG_WeeklyReport_261014_SEC1.json')).status, 403);
+  const wrongSection = await upload('H1', 'CIM2_ENG_WeeklyReport_261014_SEC2.json'); assert.equal(wrongSection.status, 400); assert.match(wrongSection.body.error, /s2.*s1/);
+  assert.equal((await upload('H1', 'not-dated.json')).status, 400);
+  assert.equal((await upload('H1', 'CIM2_ENG_WeeklyReport_261014_bad.json')).status, 400);
+  assert.equal((await upload('H1', 'CIM2_ENG_WeeklyReport_261014_missing.json')).status, 400);
+  assert.match((await upload('H1', 'CIM2_ENG_WeeklyReport_261030_SEC1.json', intake('CIM2_ENG_WeeklyReport_261014_SEC1.json'))).body.error, /尚未建立/);
+  const up1 = await upload('H1', 'CIM2_ENG_WeeklyReport_261014_SEC1.json'); assert.equal(up1.status, 201); assert.equal(up1.body.week, '2026-W42');
+  assert.match(git(remote, 'log', '--format=%s', 'master'), /2026-W42\/engineer-s1: upload by H1/);
+  // same week again merges by workId: new values win, absent works kept and flagged, sub levels merged
+  assert.equal((await upload('H1', 'CIM2_ENG_WeeklyReport_261015_SEC1.json')).status, 201);
+  const merged = (await call('/api/weeks/2026-W42/engineer/s1', 'H1')).body.results;
+  const a = merged.alice.items;
+  assert.deepEqual(a.map(i => [i.workId, i.percentage, !!i.absent]), [[100, 55, false], [200, 0, true]]);
+  assert.deepEqual(a[0].subItems.map(i => [i.workId, i.percentage, !!i.absent]), [[101, 45, false]]);
+  assert.deepEqual(a[0].subItems[0].subItems.map(i => [i.workId, !!i.absent]), [[102, true]]);
+  assert.equal(a[0].subItems[0].subItems[0].deltaPert, '?');
+  assert.equal(a[1].rmsFlag, 'R');
+  // older week rejected once W42 data exists... a W41 file is older than W42
+  const older = await upload('H1', 'CIM2_ENG_WeeklyReport_261008_SEC1.json'); assert.equal(older.status, 409); assert.match(older.body.error, /早於/);
+  // visibility: division reads any section, head only own, nothing for s2
+  assert.equal((await call('/api/weeks/2026-W42/engineer/s1', 'G')).status, 200);
+  assert.equal((await call('/api/weeks/2026-W42/engineer/s1', 'H2')).status, 403);
+  assert.equal((await call('/api/weeks/2026-W42/engineer/s2', 'H2')).status, 404);
+  assert.equal((await call('/api/weeks/2026-W42/engineer/cross', 'G')).status, 400);
   console.log('API smoke passed');
 } catch (error) {
   console.error(logs);

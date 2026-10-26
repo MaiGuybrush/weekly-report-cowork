@@ -47,6 +47,45 @@ public sealed partial class DataRepo(IConfiguration config)
         return best.file is null ? null : File.ReadAllText(best.file);
     }
 
+    string EngineerPath(string week, string section) => !ValidWeek(week) || !ValidFile(section) || section == "cross" ? throw new ArgumentException("invalid week or section") : Path.Combine(Root, "weeks", week, $"engineer-{section}.json");
+
+    public string? ReadEngineer(string week, string section)
+    {
+        var path = EngineerPath(week, section);
+        return File.Exists(path) ? File.ReadAllText(path) : null;
+    }
+
+    /// <summary>Newest week that already has engineer data for the section, or null.</summary>
+    public string? LatestEngineerWeek(string section) =>
+        Weeks().Where(w => File.Exists(EngineerPath(w, section))).FirstOrDefault();
+
+    public bool WeekExists(string week) => Directory.Exists(Path.Combine(Root, "weeks", week));
+
+    /// <summary>Merges the upload into the week's stored file by workId (missing works keep their last snapshot, flagged absent) and commits. Rejects with a reason when the week is older than existing data.</summary>
+    public async Task<string?> WriteEngineer(string week, string section, JsonObject upload, string empNo)
+    {
+        await writeLock.WaitAsync();
+        try
+        {
+            EnsureReady();
+            if (HasRemoteHeads()) Sync();
+            if (!WeekExists(week)) return $"週次 {week} 尚未建立";
+            if (LatestEngineerWeek(section) is { } latest && string.CompareOrdinal(week, latest) < 0) return $"週次 {week} 早於已有資料的 {latest}";
+            var path = EngineerPath(week, section);
+            var merged = File.Exists(path) && JsonNode.Parse(File.ReadAllText(path)) is JsonObject old ? EngineerMerge.Merge(old, upload) : EngineerMerge.Merge(null, upload);
+            var temp = path + ".tmp";
+            File.WriteAllText(temp, merged.ToJsonString(new JsonSerializerOptions { WriteIndented = true, Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping }));
+            File.Move(temp, path, overwrite: true);
+            var relative = $"weeks/{week}/engineer-{section}.json";
+            Git("add", "--", relative);
+            if (Git("status", "--porcelain", "--", relative).Length > 0)
+                Git("commit", "-m", $"{week}/engineer-{section}: upload by {empNo}", "--", relative);
+            if (Remote.Length > 0) Git("push", "-u", "origin", "HEAD");
+            return null;
+        }
+        finally { writeLock.Release(); }
+    }
+
     public IEnumerable<string> Weeks()
     {
         var dir = Path.Combine(Root, "weeks");

@@ -27,6 +27,6 @@ test('unknown file or tab (or tab of another file) is rejected', () => {
   assert.equal(resolveEdit(head, 'cross', 'projects'), null);
 });
 
-test('section files have projects plus every section tab', () => {
-  assert.deepEqual(tabsOf('s1'), ['projects', 'incidents', 'operations', 'personnel', 'technology', 'appendix']);
+test('section files have projects, every section tab and the engineer progress page', () => {
+  assert.deepEqual(tabsOf('s1'), ['projects', 'incidents', 'operations', 'personnel', 'technology', 'appendix', 'engineer']);
 });
