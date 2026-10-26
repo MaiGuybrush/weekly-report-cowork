@@ -205,6 +205,17 @@ try {
   await spec.locator('[data-field="entry-progress"]').fill('40');
   assert.match(await again.locator('[data-overall-progress]').innerText(), /整體進度 40%/);
   assert.match(await again.locator('.gantt-row-task .gantt-progress').innerText(), /40%/);
+  // expected progress: plan ended 10-10 so 100% is due; 40% is 60 points behind
+  const expectedMark = again.locator('.gantt-row-task [data-expected]');
+  assert.equal(await expectedMark.getAttribute('data-status'), 'behind');
+  assert.equal(await expectedMark.getAttribute('title'), '計畫應有進度 100%');
+  assert.equal(await again.locator('.gantt-row-task .gantt-progress').getAttribute('data-status'), 'behind');
+  // forecast end: none drawn while the default equals the base date, dashed bar once a later date is entered, gone once cleared
+  assert.equal(await again.locator('.gantt-row-task .forecast-bar').count(), 0);
+  await spec.locator('[data-field="forecastEnd"]').fill('2026-10-20');
+  assert.equal(await again.locator('.gantt-row-task .forecast-bar').count(), 1);
+  await spec.locator('[data-field="forecastEnd"]').fill('');
+  assert.equal(await again.locator('.gantt-row-task .forecast-bar').count(), 0);
   await spec.locator('select[aria-label="狀態"]').selectOption('open');
   assert.equal(await spec.locator('[data-field="entry-progress"]').count(), 0);
   // schedule grid: gantt sits above it, it scrolls on its own with a sticky header, phases open by default and share state with the gantt
