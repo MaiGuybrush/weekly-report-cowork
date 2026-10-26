@@ -191,8 +191,9 @@ export class Gantt {
   showCancelled = signal(false);
   showAllLinks = signal(false);
 
-  /** Browser date, not the report date: overdue and the today line follow the real clock. */
-  today = computed(() => localToday());
+  /** 基準日: published view passes its publish date; the editor leaves it unset and follows the clock. */
+  baseDate = input<string>();
+  today = computed(() => this.baseDate() ?? localToday());
   private range = computed(() => ganttRange(this.entries(), [this.today()]));
   ticks = computed(() => ganttTicks(this.range()));
   cancelledCount = computed(() => this.entries().filter((e) => e.state === "cancelled").length);

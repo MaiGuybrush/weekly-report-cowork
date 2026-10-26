@@ -45,10 +45,11 @@ export class ProjectHeader {
   editable = input(false);
   /** Publication layout: plain text title line instead of form fields. */
   document = input(false);
+  baseDate = input<string>();
   readonly SECTIONS = SECTIONS;
 
   // recomputed every check so in-place edits show immediately; cheap (one pass over the schedule)
-  health = () => projectHealth(this.project().schedule ?? [], localToday());
+  health = () => projectHealth(this.project().schedule ?? [], this.baseDate() ?? localToday());
 
   overall = () => projectProgressText(this.project().schedule ?? []);
 

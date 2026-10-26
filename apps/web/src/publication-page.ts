@@ -54,7 +54,7 @@ export function latestPublication(index: PublicationIndex): Entry | undefined {
           @if (hasContent(file)) {
             <section [attr.data-file]="file">
               <h2>{{ FILE_LABELS[file] }}</h2>
-              @for (p of itemsOf(file, "projects"); track p.id) { <app-project-schedule [project]="p" [document]="true" /> }
+              @for (p of itemsOf(file, "projects"); track p.id) { <app-project-schedule [project]="p" [document]="true" [baseDate]="baseDate" /> }
               @for (key of sectionKeys; track key) {
                 @if (itemsOf(file, key).length) {
                   <h3>{{ SECTION_LABELS[key] }}</h3>
@@ -102,6 +102,8 @@ export class PublicationPage implements OnInit {
     const latest = this.entries[0];
     return !!latest && (latest.week !== this.week || latest.version !== this.version);
   }
+  /** 基準日 of a published view = that version's publish date. */
+  get baseDate() { return this.entries.find((p) => p.week === this.week && p.version === this.version)?.publishedAt.slice(0, 10); }
   print = () => window.print();
   /** A section with no project and no item gets no heading. */
   hasContent = (file: string) => !!this.data[file]?.items?.length;

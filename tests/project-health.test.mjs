@@ -46,3 +46,9 @@ test('late start alone is not a slip', () => {
   const h = health([task({ state: 'in-progress', planStart: '2026-10-01', planEnd: '2026-10-20', actualStart: '2026-10-05' })]);
   assert.equal(h.text, '依計畫');
 });
+
+test('基準日: same data, different base date, different overdue and health', () => {
+  const s = [task({ planEnd: '2026-10-20' })];
+  assert.equal(projectHealth(s, '2026-10-20').text, '依計畫');
+  assert.deepEqual([projectHealth(s, '2026-10-21').status, projectHealth(s, '2026-10-21').text], ['bad', '逾期 1 項']);
+});

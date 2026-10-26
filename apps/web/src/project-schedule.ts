@@ -41,9 +41,9 @@ export function scheduleErrors(project: SectionItem) {
   template: `
     <!-- the app refreshes views manually (no zone events), so re-render after any edit bubbling up -->
     <div class="project" [class.doc-project]="document()" [class.invalid]="evaluated().errors.length > 0" [attr.data-project-error]="evaluated().errors.length > 0 ? '' : null" [attr.data-project]="project().id" (input)="changes.detectChanges()" (change)="changes.detectChanges()" (click)="changes.detectChanges()">
-      <app-project-header [project]="project()" [editable]="editable()" [document]="document()" />
+      <app-project-header [project]="project()" [editable]="editable()" [document]="document()" [baseDate]="baseDate()" />
 
-      <app-gantt [entries]="evaluated().entries" [phasesOpen]="!document()" [selectedId]="selectedId()" (entrySelected)="selectFromGantt($event)" [(expandTasks)]="expandTasks" [(phaseToggles)]="phaseToggles" />
+      <app-gantt [baseDate]="baseDate()" [entries]="evaluated().entries" [phasesOpen]="!document()" [selectedId]="selectedId()" (entrySelected)="selectFromGantt($event)" [(expandTasks)]="expandTasks" [(phaseToggles)]="phaseToggles" />
 
       @if (!document()) {
       <details class="sched" open>
@@ -197,6 +197,8 @@ export class ProjectSchedule {
   editable = input(false);
   /** Publication layout: title line, gantt and a read-only deliveries table; no schedule forms. */
   document = input(false);
+  /** 基準日 override (publish date); unset = today. */
+  baseDate = input<string>();
   readonly KIND_LABELS = KIND_LABELS;
   readonly KINDS = ["phase", "task", "milestone"] as const;
   readonly NONE: string[] = [];
@@ -273,8 +275,8 @@ export class ProjectSchedule {
   private memo?: { key: string; value: ReturnType<typeof evaluateSchedule> };
   evaluated = () => {
     const p = this.project();
-    const key = JSON.stringify([p.schedule, p.externalDependencies]);
-    if (this.memo?.key !== key) this.memo = { key, value: evaluateSchedule((p.schedule ?? []).map(toInput), toDeliveries(p)) };
+    const key = JSON.stringify([p.schedule, p.externalDependencies, this.baseDate()]);
+    if (this.memo?.key !== key) this.memo = { key, value: evaluateSchedule((p.schedule ?? []).map(toInput), toDeliveries(p), this.baseDate()) };
     return this.memo.value;
   };
   others = (e: ScheduleEntry) => (this.project().schedule ?? []).filter((o) => o.id !== e.id && o.state !== "cancelled");

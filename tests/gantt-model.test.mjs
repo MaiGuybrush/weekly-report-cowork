@@ -124,6 +124,12 @@ test('moveTask: reorder, reassign, into phase, direct', async () => {
   assert.equal(list[2].phaseId, 'p1', 'input not mutated');
 });
 
+test('基準日: same running task is late or not depending on the base date', () => {
+  const e = { ...blank, id: 'x', kind: 'task', name: 'X', state: 'in-progress', planStart: '2026-10-01', planEnd: '2026-10-10', actualStart: '2026-10-02' };
+  assert.notEqual(ganttMarks(e, '2026-10-09').actualClass, ganttMarks(e, '2026-10-11').actualClass);
+  assert.equal(ganttMarks(e, '2026-10-05').actualBar.end, '2026-10-05');
+});
+
 test('ganttLinks: endpoints, collapsed reattach, cancelled dropped', () => {
   const e = [
     { ...blank, id: 'p1', kind: 'phase', name: 'P1', state: 'open' },
