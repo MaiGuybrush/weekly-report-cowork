@@ -160,6 +160,12 @@ input:disabled, select:disabled, textarea:disabled { background: var(--paper); -
 .gantt-row { min-height: 2.1rem; padding: 0 .35rem; border-bottom: 1px solid var(--line2); cursor: pointer; }
 .gantt-row:hover { background: var(--steel-t); }
 .gantt-row-selected, .gantt-row-selected:hover, .sched-grid tr.row-selected { background: var(--steel-t); box-shadow: inset 3px 0 0 var(--steel, #3b6b8a); }
+.gantt-row-related { background: var(--steel-t); }
+.gantt-body { position: relative; }
+.gantt-links { position: absolute; inset: 0 .35rem; display: grid; grid-template-columns: minmax(13rem, 1.4fr) minmax(14rem, 2.4fr) minmax(8.5rem, .9fr); gap: .8rem; pointer-events: none; z-index: 3; }
+.gantt-links svg { grid-column: 2; width: 100%; height: 100%; overflow: visible; }
+.gantt-link { fill: none; stroke: var(--mute); stroke-width: 1.2; vector-effect: non-scaling-stroke; opacity: .7; }
+.gantt-link-active { stroke: var(--steel, #3b6b8a); stroke-width: 2; opacity: 1; }
 .gantt-row-phase { font-weight: 600; }
 .gantt-row-task { color: #34434c; }
 .gantt-row-task .gantt-meta { padding-left: 1.25rem; }

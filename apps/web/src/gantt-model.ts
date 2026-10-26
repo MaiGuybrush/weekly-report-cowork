@@ -15,6 +15,9 @@ export type GanttEntry = {
   warnings?: { message: string }[];
   externalNotices?: { message: string }[];
   evidenceLinks?: { workId: number; summary: string }[];
+  /** Finish-to-start: ids that must finish before this entry starts; successors is the derived reverse. */
+  predecessors?: string[];
+  successors?: string[];
 };
 
 export type GanttView = { expandTasks: boolean; showCancelled: boolean; expandedPhases: ReadonlySet<string> };
@@ -93,6 +96,33 @@ export function gridRows<T extends GanttEntry>(entries: T[], isOpen: (phaseId: s
     ...entries.filter((e) => e.kind === "milestone"),
   ];
 }
+
+/** Dependency lines between visible rows: a hidden task re-attaches to its visible phase; cancelled ends and self-links drop out. */
+export function ganttLinks(entries: GanttEntry[], visible: GanttEntry[]): { from: string; to: string }[] {
+  const shown = new Set(visible.map((e) => e.id));
+  const byId = new Map(entries.map((e) => [e.id, e]));
+  const resolve = (id: string) => {
+    const e = byId.get(id);
+    if (!e || e.state === "cancelled") return null;
+    if (shown.has(id)) return id;
+    return e.kind === "task" && e.phaseId && shown.has(e.phaseId) && byId.get(e.phaseId)?.state !== "cancelled" ? e.phaseId : null;
+  };
+  const seen = new Set<string>();
+  const links: { from: string; to: string }[] = [];
+  for (const e of entries) {
+    for (const p of e.predecessors ?? []) {
+      const from = resolve(p), to = resolve(e.id);
+      if (!from || !to || from === to || seen.has(`${from}>${to}`)) continue;
+      seen.add(`${from}>${to}`);
+      links.push({ from, to });
+    }
+  }
+  return links;
+}
+
+/** Plan-bar edge where a link arrives (start) or leaves (end); falls back to actual dates, null when undated. */
+export const ganttAnchor = (e: GanttEntry, side: "start" | "end"): string | null =>
+  (side === "start" ? e.planStart || e.planDate || e.actualStart || e.actualDate : e.planEnd || e.planDate || e.actualEnd || e.actualDate) || null;
 
 export function hasChildTasks(entries: GanttEntry[], phaseId: string, showCancelled: boolean) {
   return entries.some((e) => e.kind === "task" && e.phaseId === phaseId && (showCancelled || e.state !== "cancelled"));

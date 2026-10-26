@@ -1,7 +1,9 @@
 import { Component, computed, input, model, output, signal } from "@angular/core";
 import {
   GanttEntry,
+  ganttAnchor,
   ganttDisplayEntries,
+  ganttLinks,
   ganttMarks,
   ganttPosition,
   ganttTooltip,
@@ -35,6 +37,13 @@ import { progressText } from "./project-progress";
             [attr.aria-expanded]="expandTasks()">
             {{ expandTasks() ? '收合關鍵任務' : '展開關鍵任務' }}
           </button>
+          <button
+            type="button"
+            class="btn-gantt-toggle btn-gantt-toggle-links"
+            (click)="showAllLinks.set(!showAllLinks())"
+            [attr.aria-pressed]="showAllLinks()">
+            {{ showAllLinks() ? '隱藏相依線' : '顯示全部相依線' }}
+          </button>
           @if (cancelledCount()) {
             <button
               type="button"
@@ -67,6 +76,15 @@ import { progressText } from "./project-progress";
       </div>
 
       <div class="gantt-body">
+        @if (drawnLinks().length) {
+          <div class="gantt-links" aria-hidden="true">
+            <svg [attr.viewBox]="'0 0 100 ' + rows().length" preserveAspectRatio="none">
+              @for (l of drawnLinks(); track l.from + l.to) {
+                <path class="gantt-link" [class.gantt-link-active]="l.active" [attr.data-link]="l.from + '>' + l.to" [attr.d]="l.d" />
+              }
+            </svg>
+          </div>
+        }
         @for (entry of rows(); track entry.id) {
           <div
             class="gantt-row"
@@ -75,6 +93,7 @@ import { progressText } from "./project-progress";
             [class.gantt-row-phase]="entry.kind === 'phase'"
             [class.gantt-row-cancelled]="entry.state === 'cancelled'"
             [class.gantt-row-selected]="entry.id === selectedId()"
+            [class.gantt-row-related]="related().has(entry.id)"
             [attr.data-gantt-id]="entry.id"
             (click)="entrySelected.emit(entry.id)">
             <div class="gantt-meta">
@@ -170,6 +189,7 @@ export class Gantt {
   phaseToggles = model<ReadonlySet<string>>(new Set());
   phasesOpen = input(false);
   showCancelled = signal(false);
+  showAllLinks = signal(false);
 
   /** Browser date, not the report date: overdue and the today line follow the real clock. */
   today = computed(() => localToday());
@@ -183,6 +203,21 @@ export class Gantt {
       expandedPhases: new Set(this.entries().filter((e) => this.isExpanded(e.id)).map((e) => e.id)),
     }),
   );
+  private links = computed(() => ganttLinks(this.entries(), this.rows()));
+  /** Links touching the selected row (its upstream and downstream, one hop). */
+  private selectedLinks = computed(() => this.links().filter((l) => l.from === this.selectedId() || l.to === this.selectedId()));
+  related = computed(() => new Set(this.selectedLinks().flatMap((l) => [l.from, l.to])));
+  /** Elbow paths in a 100 x rowCount box: leave the predecessor end, drop to the successor row, enter its start. */
+  drawnLinks = computed(() => {
+    const rows = this.rows();
+    const y = (id: string) => rows.findIndex((r) => r.id === id) + 0.5;
+    const pick = (id: string, side: "start" | "end") => this.position(ganttAnchor(rows.find((r) => r.id === id)!, side));
+    const active = new Set(this.selectedLinks());
+    return (this.showAllLinks() ? this.links() : this.selectedLinks()).map((l) => {
+      const x1 = pick(l.from, "end"), x2 = pick(l.to, "start");
+      return { ...l, active: active.has(l), d: `M${x1} ${y(l.from)} H${x1} V${y(l.to)} H${x2}` };
+    });
+  });
   todayPosition = computed(() => ganttPosition(this.range(), this.today()));
   todayLabel = computed(() => this.today().slice(5).replace("-", "/"));
 

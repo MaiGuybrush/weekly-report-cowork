@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { ganttDisplayEntries, ganttMarks, ganttPosition, ganttRange, ganttTicks, ganttWidth, gridRows, hasChildTasks, isPhaseOpen, varianceBadgeClass, varianceText } from '../apps/web/src/gantt-model.ts';
+import { ganttDisplayEntries, ganttMarks, ganttPosition, ganttRange, ganttTicks, ganttWidth, ganttLinks, gridRows, hasChildTasks, isPhaseOpen, varianceBadgeClass, varianceText } from '../apps/web/src/gantt-model.ts';
 
 const blank = { planStart: null, planEnd: null, actualStart: null, actualEnd: null };
 const entries = [
@@ -122,4 +122,20 @@ test('moveTask: reorder, reassign, into phase, direct', async () => {
   assert.equal(run('a', { before: 'd' }), 'p1,p2,b@p1,c@p2,a,d,m');
   assert.equal(run('a', { before: 'a' }), 'p1,p2,a@p1,b@p1,c@p2,d,m');
   assert.equal(list[2].phaseId, 'p1', 'input not mutated');
+});
+
+test('ganttLinks: endpoints, collapsed reattach, cancelled dropped', () => {
+  const e = [
+    { ...blank, id: 'p1', kind: 'phase', name: 'P1', state: 'open' },
+    { ...blank, id: 't1', kind: 'task', name: 'T1', phaseId: 'p1', state: 'open' },
+    { ...blank, id: 't2', kind: 'task', name: 'T2', phaseId: 'p1', state: 'open', predecessors: ['t1'] },
+    { ...blank, id: 'p2', kind: 'phase', name: 'P2', state: 'open' },
+    { ...blank, id: 't3', kind: 'task', name: 'T3', phaseId: 'p2', state: 'open', predecessors: ['t1', 't2', 'x'] },
+    { ...blank, id: 't4', kind: 'task', name: 'T4', phaseId: 'p2', state: 'cancelled', predecessors: ['t1'] },
+    { ...blank, id: 'm1', kind: 'milestone', name: 'M', state: 'pending', predecessors: ['t3'] },
+  ];
+  const view = (expandedPhases) => ganttLinks(e, ganttDisplayEntries(e, { expandTasks: false, showCancelled: false, expandedPhases: new Set(expandedPhases) }));
+  assert.deepEqual(view(['p1', 'p2']), [{ from: 't1', to: 't2' }, { from: 't1', to: 't3' }, { from: 't2', to: 't3' }, { from: 't3', to: 'm1' }]);
+  // collapsed: t1/t2 -> p1, t3 -> p2; t1->t2 becomes a self link and is dropped; duplicates merge
+  assert.deepEqual(view([]), [{ from: 'p1', to: 'p2' }, { from: 'p2', to: 'm1' }]);
 });
