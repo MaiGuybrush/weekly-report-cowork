@@ -174,10 +174,19 @@ try {
   assert.equal((await call('/api/weeks/2026-W42/engineer/s3', 'G')).status, 404);
   assert.equal((await call('/api/weeks/2026-W42/engineer/cross', 'G')).status, 400);
   // publication snapshot carries no engineer data or annotations; next week starts clean but shows last week's comment
+  const w42s1 = (await call('/api/weeks/2026-W42', 'H1')).body.s1;
+  w42s1.items.push({ id: 'bound', section: 'incidents', title: '綁定項', content: '', details: {}, workId: 100, engineerProgress: 55, engineerStatus: '處理中',
+    schedule: [{ id: 'bt', kind: 'task', name: 'T', state: 'in-progress', planStart: null, planEnd: null, actualStart: null, actualEnd: null, workId: 101, engineerProgress: 45, progressOverride: true, pendingSync: { state: 'open' }, rejectedSync: { percentage: 1 } }] });
+  assert.equal((await call('/api/weeks/2026-W42/s1', 'H1', 'PUT', w42s1)).status, 204);
   const pub = await call('/api/weeks/2026-W42/publications', 'G', 'POST'); assert.equal(pub.status, 201);
-  assert.doesNotMatch(JSON.stringify((await call(`/api/publications/2026-W42/${pub.body.version}`, 'G')).body), /isImportant|managerComment|lastComment|engineer/);
+  assert.doesNotMatch(JSON.stringify((await call(`/api/publications/2026-W42/${pub.body.version}`, 'G')).body), /isImportant|managerComment|lastComment|"results"/);
   assert.ok(git(remote, 'ls-tree', '--name-only', 'master', `publications/2026-W42/v${pub.body.version}/`).split(/\r?\n/).filter(Boolean).every(n => /\/(s1|s2|s3|cross)\.json$/.test(n)));
   assert.equal((await call('/api/weeks', 'G', 'POST')).body.week, '2026-W43');
+  const pubBound = (await call(`/api/publications/2026-W42/${pub.body.version}`, 'G')).body.s1.items.find(i => i.id === 'bound');
+  assert.doesNotMatch(JSON.stringify(pubBound), /pendingSync|rejectedSync/);
+  const carried = (await call('/api/weeks/2026-W43', 'H1')).body.s1.items.find(i => i.id === 'bound');
+  assert.deepEqual([carried.workId, carried.engineerProgress, carried.schedule[0].workId, carried.schedule[0].progressOverride], [100, 55, 101, true]);
+  assert.doesNotMatch(JSON.stringify(carried), /pendingSync|rejectedSync/);
   assert.equal((await call('/api/weeks/2026-W43/engineer/s1', 'H1')).status, 404);
   assert.equal((await upload('H1', 'CIM2_ENG_WeeklyReport_261021_SEC1.json', intake('CIM2_ENG_WeeklyReport_261015_SEC1.json'))).status, 201);
   const w43 = (await call('/api/weeks/2026-W43/engineer/s1', 'H1')).body.results.alice.items[0].subItems[0];

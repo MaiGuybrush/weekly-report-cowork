@@ -4,6 +4,7 @@ import { ActivatedRoute } from "@angular/router";
 import { firstValueFrom } from "rxjs";
 import { ProjectSchedule } from "./project-schedule";
 import { publishedDate } from "./week-status";
+import { appendixRows, baselineOf, deltaText, previousWeek } from "./work-binding";
 import { FILE_LABELS, SECTION_LABELS, type CrossFile, type NonProjectSection, type PublicationIndex, type SectionFile, type SectionItem } from "./report-types";
 
 type Entry = PublicationIndex["publications"][number];
@@ -54,14 +55,14 @@ export function latestPublication(index: PublicationIndex): Entry | undefined {
           @if (hasContent(file)) {
             <section [attr.data-file]="file">
               <h2>{{ FILE_LABELS[file] }}</h2>
-              @for (p of itemsOf(file, "projects"); track p.id) { <app-project-schedule [project]="p" [document]="true" [baseDate]="baseDate" /> }
+              @for (p of itemsOf(file, "projects"); track p.id) { <app-project-schedule [project]="p" [document]="true" [baseDate]="baseDate" [baseline]="baseline" /> }
               @for (key of sectionKeys; track key) {
                 @if (itemsOf(file, key).length) {
                   <h3>{{ SECTION_LABELS[key] }}</h3>
                   @for (item of itemsOf(file, key); track item.id) {
                     <div class="item-doc">
                       <b>{{ item.title }}</b>
-                      <p class="body">{{ item.content }}</p>
+                      <p class="body">{{ item.content }}@if (deltaText(item.workId, item.engineerProgress, baseline); as d) { <strong data-progress-delta> （{{ d }}）</strong> }</p>
                       @if (impactLine(item); as line) { <p data-impact-line>{{ line }}</p> }
                       @if (item.details.sourceLinks?.length) {
                         <p class="links" data-source-links>
@@ -75,6 +76,19 @@ export function latestPublication(index: PublicationIndex): Entry | undefined {
             </section>
           }
         }
+        @if (appendix.length) {
+          <section data-appendix>
+            <h2>{{ SECTION_LABELS.appendix }}</h2>
+            <table class="grid">
+              <thead><tr><th>工作編號</th><th>工作內容</th><th>進度</th><th>變動</th></tr></thead>
+              <tbody>
+                @for (r of appendix; track r.workId) {
+                  <tr data-appendix-row><td class="num">{{ r.workId }}</td><td>{{ r.content }}</td><td class="num">{{ r.progress }}%</td><td class="num">{{ r.delta }}</td></tr>
+                }
+              </tbody>
+            </table>
+          </section>
+        }
       </article>
     </main>`,
 })
@@ -85,13 +99,18 @@ export class PublicationPage implements OnInit {
   readonly SECTION_LABELS = SECTION_LABELS;
   readonly FILE_LABELS = FILE_LABELS;
   readonly publishedDate = publishedDate;
-  readonly sectionKeys = Object.keys(SECTION_LABELS) as NonNullable<NonProjectSection[]>;
+  readonly deltaText = deltaText;
+  /** The appendix is generated from bindings, so the hand-kept appendix section is not rendered here. */
+  readonly sectionKeys = (Object.keys(SECTION_LABELS) as NonProjectSection[]).filter((k) => k !== "appendix");
   readonly files = ["s1", "s2", "s3"];
   week = "";
   version = 0;
   entries: Entry[] = [];
   data: Record<string, Partial<SectionFile & CrossFile>> = {};
   message = "";
+  /** Progress in the previous week's last official version; empty when that week was never published. */
+  baseline = new Map<number, number>();
+  get appendix() { return appendixRows(this.files.map((f) => this.data[f]), this.baseline); }
   get cross() { return (this.data["cross"] ?? {}) as Partial<CrossFile>; }
   /** Weeks newest first, versions newest first inside each week (entries arrive sorted that way). */
   get groups() {
@@ -125,12 +144,25 @@ export class PublicationPage implements OnInit {
 
   itemsOf = (file: string, section: string): SectionItem[] => (this.data[file]?.items ?? []).filter((i) => i.section === section);
 
+  private async loadBaseline(week: string) {
+    const prev = previousWeek(week);
+    const version = Math.max(0, ...this.entries.filter((p) => p.week === prev).map((p) => p.version));
+    if (!version) return new Map<number, number>();
+    try {
+      const snap = await firstValueFrom(this.http.get<typeof this.data>("/api/publications/" + prev + "/" + version));
+      return baselineOf(this.files.map((f) => snap[f]));
+    } catch {
+      return new Map<number, number>();
+    }
+  }
+
   private async load(week: string, version: number) {
     try {
       this.entries = (await firstValueFrom(this.http.get<PublicationIndex>("/api/publications"))).publications
         .sort((a, b) => b.week.localeCompare(a.week) || b.version - a.version);
       this.data = await firstValueFrom(this.http.get<typeof this.data>(`/api/publications/${week}/${version}`));
       for (const d of Object.values(this.data)) for (const i of d.items ?? []) i.details ??= {};
+      this.baseline = await this.loadBaseline(week);
       this.week = week;
       this.version = version;
       this.message = "";

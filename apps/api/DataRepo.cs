@@ -180,7 +180,7 @@ public sealed partial class DataRepo(IConfiguration config)
             var relative = $"publications/{week}/v{version}";
             var directory = Path.Combine(Root, "publications", week, $"v{version}");
             Directory.CreateDirectory(directory);
-            foreach (var f in drafts) File.Copy(PathOf(week, f), Path.Combine(directory, f + ".json"), overwrite: false);
+            foreach (var f in drafts) File.WriteAllText(Path.Combine(directory, f + ".json"), WithoutPendingSync(File.ReadAllText(PathOf(week, f))));
             var entry = new JsonObject { ["week"] = week, ["version"] = version, ["publishedAt"] = DateTime.UtcNow.ToString("o"), ["publishedBy"] = empNo, ["path"] = relative };
             list.Add(entry);
             File.WriteAllText(IndexPath, index.ToJsonString(new JsonSerializerOptions { WriteIndented = true, Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping }));
@@ -192,6 +192,18 @@ public sealed partial class DataRepo(IConfiguration config)
             return entry;
         }
         finally { writeLock.Release(); }
+    }
+
+    /// <summary>Unconfirmed sync records are internal: the published snapshot (and so the next week built from it) never carries them.</summary>
+    static string WithoutPendingSync(string text)
+    {
+        if (JsonNode.Parse(text) is not JsonObject file || file["items"] is not JsonArray items) return text;
+        foreach (var entry in items.OfType<JsonObject>().SelectMany(i => i["schedule"] is JsonArray s ? s.OfType<JsonObject>() : []))
+        {
+            entry.Remove("pendingSync");
+            entry.Remove("rejectedSync");
+        }
+        return file.ToJsonString(new JsonSerializerOptions { WriteIndented = true, Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping });
     }
 
     /// <summary>Creates the week after the latest published one (or after the newest draft week, or this week) from the latest snapshot, else empty files. Null when that week already exists.</summary>

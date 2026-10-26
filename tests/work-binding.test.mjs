@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { abortNotice, baselineOf, boundWorkIds, canBind, confirmSync, deltaText, followEngineer, followHint, itemFromWork, missingActualEnd, overrideProgress, pendingCount, previousWeek, revertSync, syncBound } from '../apps/web/src/work-binding.ts';
+import { abortNotice, appendixRows, baselineOf, boundWorkIds, canBind, confirmSync, deltaText, followEngineer, followHint, itemFromWork, missingActualEnd, overrideProgress, pendingCount, previousWeek, revertSync, syncBound } from '../apps/web/src/work-binding.ts';
 
 const work = { workId: 101, workContent: '二層B', status: '處理中', percentage: 30, deltaTime: 1, managerComment: '看一下', subItems: [{ workId: 102, percentage: 99 }] };
 const file = (...ids) => ({ items: ids.map((workId) => ({ id: String(workId), section: 'incidents', title: '', content: '', details: {}, workId })).concat([{ id: 'x', section: 'incidents', title: '', content: '', details: {} }]) });
@@ -165,4 +165,21 @@ test('revert also restores the forecast end that completing cleared', () => {
   assert.equal(items[0].schedule[0].forecastEnd, undefined);
   revertSync(items[0].schedule[0]);
   assert.equal(items[0].schedule[0].forecastEnd, '2026-11-01');
+});
+
+test('appendix lists every bound item and key task in file order with progress and delta', () => {
+  const s1 = { items: [
+    { id: 'a', section: 'incidents', title: '異常A', content: '', details: {}, workId: 7, engineerProgress: 60 },
+    { id: 'm', section: 'incidents', title: '手動', content: '', details: {} },
+    { id: 'p', section: 'projects', title: '專案', content: '', details: {}, schedule: [
+      { id: 't', kind: 'task', name: '任務T', state: 'open', workId: 9, engineerProgress: 20 },
+      { id: 'u', kind: 'task', name: '手動任務', state: 'open' }] }] };
+  const s2 = { items: [{ id: 'b', section: 'technology', title: '評估B', content: '', details: {}, workId: 3, engineerProgress: 0 }] };
+  const rows = appendixRows([s1, s2, undefined], new Map([[7, 50], [3, 5]]));
+  assert.deepEqual(rows, [
+    { workId: 7, content: '異常A', progress: 60, delta: '+10%' },
+    { workId: 9, content: '任務T', progress: 20, delta: '新增' },
+    { workId: 3, content: '評估B', progress: 0, delta: '-5%' },
+  ]);
+  assert.deepEqual(appendixRows([{}], new Map()), []);
 });

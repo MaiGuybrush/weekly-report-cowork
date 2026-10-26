@@ -622,7 +622,7 @@ try {
   // document: 管理摘要, then 三課; version in the title row; project header, deliveries, evidence, links, personnel line
   await guyPage.locator('[data-file="s1"] app-project-schedule .gantt-row').first().waitFor({ timeout: 15000 });
   assert.equal(await guyPage.locator('[data-doc-version]').innerText(), '2026-W41 · v1');
-  assert.deepEqual(await guyPage.locator('.doc h2').allInnerTexts(), ['管理摘要', '第一課', '第二課', '第三課']);
+  assert.deepEqual(await guyPage.locator('.doc h2').allInnerTexts(), ['管理摘要', '第一課', '第二課', '第三課', '工程師工作明細與來源連結']);
   assert.equal(await guyPage.locator('.doc .summary').innerText(), '本週有一項風險。');
   assert.equal(await guyPage.locator('[data-file="s1"] input, [data-file="s1"] [data-evidence-toggle], [data-file="s1"] [data-add-dependency]').count(), 0);
   const pub = guyPage.locator('[data-file="s1"] app-project-schedule').last();
@@ -636,6 +636,7 @@ try {
   await pub.locator('.btn-phase-expand').click();
   assert.equal(await guyPage.locator('[data-file="s1"] [data-source-links] a').getAttribute('href'), 'https://example.com/notice');
   assert.equal(await guyPage.locator('[data-file="s2"] [data-impact-line]').innerText(), '交接：交接給同課同仁；影響：無；下一步：補人（2026-10-05 生效）');
+  assert.match(await guyPage.locator('[data-appendix-row]', { hasText: '101' }).innerText(), /101\s+二層B\s+45%\s+新增/);
   assert.equal(await guyPage.locator('[data-sync-badge], [data-pending-count]').count(), 0);
   assert.equal(await guyPage.locator('[data-old-version]').count(), 0);
   await shot(guyPage, '12-publication');

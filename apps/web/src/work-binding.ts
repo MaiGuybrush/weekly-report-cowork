@@ -141,3 +141,13 @@ export function previousWeek(week: string): string {
   const firstMonday = startOfYear.getTime() - ((startOfYear.getUTCDay() + 6) % 7) * 864e5;
   return `${isoYear}-W${String(Math.round((monday.getTime() - firstMonday) / (7 * 864e5)) + 1).padStart(2, "0")}`;
 }
+
+export type AppendixRow = { workId: number; content: string; progress: number | undefined; delta: string };
+
+/** Publication appendix: every bound item and key task, in file → item → task order (stable), so nothing is hand-compiled. */
+export function appendixRows(files: ({ items?: SectionItem[] } | undefined)[], baseline: Map<number, number>): AppendixRow[] {
+  return files.flatMap((f) => f?.items ?? []).flatMap((i) => [
+    { workId: i.workId, content: i.title, progress: i.engineerProgress },
+    ...(i.schedule ?? []).map((e) => ({ workId: e.workId, content: e.name, progress: e.engineerProgress })),
+  ]).flatMap((r) => (r.workId == null ? [] : [{ ...r, workId: r.workId, delta: deltaText(r.workId, r.progress, baseline) }]));
+}
