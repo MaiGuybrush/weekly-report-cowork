@@ -472,6 +472,26 @@ try {
   assert.equal(await eng.locator('[data-work="100"]').count(), 1);
   assert.equal(await page.locator('[data-tab="engineer"] em').count(), 0);
 
+  // pick a child work (101, under 100) into a non-project tab: prefilled, saved, bound; picking it again is blocked
+  await page.goto(base + '/#/weeks/2026-W41/s1/operations');
+  const ops = page.locator('[data-file="s1"]');
+  await ops.locator('[data-open-picker]').click();
+  await ops.locator('[data-pick-row="100"] [data-picker-children]').click();
+  await ops.locator('[data-pick-row="101"] [data-pick]').click();
+  assert.equal(await ops.locator('[data-field="title"]').last().inputValue(), '二層B');
+  assert.equal(await ops.locator('[data-bound-work]').last().innerText(), '來源 #101・工程師狀態 處理中・進度 30%');
+  assert.equal(await ops.locator('[data-pick-row="101"] [data-bound]').count(), 1);
+  assert.equal(await ops.locator('[data-pick-row="101"] [data-pick]').count(), 0);
+  assert.equal(await ops.locator('[data-pick-row="100"] [data-pick]').count(), 1);
+  await page.locator('[data-save]').click();
+  await page.locator('[data-save-state="clean"]').waitFor({ timeout: 15000 });
+  await page.reload();
+  await ops.locator('[data-bound-work]').waitFor({ timeout: 15000 });
+  assert.equal(await ops.locator('[data-field="title"]').last().inputValue(), '二層B');
+  await ops.locator('[data-open-picker]').click();
+  await ops.locator('[data-pick-row="100"] [data-picker-children]').click();
+  await ops.locator('[data-pick-row="101"] [data-bound]').waitFor({ timeout: 15000 });
+
   // section head home: hint without create button; unknown week bounces home with a toast
   await page.goto(base + '/#/');
   await page.locator('[data-role-hint]').waitFor({ timeout: 15000 });

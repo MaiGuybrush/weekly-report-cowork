@@ -49,7 +49,7 @@ export const leaveGuard: CanDeactivateFn<WeekEditor> = (editor, _route, _state, 
         } @else if (tab === "engineer") {
           <app-engineer-progress [week]="week" [file]="file" [editable]="canEdit(file)" />
         } @else {
-          <app-file-view [file]="file" [tab]="tab" [week]="week" [data]="fileData(file)" [editable]="canEdit(file)" />
+          <app-file-view [file]="file" [tab]="tab" [week]="week" [data]="fileData(file)" [all]="data" [editable]="canEdit(file)" />
         }
       </main>
       @if (canEditFile(file) || canEditCross()) {

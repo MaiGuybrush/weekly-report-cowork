@@ -49,6 +49,10 @@ export type SectionItem = {
   title: string;
   content: string;
   details: ItemDetails;
+  // engineer work this item is bound to (unique site-wide) and its last synced progress/status
+  workId?: number;
+  engineerProgress?: number;
+  engineerStatus?: string;
   // project items only (edited in the schedule screen)
   owner?: string;
   participants?: string[];
