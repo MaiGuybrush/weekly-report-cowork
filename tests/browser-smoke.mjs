@@ -458,6 +458,19 @@ try {
   assert.equal(await eng.locator('[data-work="100"] > [data-long]').count(), 1);
   assert.equal(await eng.locator('[data-work="200"] > [data-rms]').count(), 1);
   assert.equal(await page.locator('[data-tab="engineer"] em').count(), 0);
+  // star + comment survive a reload; only-important filter hides the rest
+  await eng.locator('[data-work="100"] > [data-star]').click();
+  await eng.locator('[data-work="100"] > [data-star][aria-pressed="true"]').waitFor({ timeout: 15000 });
+  await eng.locator('[data-work="100"] > [data-comment]').fill('重點追蹤');
+  await eng.locator('[data-work="100"] > [data-comment]').blur();
+  await page.waitForTimeout(500);
+  await page.reload();
+  await eng.locator('[data-work="100"] > [data-comment]').waitFor({ timeout: 15000 });
+  assert.equal(await eng.locator('[data-work="100"] > [data-comment]').inputValue(), '重點追蹤');
+  await eng.locator('[data-only-important]').check();
+  assert.equal(await eng.locator('[data-work="200"]').count(), 0);
+  assert.equal(await eng.locator('[data-work="100"]').count(), 1);
+  assert.equal(await page.locator('[data-tab="engineer"] em').count(), 0);
 
   // section head home: hint without create button; unknown week bounces home with a toast
   await page.goto(base + '/#/');

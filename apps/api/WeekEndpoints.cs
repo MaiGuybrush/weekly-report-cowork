@@ -46,7 +46,22 @@ public static class WeekEndpoints
             var user = (User)ctx.Items["user"]!;
             if (!(user.Role == "Division" || (user.Role == "Head" && user.Section == section))) return Results.StatusCode(403);
             if (!repo.Configured) return Results.StatusCode(503);
-            return repo.ReadEngineer(week, section) is { } text ? Results.Content(text, "application/json; charset=utf-8") : Results.NotFound();
+            return repo.ReadEngineerForView(week, section) is { } file ? Results.Json(file) : Results.NotFound();
+        });
+
+        app.MapPut("/api/weeks/{week}/engineer/{section}/works/{workId:long}", async (HttpContext ctx, DataRepo repo, string week, string section, long workId) =>
+        {
+            if (!DataRepo.ValidWeek(week) || !DataRepo.ValidFile(section) || section == "cross") return Results.BadRequest(new { error = "invalid week or section" });
+            var user = (User)ctx.Items["user"]!;
+            if (user.Role != "Head" || user.Section != section) return Results.StatusCode(403);
+            if (!repo.Configured) return Results.StatusCode(503);
+            JsonObject? body;
+            try { body = await ctx.Request.ReadFromJsonAsync<JsonObject>(); }
+            catch (JsonException) { body = null; }
+            if (body?["isImportant"] is not JsonValue flag || !flag.TryGetValue<bool>(out var important) || body["managerComment"] is not JsonValue c || !c.TryGetValue<string>(out var comment) || comment.Length > 2000)
+                return Results.BadRequest(new { error = "需要 isImportant（布林）與 managerComment（字串，≤2000 字）" });
+            try { return await repo.AnnotateEngineer(week, section, workId, important, comment, user.EmpNo) ? Results.NoContent() : Results.NotFound(); }
+            catch (GitException e) { return Results.Json(new { error = e.Message }, statusCode: 500); }
         });
 
         app.MapPost("/api/engineer-work", async (HttpContext ctx, DataRepo repo, string filename) =>

@@ -45,6 +45,9 @@ public static class EngineerMerge
             var key = item["workId"]?.ToJsonString();
             JsonObject? previous = null;
             if (key is not null && oldById.TryGetValue(key, out previous)) seen.Add(key);
+            // Site annotations win over the upload's once the work is known.
+            foreach (var key2 in new[] { "isImportant", "managerComment" })
+                if (previous?[key2] is { } kept) copy[key2] = kept.DeepClone();
             copy["subItems"] = MergeItems(previous?["subItems"] as JsonArray, item["subItems"] as JsonArray);
             merged.Add(copy);
         }
@@ -52,4 +55,28 @@ public static class EngineerMerge
             if (!seen.Contains(key)) merged.Add(Absent((JsonObject)item.DeepClone()));
         return merged;
     }
+
+    /// <summary>Sets the annotation on the work with this id, at any depth; false when not found.</summary>
+    public static bool Annotate(JsonObject file, long workId, bool important, string comment)
+    {
+        foreach (var work in AllWorks(file))
+            if (work["workId"]?.GetValue<long>() == workId) { work["isImportant"] = important; work["managerComment"] = comment; return true; }
+        return false;
+    }
+
+    /// <summary>Copies each work's comment from the previous week's file onto the same workId as lastComment (read-only, never stored).</summary>
+    public static void AttachLastComments(JsonObject current, JsonObject? previous)
+    {
+        if (previous is null) return;
+        var comments = AllWorks(previous).Where(w => !string.IsNullOrWhiteSpace(w["managerComment"]?.GetValue<string>()) && w["workId"] is not null)
+            .GroupBy(w => w["workId"]!.GetValue<long>()).ToDictionary(g => g.Key, g => g.Last()["managerComment"]!.GetValue<string>());
+        foreach (var work in AllWorks(current))
+            if (work["workId"] is { } id && comments.TryGetValue(id.GetValue<long>(), out var c)) work["lastComment"] = c;
+    }
+
+    static IEnumerable<JsonObject> AllWorks(JsonObject file) =>
+        (file["results"] as JsonObject ?? new JsonObject()).SelectMany(e => Flatten(e.Value?["items"] as JsonArray));
+
+    static IEnumerable<JsonObject> Flatten(JsonArray? items) =>
+        (items ?? []).OfType<JsonObject>().SelectMany(i => Flatten(i["subItems"] as JsonArray).Prepend(i));
 }

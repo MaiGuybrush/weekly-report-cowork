@@ -6,7 +6,7 @@ import { ShellState } from "./shell-state";
 
 export type EngineerWork = {
   workId: number; workContent: string; status: string; percentage: number; deltaTime: number;
-  rmsFlag?: string; absent?: boolean; subItems?: EngineerWork[];
+  rmsFlag?: string; absent?: boolean; isImportant?: boolean; managerComment?: string; lastComment?: string; subItems?: EngineerWork[];
 };
 export type EngineerFile = { results: Record<string, { totalWorkHours?: number; totalOffHours?: number; items: EngineerWork[] }> };
 
@@ -21,6 +21,7 @@ export const LONG_HOURS = 10;
     @if (editable()) {
       <p><label>上傳工程師工作彙整 JSON <input type="file" accept=".json,application/json" data-engineer-upload (change)="upload($event)" /></label></p>
     }
+    <p><label><input type="checkbox" data-only-important [checked]="onlyImportant" (change)="onlyImportant = !onlyImportant" /> 僅顯示重要工作</label></p>
     @if (error) { <p class="err" role="alert" data-engineer-error>{{ error }}</p> }
     @if (!data) {
       <div class="empty" data-empty>{{ loading ? "載入中…" : "本週尚無工程師工作彙整" }}</div>
@@ -34,14 +35,24 @@ export const LONG_HOURS = 10;
     }
     <ng-template #tree let-items>
       @for (w of items; track w.workId) {
+        @if (shown(w)) {
         <li [attr.data-work]="w.workId" [attr.data-absent]="w.absent ? '' : null">
           <span class="num">#{{ w.workId }}</span> {{ w.workContent }}
           <span class="num">{{ w.status }}・{{ w.percentage }}%・{{ w.deltaTime }}H</span>
           @if (w.deltaTime >= LONG_HOURS) { <em data-long>耗時 ≥{{ LONG_HOURS }}H</em> }
           @if (w.rmsFlag) { <em data-rms>RMS</em> }
           @if (w.absent) { <em data-absent-note>本週彙整未出現此工作（可能本週無進度）</em> }
+          @if (editable()) {
+            <button type="button" data-star [attr.aria-pressed]="!!w.isImportant" [attr.aria-label]="'標記 #' + w.workId + ' 為重要'" (click)="annotate(w, !w.isImportant, w.managerComment ?? '')">{{ w.isImportant ? "★" : "☆" }}</button>
+            <input type="text" data-comment maxlength="2000" placeholder="comment" [value]="w.managerComment ?? ''" (change)="annotate(w, !!w.isImportant, $any($event.target).value)" />
+          } @else {
+            @if (w.isImportant) { <em data-important>★ 重要</em> }
+            @if (w.managerComment) { <span data-comment-text>{{ w.managerComment }}</span> }
+          }
+          @if (w.lastComment) { <small data-last-comment>上週：{{ w.lastComment }}</small> }
           @if (w.subItems?.length) { <ul><ng-container *ngTemplateOutlet="tree; context: { $implicit: w.subItems }" /></ul> }
         </li>
+        }
       }
     </ng-template>
   </section>`,
@@ -55,12 +66,15 @@ export class EngineerProgress {
   file = input.required<string>();
   editable = input(false);
   data: EngineerFile | null = null;
+  onlyImportant = false;
   loading = false;
   error = "";
 
   constructor() {
     effect(() => void this.load(this.week(), this.file()));
   }
+  /** 篩選「僅重要」時，自己重要或含重要子項的工作才顯示。 */
+  shown = (w: EngineerWork): boolean => !this.onlyImportant || !!w.isImportant || !!w.subItems?.some(this.shown);
   engineers = () => Object.entries(this.data?.results ?? {});
 
   private async load(week: string, file: string) {
@@ -90,6 +104,18 @@ export class EngineerProgress {
       else this.error = `檔案屬於 ${week}，請切換到該週查看`;
     } catch (e: any) {
       this.error = `上傳失敗：${e?.error?.error ?? "未知錯誤"}`;
+    }
+    this.changes.detectChanges();
+  }
+
+  async annotate(work: EngineerWork, isImportant: boolean, managerComment: string) {
+    this.error = "";
+    try {
+      await firstValueFrom(this.http.put(`/api/weeks/${this.week()}/engineer/${this.file()}/works/${work.workId}`, { isImportant, managerComment }));
+      work.isImportant = isImportant;
+      work.managerComment = managerComment;
+    } catch (e: any) {
+      this.error = `儲存標註失敗：${e?.error?.error ?? e?.status ?? "未知錯誤"}`;
     }
     this.changes.detectChanges();
   }

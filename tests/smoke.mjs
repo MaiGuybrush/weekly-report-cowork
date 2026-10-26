@@ -131,7 +131,12 @@ try {
   assert.match((await upload('H1', 'CIM2_ENG_WeeklyReport_261030_SEC1.json', intake('CIM2_ENG_WeeklyReport_261014_SEC1.json'))).body.error, /尚未建立/);
   const noPercent = JSON.parse(intake('CIM2_ENG_WeeklyReport_261014_SEC1.json')); delete noPercent.results.alice.items[0].percentage;
   assert.match((await upload('H1', 'CIM2_ENG_WeeklyReport_261014_SEC1.json', JSON.stringify(noPercent))).body.error, /percentage/);
-  const up1 = await upload('H1', 'CIM2_ENG_WeeklyReport_261014_SEC1.json'); assert.equal(up1.status, 201); assert.equal(up1.body.week, '2026-W42');
+  // annotations: upload-carried star/comment import as initial; W41 first so W42 can show last week's comment
+  const annotated = (name, comment) => { const f = JSON.parse(intake(name)); Object.assign(f.results.alice.items[0], { isImportant: true, managerComment: comment }); return JSON.stringify(f); };
+  assert.equal((await upload('H1', 'CIM2_ENG_WeeklyReport_261008_SEC1.json', annotated('CIM2_ENG_WeeklyReport_261008_SEC1.json', 'W41評語'))).status, 201);
+  const w41 = (await call('/api/weeks/2026-W41/engineer/s1', 'H1')).body.results.alice.items[0];
+  assert.deepEqual([w41.isImportant, w41.managerComment], [true, 'W41評語']);
+  const up1 = await upload('H1', 'CIM2_ENG_WeeklyReport_261014_SEC1.json', annotated('CIM2_ENG_WeeklyReport_261014_SEC1.json', '匯入評語')); assert.equal(up1.status, 201); assert.equal(up1.body.week, '2026-W42');
   assert.match(git(remote, 'log', '--format=%s', 'master'), /2026-W42\/engineer-s1: upload by H1/);
   // same week again merges by workId: new values win, absent works kept and flagged, sub levels merged
   assert.equal((await upload('H1', 'CIM2_ENG_WeeklyReport_261015_SEC1.json')).status, 201);
@@ -142,6 +147,24 @@ try {
   assert.deepEqual(a[0].subItems[0].subItems.map(i => [i.workId, !!i.absent]), [[102, true]]);
   assert.equal(a[0].subItems[0].subItems[0].deltaPert, '?');
   assert.equal(a[1].rmsFlag, 'R');
+  // re-upload (isImportant false, no comment) keeps what the site holds; last week's comment shows beside the same workId
+  const first42 = merged.alice.items[0];
+  assert.deepEqual([first42.isImportant, first42.managerComment, first42.lastComment], [true, '匯入評語', 'W41評語']);
+  const put = (user, work, body, week = '2026-W42', section = 's1') => call(`/api/weeks/${week}/engineer/${section}/works/${work}`, user, 'PUT', body);
+  assert.equal((await put('H1', 101, { isImportant: true, managerComment: '子項評語' })).status, 204);
+  assert.equal((await put('H1', 100, { isImportant: false, managerComment: '' })).status, 204);
+  assert.equal((await put('H1', 999, { isImportant: true, managerComment: 'x' })).status, 404);
+  assert.equal((await put('H1', 100, { isImportant: 'yes', managerComment: 'x' })).status, 400);
+  assert.equal((await put('H2', 100, { isImportant: true, managerComment: 'x' })).status, 403);
+  assert.equal((await put('G', 100, { isImportant: true, managerComment: 'x' })).status, 403);
+  assert.equal((await put('H1', 100, { isImportant: true, managerComment: 'x' }, '2026-W42', 's2')).status, 403);
+  const saved = (await call('/api/weeks/2026-W42/engineer/s1', 'G')).body.results.alice.items[0];
+  assert.deepEqual([saved.isImportant, saved.managerComment, saved.subItems[0].isImportant, saved.subItems[0].managerComment], [false, '', true, '子項評語']);
+  assert.match(git(remote, 'log', '--format=%s', 'master'), /engineer-s1: annotate 101 by H1/);
+  assert.doesNotMatch(git(remote, 'show', 'master:weeks/2026-W42/engineer-s1.json'), /lastComment/);
+  // re-upload after annotating still keeps site values
+  assert.equal((await upload('H1', 'CIM2_ENG_WeeklyReport_261015_SEC1.json')).status, 201);
+  assert.equal((await call('/api/weeks/2026-W42/engineer/s1', 'H1')).body.results.alice.items[0].subItems[0].managerComment, '子項評語');
   // older week rejected once W42 data exists... a W41 file is older than W42
   const older = await upload('H1', 'CIM2_ENG_WeeklyReport_261008_SEC1.json'); assert.equal(older.status, 409); assert.match(older.body.error, /早於/);
   // visibility: division reads any section, head only own, nothing for s2

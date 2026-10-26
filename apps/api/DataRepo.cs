@@ -73,17 +73,47 @@ public sealed partial class DataRepo(IConfiguration config)
             if (LatestEngineerWeek(section) is { } latest && string.CompareOrdinal(week, latest) < 0) return $"週次 {week} 早於已有資料的 {latest}";
             var path = EngineerPath(week, section);
             var merged = File.Exists(path) && JsonNode.Parse(File.ReadAllText(path)) is JsonObject old ? EngineerMerge.Merge(old, upload) : EngineerMerge.Merge(null, upload);
-            var temp = path + ".tmp";
-            File.WriteAllText(temp, merged.ToJsonString(new JsonSerializerOptions { WriteIndented = true, Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping }));
-            File.Move(temp, path, overwrite: true);
-            var relative = $"weeks/{week}/engineer-{section}.json";
-            Git("add", "--", relative);
-            if (Git("status", "--porcelain", "--", relative).Length > 0)
-                Git("commit", "-m", $"{week}/engineer-{section}: upload by {empNo}", "--", relative);
-            if (Remote.Length > 0) Git("push", "-u", "origin", "HEAD");
+            SaveEngineer(week, section, merged, $"upload by {empNo}");
             return null;
         }
         finally { writeLock.Release(); }
+    }
+
+    void SaveEngineer(string week, string section, JsonObject content, string message)
+    {
+        var path = EngineerPath(week, section);
+        var temp = path + ".tmp";
+        File.WriteAllText(temp, content.ToJsonString(new JsonSerializerOptions { WriteIndented = true, Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping }));
+        File.Move(temp, path, overwrite: true);
+        var relative = $"weeks/{week}/engineer-{section}.json";
+        Git("add", "--", relative);
+        if (Git("status", "--porcelain", "--", relative).Length > 0)
+            Git("commit", "-m", $"{week}/engineer-{section}: {message}", "--", relative);
+        if (Remote.Length > 0) Git("push", "-u", "origin", "HEAD");
+    }
+
+    /// <summary>Stores the head's star and comment on one work. False when the week has no engineer data or no such work.</summary>
+    public async Task<bool> AnnotateEngineer(string week, string section, long workId, bool important, string comment, string empNo)
+    {
+        await writeLock.WaitAsync();
+        try
+        {
+            EnsureReady();
+            if (HasRemoteHeads()) Sync();
+            if (ReadEngineer(week, section) is not { } text || JsonNode.Parse(text) is not JsonObject file || !EngineerMerge.Annotate(file, workId, important, comment)) return false;
+            SaveEngineer(week, section, file, $"annotate {workId} by {empNo}");
+            return true;
+        }
+        finally { writeLock.Release(); }
+    }
+
+    /// <summary>The week's engineer file with lastComment attached from the newest earlier week that has data for the section.</summary>
+    public JsonObject? ReadEngineerForView(string week, string section)
+    {
+        if (ReadEngineer(week, section) is not { } text || JsonNode.Parse(text) is not JsonObject file) return null;
+        var earlier = Weeks().Where(w => string.CompareOrdinal(w, week) < 0 && File.Exists(EngineerPath(w, section))).FirstOrDefault();
+        EngineerMerge.AttachLastComments(file, earlier is null ? null : JsonNode.Parse(ReadEngineer(earlier, section)!) as JsonObject);
+        return file;
     }
 
     public IEnumerable<string> Weeks()
