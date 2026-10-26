@@ -22,6 +22,7 @@ label: `wayfinder:map`
 - [後端語言](issues/05-backend-language.md) — 後端保留且維持 C#，不改寫 Python；職責縮為靜態檔託管、JWT 驗證、草稿 commit、發布。沿用 SSO/JWT，角色只剩課長與部級。
 - [週報 JSON 結構、草稿讀取與部署](issues/06-json-shape-and-deployment.md) — 部署如現況（後端託管靜態前端）；後端讀 git 工作目錄；JSON 沿用 `ScheduleEntry` 欄位，相依只存 `predecessors`；來源連結以頂層工作項目的 `workId` 加手寫摘要為單位。
 - [git 寫入方式](issues/07-git-write-interface.md) — 後端以 git CLI 在本機工作目錄執行草稿 commit 與發布 tag，服務帳號憑證由伺服器環境提供。
+- [計畫／實際兩組日期](issues/08-plan-actual-two-dates.md) — 原始／目前／實際三組日期簡化為計畫與實際：欄位改 `plan*` + `actual*`、不遷移舊資料；偏差為實際 vs 計畫；甘特圖每列計畫條加實際條；取消原始資料更正流程；刪除舊設計文件並清除 `.scratch/` 引用。
 
 ## Not yet specified
 

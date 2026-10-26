@@ -111,7 +111,7 @@ public sealed partial class DataRepo(IConfiguration config)
     public JsonObject? ReadEngineerForView(string week, string section)
     {
         if (ReadEngineer(week, section) is not { } text || JsonNode.Parse(text) is not JsonObject file) return null;
-        var earlier = Weeks().Where(w => string.CompareOrdinal(w, week) < 0 && File.Exists(EngineerPath(w, section))).FirstOrDefault();
+        var earlier = Weeks().FirstOrDefault(w => string.CompareOrdinal(w, week) < 0 && File.Exists(EngineerPath(w, section)));
         EngineerMerge.AttachLastComments(file, earlier is null ? null : JsonNode.Parse(ReadEngineer(earlier, section)!) as JsonObject);
         return file;
     }

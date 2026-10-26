@@ -46,8 +46,8 @@ public static class EngineerMerge
             JsonObject? previous = null;
             if (key is not null && oldById.TryGetValue(key, out previous)) seen.Add(key);
             // Site annotations win over the upload's once the work is known.
-            foreach (var key2 in new[] { "isImportant", "managerComment" })
-                if (previous?[key2] is { } kept) copy[key2] = kept.DeepClone();
+            foreach (var field in new[] { "isImportant", "managerComment" })
+                if (previous?[field] is { } kept) copy[field] = kept.DeepClone();
             copy["subItems"] = MergeItems(previous?["subItems"] as JsonArray, item["subItems"] as JsonArray);
             merged.Add(copy);
         }
