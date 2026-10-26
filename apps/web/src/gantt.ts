@@ -8,6 +8,7 @@ import {
   ganttPosition,
   ganttTooltip,
   forecastEnds,
+  criticalChain,
   ganttRange,
   ganttTicks,
   ganttWidth,
@@ -62,6 +63,7 @@ import { expectedProgress, progressStatus, progressText } from "./project-progre
         <span class="legend-item"><i class="legend-bar actual-bar"></i> 實際</span>
         <span class="legend-item"><i class="legend-bar actual-bar late"></i> 實際（逾期）</span>
         <span class="legend-item"><i class="legend-bar forecast-bar"></i> 預估完工</span>
+        <span class="legend-item"><i class="legend-critical"></i> 關鍵鏈（延誤即拖延專案）</span>
         <span class="legend-item"><i class="legend-expected" data-status="normal"></i> 計畫應有進度：實際差距 10 點內正常</span>
         <span class="legend-item"><i class="legend-expected" data-status="behind"></i> 落後（低 10 點以上）</span>
         <span class="legend-item"><i class="legend-expected" data-status="ahead"></i> 領先（高 10 點以上）</span>
@@ -97,6 +99,8 @@ import { expectedProgress, progressStatus, progressText } from "./project-progre
             [class.gantt-row-milestone]="entry.kind === 'milestone'"
             [class.gantt-row-phase]="entry.kind === 'phase'"
             [class.gantt-row-cancelled]="entry.state === 'cancelled'"
+            [class.gantt-row-critical]="critical().has(entry.id)"
+            [attr.data-critical]="critical().has(entry.id) ? '' : null"
             [class.gantt-row-selected]="entry.id === selectedId()"
             [class.gantt-row-related]="related().has(entry.id)"
             [attr.data-gantt-id]="entry.id"
@@ -236,6 +240,7 @@ export class Gantt {
     });
   });
   forecasts = computed(() => forecastEnds(this.entries(), this.today()));
+  critical = computed(() => criticalChain(this.entries(), this.today()));
   forecastBar = (entry: GanttEntry) => {
     const from = this.marks(entry, this.today()).actualBar?.end ?? this.today();
     const to = this.forecasts().get(entry.id);

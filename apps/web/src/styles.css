@@ -215,6 +215,11 @@ input:disabled, select:disabled, textarea:disabled { background: var(--paper); -
 .gantt-track .gantt-progress[data-status="ahead"] { color: var(--ok); font-weight: 600; }
 .variance-forecast { color: var(--mute); font-weight: 400; opacity: .75; }
 .gantt-track .forecast-bar { top: 1.05rem; height: .5rem; min-width: 4px; border-top: 2px dashed var(--actual); opacity: .6; }
+.gantt-row-critical .gantt-meta { box-shadow: inset 3px 0 0 var(--red); }
+.gantt-row-critical .gantt-name { font-weight: 700; }
+.gantt-row-critical .gantt-track .plan-bar { outline: 2px solid var(--red); outline-offset: 1px; }
+.gantt-row-critical .milestone-target-marker, .gantt-row-critical .milestone-marker { outline: 2px solid var(--red); outline-offset: 2px; }
+.legend-critical { display: inline-block; width: 1.1rem; height: .4rem; border-radius: 2px; outline: 2px solid var(--red); outline-offset: 1px; background: var(--plan); }
 .legend-bar.forecast-bar { height: 0; border-top: 2px dashed var(--actual); border-radius: 0; opacity: .6; }
 
 @media (max-width: 860px) {

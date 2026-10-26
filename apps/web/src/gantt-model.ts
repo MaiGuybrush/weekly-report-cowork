@@ -162,6 +162,27 @@ export function forecastEnds(entries: GanttEntry[], today: string): Map<string, 
   return result;
 }
 
+/** 關鍵鏈: ids of the item(s) finishing last (forecast end, else actual/plan end) and, walking back, the latest-finishing predecessors; a phase joins when one of its tasks is on the chain. Cancelled items are ignored. */
+export function criticalChain(entries: GanttEntry[], today: string): Set<string> {
+  const live = entries.filter((e) => e.state !== "cancelled");
+  const byId = new Map(live.map((e) => [e.id, e]));
+  const fc = forecastEnds(live, today);
+  const end = (e: GanttEntry) => fc.get(e.id) || (e.kind === "milestone" ? e.actualDate || e.planDate : e.actualEnd || e.planEnd) || "";
+  const chain = new Set<string>();
+  const walk = (e: GanttEntry) => {
+    if (chain.has(e.id)) return;
+    chain.add(e.id);
+    const preds = (e.predecessors ?? []).map((id) => byId.get(id)).filter((p): p is GanttEntry => !!p && !!end(p));
+    const latest = preds.reduce((m, p) => (end(p) > m ? end(p) : m), "");
+    preds.filter((p) => end(p) === latest).forEach(walk);
+  };
+  const last = live.reduce((m, e) => (end(e) > m ? end(e) : m), "");
+  if (!last) return chain;
+  live.filter((e) => end(e) === last).forEach(walk);
+  for (const t of live) if (t.kind === "task" && t.phaseId && chain.has(t.id)) chain.add(t.phaseId);
+  return chain;
+}
+
 /** Why a filled 預估完工日 cannot be saved, or null. */
 export function forecastError(e: GanttEntry): string | null {
   const start = e.actualStart || e.planStart;

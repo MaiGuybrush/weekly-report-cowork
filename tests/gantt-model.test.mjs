@@ -180,3 +180,19 @@ test('cancel clears 預估完工日', async () => {
   const out = cancelEntry([{ ...blank, id: 'a', kind: 'task', name: 'A', state: 'in-progress', forecastEnd: '2026-10-20' }], 'a');
   assert.equal(out[0].forecastEnd, undefined);
 });
+
+test('criticalChain: single chain, fork-join, no deps, cancelled', async () => {
+  const { criticalChain } = await import('../apps/web/src/gantt-model.ts');
+  const t = (id, planEnd, extra = {}) => ({ ...blank, id, kind: 'task', name: id, state: 'open', planStart: '2026-10-01', planEnd, ...extra });
+  const chain = (e) => [...criticalChain(e, '2026-10-02')].sort();
+  assert.deepEqual(chain([t('a', '2026-10-05'), t('b', '2026-10-08', { predecessors: ['a'] }), t('c', '2026-10-12', { predecessors: ['b'] })]), ['a', 'b', 'c']);
+  const fj = [t('x', '2026-10-09'), t('y', '2026-10-04'), t('j', '2026-10-12', { predecessors: ['x', 'y'] }), t('z', '2026-10-06')];
+  assert.deepEqual(chain(fj), ['j', 'x']);
+  fj[1] = t('y', '2026-10-04', { state: 'in-progress', forecastEnd: '2026-10-11' });
+  assert.deepEqual(chain(fj), ['j', 'y']);
+  assert.deepEqual(chain([t('a', '2026-10-05'), t('b', '2026-10-09')]), ['b']);
+  assert.deepEqual(chain([]), []);
+  assert.deepEqual(chain([t('a', '2026-10-05'), t('c', '2026-10-20', { state: 'cancelled' }), t('b', '2026-10-09', { predecessors: ['c'] })]), ['b']);
+  const m = [{ ...blank, id: 'p', kind: 'phase', name: 'p', state: 'open' }, t('a', '2026-10-05', { phaseId: 'p' }), { ...blank, id: 'm', kind: 'milestone', name: 'm', state: 'pending', planDate: '2026-10-10', predecessors: ['a'] }];
+  assert.deepEqual(chain(m), ['a', 'm', 'p']);
+});
