@@ -52,3 +52,23 @@ test('基準日: same data, different base date, different overdue and health', 
   assert.equal(projectHealth(s, '2026-10-20').text, '依計畫');
   assert.deepEqual([projectHealth(s, '2026-10-21').status, projectHealth(s, '2026-10-21').text], ['bad', '逾期 1 項']);
 });
+
+test('預估延後: not overdue, forecast past plan end; ranks below overdue, above slipped', () => {
+  const f = task({ state: 'in-progress', planEnd: '2026-10-20', forecastEnd: '2026-10-25' });
+  const slip = task({ state: 'completed', planEnd: '2026-10-05', actualEnd: '2026-10-08' });
+  assert.deepEqual([health([f]).status, health([f]).text], ['warn', '預估延後 1 項']);
+  assert.equal(health([f, slip]).text, '預估延後 1 項');
+  assert.equal(health([f, task({ planEnd: '2026-10-01' })]).text, '逾期 1 項');
+});
+
+test('預估延後: overdue not double counted; done, cancelled, forecast on/before plan ignored', () => {
+  const h = health([
+    task({ planEnd: '2026-10-01', forecastEnd: '2026-10-30' }),
+    task({ state: 'completed', planEnd: '2026-10-20', forecastEnd: '2026-10-25' }),
+    task({ state: 'cancelled', planEnd: '2026-10-20', forecastEnd: '2026-10-25' }),
+    task({ planEnd: '2026-10-20', forecastEnd: '2026-10-20' }),
+    task({ planEnd: '2026-10-20', forecastEnd: '2026-10-15' }),
+  ]);
+  assert.equal(h.text, '逾期 1 項');
+  assert.equal(health([task({ planEnd: '2026-10-20', forecastEnd: '2026-10-20' })]).text, '依計畫');
+});
