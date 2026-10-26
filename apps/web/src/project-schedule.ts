@@ -10,12 +10,12 @@ import { PredecessorSelect } from "./predecessor-select";
 import type { EngineerFile, EngineerWork } from "./engineer-progress";
 import { clampProgress, liveTasksOf, progressText } from "./project-progress";
 import { cancelEntry, evaluateSchedule, reactivateEntry, type ScheduleInput } from "./schedule-rules";
-import { boundWorkIds, canBind, missingPlanDates, taskFromWork } from "./work-binding";
+import { boundWorkIds, canBind, deltaText, missingPlanDates, taskFromWork } from "./work-binding";
 import type { ExternalDependency, ScheduleEntry, SectionFile, SectionItem } from "./report-types";
 
 const KEYS: (keyof ScheduleEntry)[] = [
   "id", "kind", "name", "owner", "phaseId", "state", "planStart", "planEnd",
-  "progress", "forecastEnd", "actualStart", "actualEnd", "planDate", "actualDate", "predecessors", "workId",
+  "progress", "forecastEnd", "actualStart", "actualEnd", "planDate", "actualDate", "predecessors", "workId", "engineerProgress",
 ];
 const KIND_LABELS = { phase: "階段", task: "關鍵任務", milestone: "里程碑" };
 
@@ -65,7 +65,7 @@ export function scheduleErrors(project: SectionItem) {
                 </td>
                 <td class="name-cell">
                   <input data-field="entry-name" aria-label="名稱" [(ngModel)]="e.name" [disabled]="!editable() || e.state === 'cancelled'" />
-                  @if (e.workId != null) { <small class="num" data-bound-work [title]="'來源 #' + e.workId">已綁定 #{{ e.workId }}</small> }
+                  @if (e.workId != null) { <small class="num" data-bound-work [title]="'來源 #' + e.workId">已綁定 #{{ e.workId }}</small>@if (deltaText(e.workId, e.engineerProgress, baseline()); as d) { <small class="num" data-progress-delta>（{{ d }}）</small> } }
                 </td>
                 <td>@if (e.kind === 'task') { <input aria-label="負責人/單位" [(ngModel)]="e.owner" [disabled]="!editable()" /> }</td>
                 <td>
@@ -194,6 +194,8 @@ export class ProjectSchedule {
   private host = inject<ElementRef<HTMLElement>>(ElementRef);
   project = input.required<SectionItem>();
   week = input("");
+  baseline = input(new Map<number, number>());
+  deltaText = deltaText;
   /** Section file whose engineer summary feeds the picker. */
   file = input("");
   /** All section files of the week; a workId may be bound only once across them. */

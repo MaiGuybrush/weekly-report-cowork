@@ -56,3 +56,38 @@ test('workId uniqueness covers project tasks and section items together', () => 
   assert.deepEqual([...bound].sort(), [100, 101]);
   assert.equal(canBind(101, bound), false);
 });
+
+import { baselineOf, deltaText, previousWeek, syncBound } from '../apps/web/src/work-binding.ts';
+
+const bound = () => [{ id: 'i', section: 'operations', title: '', content: '', details: {}, workId: 101, engineerProgress: 10, engineerStatus: '待執行',
+  schedule: [{ id: 't', kind: 'task', state: 'in-progress', workId: 102, engineerProgress: 20, progress: 20 }] }];
+
+test('sync pulls percentage into bound items and tasks at any depth; deltaPert is ignored', () => {
+  const items = bound();
+  const works = [{ workId: 100, percentage: 1, subItems: [{ ...work, percentage: 55, deltaPert: '?' }, { workId: 102, percentage: 70, status: '處理中', deltaPert: -5 }] }];
+  assert.equal(syncBound(items, works), 2);
+  assert.deepEqual([items[0].engineerProgress, items[0].engineerStatus, items[0].schedule[0].engineerProgress, items[0].schedule[0].progress], [55, '處理中', 70, 70]);
+});
+
+test('absent works keep the last snapshot', () => {
+  const items = bound();
+  assert.equal(syncBound(items, [{ ...work, percentage: 99, absent: true, subItems: [] }]), 0);
+  assert.equal(items[0].engineerProgress, 10);
+});
+
+test('baseline comes from the published snapshot; new, positive, zero and negative deltas', () => {
+  const base = baselineOf([{ items: bound() }, undefined]);
+  assert.deepEqual([...base], [[101, 10], [102, 20]]);
+  assert.equal(deltaText(101, 35, base), '+25%');
+  assert.equal(deltaText(101, 10, base), '+0%');
+  assert.equal(deltaText(102, 15, base), '-5%');
+  assert.equal(deltaText(103, 5, base), '新增');
+  assert.equal(deltaText(undefined, 5, base), '');
+  assert.equal(deltaText(103, 5, baselineOf([])), '新增');
+});
+
+test('previousWeek crosses year boundaries on ISO weeks', () => {
+  assert.equal(previousWeek('2026-W43'), '2026-W42');
+  assert.equal(previousWeek('2026-W01'), '2025-W52');
+  assert.equal(previousWeek('2021-W01'), '2020-W53');
+});

@@ -5,7 +5,7 @@ import { firstValueFrom } from "rxjs";
 import type { EngineerFile, EngineerWork } from "./engineer-progress";
 import { ProjectSchedule } from "./project-schedule";
 import { type NonProjectSection, type SourceLink, type SectionFile, type SectionItem } from "./report-types";
-import { boundWorkIds, canBind, itemFromWork } from "./work-binding";
+import { boundWorkIds, canBind, deltaText, itemFromWork } from "./work-binding";
 
 /** Rows without a URL are dropped on save; an emptied list leaves no field behind. */
 export function pruneRefLinks(item: SectionItem) {
@@ -21,7 +21,7 @@ export function pruneRefLinks(item: SectionItem) {
   template: `<section [attr.data-file]="file()">
       @if (tab() === "projects") {
         @for (p of itemsOf("projects"); track p.id) {
-          <app-project-schedule [week]="week()" [file]="file()" [all]="all()" [project]="p" [editable]="editable()" />
+          <app-project-schedule [week]="week()" [file]="file()" [all]="all()" [baseline]="baseline()" [project]="p" [editable]="editable()" />
           @if (editable()) { <button type="button" (click)="remove(p)">刪除專案</button> }
         } @empty {
           <div class="empty" data-empty>{{ editable() ? "尚無專案，按下方「新增專案」開始。" : "尚無專案" }}</div>
@@ -46,7 +46,7 @@ export function pruneRefLinks(item: SectionItem) {
                 <textarea data-field="content" rows="6" [(ngModel)]="item.content" [disabled]="!editable()"></textarea></label>
             }
             @if (item.workId != null) {
-              <p class="num" data-bound-work>來源 #{{ item.workId }}・工程師狀態 {{ item.engineerStatus }}・進度 {{ item.engineerProgress }}%</p>
+              <p class="num" data-bound-work>來源 #{{ item.workId }}・工程師狀態 {{ item.engineerStatus }}・進度 {{ item.engineerProgress }}%@if (deltaText(item.workId, item.engineerProgress, baseline()); as d) { <strong data-progress-delta>（{{ d }}）</strong> }</p>
             }
             <div class="ref-links">
               <strong>參考連結</strong>
@@ -106,6 +106,8 @@ export class FileView {
   /** Mutated in place; the parent owns it and serialises it on save. */
   data = input.required<Partial<SectionFile>>();
   editable = input(false);
+  baseline = input(new Map<number, number>());
+  deltaText = deltaText;
 
   itemsOf = (section: string): SectionItem[] => (this.data().items ?? []).filter((i) => i.section === section);
 

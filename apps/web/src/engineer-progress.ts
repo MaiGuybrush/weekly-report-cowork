@@ -1,4 +1,4 @@
-import { ChangeDetectorRef, Component, effect, inject, input } from "@angular/core";
+import { ChangeDetectorRef, Component, effect, inject, input, output } from "@angular/core";
 import { HttpClient } from "@angular/common/http";
 import { NgTemplateOutlet } from "@angular/common";
 import { firstValueFrom } from "rxjs";
@@ -65,6 +65,8 @@ export class EngineerProgress {
   week = input.required<string>();
   file = input.required<string>();
   editable = input(false);
+  /** Emitted with every work of the merged file after a successful upload, so the editor can sync bound items. */
+  uploaded = output<EngineerWork[]>();
   data: EngineerFile | null = null;
   onlyImportant = false;
   loading = false;
@@ -100,7 +102,10 @@ export class EngineerProgress {
     try {
       const { week } = await firstValueFrom(this.http.post<{ week: string }>(`/api/engineer-work?filename=${encodeURIComponent(picked.name)}`, await picked.text(), { headers: { "Content-Type": "application/json" } }));
       this.state.flash(`已上傳 ${week} 工程師彙整`);
-      if (week === this.week()) await this.load(week, this.file());
+      if (week === this.week()) {
+        await this.load(week, this.file());
+        this.uploaded.emit(Object.values(this.data?.results ?? {}).flatMap((r) => r.items));
+      }
       else this.error = `檔案屬於 ${week}，請切換到該週查看`;
     } catch (e: any) {
       this.error = `上傳失敗：${e?.error?.error ?? "未知錯誤"}`;

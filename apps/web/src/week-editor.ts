@@ -5,8 +5,9 @@ import { firstValueFrom } from "rxjs";
 import { CrossEditor } from "./cross-editor";
 import { isDirty, snapshotOf } from "./dirty-state";
 import { EDIT_FILES, tabsOf } from "./edit-nav";
-import { EngineerProgress } from "./engineer-progress";
+import { EngineerProgress, type EngineerWork } from "./engineer-progress";
 import { FileView, pruneRefLinks } from "./file-view";
+import { baselineOf, previousWeek, syncBound } from "./work-binding";
 import { cleanSchedule, scheduleErrors } from "./project-schedule";
 import { FILE_LABELS, SECTION_LABELS, type CrossFile, type SectionFile } from "./report-types";
 import { ShellState } from "./shell-state";
@@ -47,9 +48,9 @@ export const leaveGuard: CanDeactivateFn<WeekEditor> = (editor, _route, _state, 
         } @else if (file === "cross") {
           <app-cross-editor [cross]="cross" [tab]="tab" [editable]="canEditCross()" />
         } @else if (tab === "engineer") {
-          <app-engineer-progress [week]="week" [file]="file" [editable]="canEdit(file)" />
+          <app-engineer-progress [week]="week" [file]="file" [editable]="canEdit(file)" (uploaded)="synced($event)" />
         } @else {
-          <app-file-view [file]="file" [tab]="tab" [week]="week" [data]="fileData(file)" [all]="data" [editable]="canEdit(file)" />
+          <app-file-view [file]="file" [tab]="tab" [week]="week" [data]="fileData(file)" [all]="data" [baseline]="baseline" [editable]="canEdit(file)" />
         }
       </main>
       @if (canEditFile(file) || canEditCross()) {
@@ -97,6 +98,7 @@ export class WeekEditor implements OnInit {
   tab = "";
   loaded = false;
   data: Record<string, Partial<SectionFile & CrossFile>> = {};
+  baseline = new Map<number, number>();
   error = "";
   errorFile = "";
   /** Per-file snapshot of what was last loaded or saved; a file is dirty when its draft differs. */
@@ -134,6 +136,28 @@ export class WeekEditor implements OnInit {
     this.data = data;
     this.saved = Object.fromEntries(EDIT_FILES.map((f) => [f, snapshotOf(this.payload(f))]));
     this.loaded = true;
+    this.changes.detectChanges();
+    this.baseline = await this.loadBaseline(week);
+    this.changes.detectChanges();
+  }
+
+  /** Progress recorded in the last official version of the previous week; empty when that week was never published. */
+  private async loadBaseline(week: string) {
+    const prev = previousWeek(week);
+    const { version } = weekStatus(this.state.publications(), prev);
+    if (!version) return new Map<number, number>();
+    try {
+      const snap = await firstValueFrom(this.http.get<typeof this.data>(`/api/publications/${prev}/${version}`));
+      return baselineOf(EDIT_FILES.map((f) => snap[f]));
+    } catch {
+      return new Map<number, number>();
+    }
+  }
+
+  /** A reupload updates the draft of the head's own file; saving stays explicit. */
+  synced(works: EngineerWork[]) {
+    const n = syncBound(this.fileData(this.file).items ?? [], works);
+    if (n) this.state.flash(`已依工程師進度更新 ${n} 個綁定項目，請儲存`);
     this.changes.detectChanges();
   }
 

@@ -1,0 +1,120 @@
+{
+ "target_section": "s1",
+ "today_str": "2026-10-14",
+ "results": {
+  "alice": {
+   "totalWorkHours": 30,
+   "totalOffHours": 0,
+   "items": [
+    {
+     "workId": 100,
+     "workContent": "頂層工作A",
+     "status": "處理中",
+     "ownerName": "甲",
+     "ownerId": "a",
+     "percentage": 40,
+     "deltaTime": 12,
+     "deltaPert": "0",
+     "spentTime": 12,
+     "unit": "H",
+     "hasSub": "Y",
+     "planStartDate": "",
+     "planEndDate": "",
+     "startDate": "2026-10-12",
+     "rmsFlag": "",
+     "projDirect": "",
+     "subItems": [
+      {
+       "workId": 101,
+       "workContent": "二層B",
+       "status": "處理中",
+       "ownerName": "甲",
+       "ownerId": "a",
+       "percentage": 45,
+       "deltaTime": 12,
+       "deltaPert": "?",
+       "spentTime": 12,
+       "unit": "H",
+       "hasSub": "Y",
+       "planStartDate": "",
+       "planEndDate": "",
+       "startDate": "2026-10-12",
+       "rmsFlag": "",
+       "projDirect": "",
+       "subItems": [
+        {
+         "workId": 102,
+         "workContent": "三層C",
+         "status": "處理中",
+         "ownerName": "甲",
+         "ownerId": "a",
+         "percentage": 20,
+         "deltaTime": 3,
+         "deltaPert": "?",
+         "spentTime": 3,
+         "unit": "H",
+         "hasSub": "N",
+         "planStartDate": "",
+         "planEndDate": "",
+         "startDate": "2026-10-12",
+         "rmsFlag": "",
+         "projDirect": "",
+         "subItems": [],
+         "isImportant": false
+        }
+       ],
+       "isImportant": false
+      }
+     ],
+     "isImportant": false
+    },
+    {
+     "workId": 200,
+     "workContent": "RMS 例行",
+     "status": "待執行",
+     "ownerName": "甲",
+     "ownerId": "a",
+     "percentage": 0,
+     "deltaTime": 0,
+     "deltaPert": "0",
+     "spentTime": 0,
+     "unit": "H",
+     "hasSub": "N",
+     "planStartDate": "",
+     "planEndDate": "",
+     "startDate": "2026-10-12",
+     "rmsFlag": "R",
+     "projDirect": "",
+     "subItems": [],
+     "isImportant": false
+    }
+   ]
+  },
+  "bob": {
+   "totalWorkHours": 10,
+   "totalOffHours": 0,
+   "items": [
+    {
+     "workId": 300,
+     "workContent": "Bob 工作",
+     "status": "已完成",
+     "ownerName": "甲",
+     "ownerId": "a",
+     "percentage": 100,
+     "deltaTime": 10,
+     "deltaPert": "0",
+     "spentTime": 10,
+     "unit": "H",
+     "hasSub": "N",
+     "planStartDate": "",
+     "planEndDate": "",
+     "startDate": "2026-10-12",
+     "rmsFlag": "",
+     "projDirect": "",
+     "subItems": [],
+     "isImportant": false
+    }
+   ]
+  }
+ }
+}

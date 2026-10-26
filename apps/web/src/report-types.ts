@@ -29,6 +29,7 @@ export type ScheduleEntry = {
   actualDate?: string | null;
   predecessors?: string[];
   workId?: number;
+  engineerProgress?: number;
 };
 
 export type ExternalDependency = {
