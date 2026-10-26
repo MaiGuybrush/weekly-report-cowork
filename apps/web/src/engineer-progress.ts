@@ -6,7 +6,7 @@ import { ShellState } from "./shell-state";
 
 export type EngineerWork = {
   workId: number; workContent: string; status: string; percentage: number; deltaTime: number;
-  rmsFlag?: string; absent?: boolean; isImportant?: boolean; managerComment?: string; lastComment?: string; subItems?: EngineerWork[];
+  ownerName?: string; planStartDate?: string; planEndDate?: string; rmsFlag?: string; absent?: boolean; isImportant?: boolean; managerComment?: string; lastComment?: string; subItems?: EngineerWork[];
 };
 export type EngineerFile = { results: Record<string, { totalWorkHours?: number; totalOffHours?: number; items: EngineerWork[] }> };
 

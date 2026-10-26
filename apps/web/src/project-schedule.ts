@@ -7,13 +7,15 @@ import { Gantt } from "./gantt";
 import { forecastError, gridRows, hasChildTasks, isPhaseOpen, moveTask, type TaskDrop } from "./gantt-model";
 import { ProjectHeader } from "./project-header";
 import { PredecessorSelect } from "./predecessor-select";
+import type { EngineerFile, EngineerWork } from "./engineer-progress";
 import { clampProgress, liveTasksOf, progressText } from "./project-progress";
 import { cancelEntry, evaluateSchedule, reactivateEntry, type ScheduleInput } from "./schedule-rules";
-import type { ExternalDependency, ScheduleEntry, SectionItem } from "./report-types";
+import { boundWorkIds, canBind, missingPlanDates, taskFromWork } from "./work-binding";
+import type { ExternalDependency, ScheduleEntry, SectionFile, SectionItem } from "./report-types";
 
 const KEYS: (keyof ScheduleEntry)[] = [
   "id", "kind", "name", "owner", "phaseId", "state", "planStart", "planEnd",
-  "progress", "forecastEnd", "actualStart", "actualEnd", "planDate", "actualDate", "predecessors", "evidenceLinks",
+  "progress", "forecastEnd", "actualStart", "actualEnd", "planDate", "actualDate", "predecessors", "workId",
 ];
 const KIND_LABELS = { phase: "階段", task: "關鍵任務", milestone: "里程碑" };
 
@@ -21,8 +23,6 @@ const KIND_LABELS = { phase: "階段", task: "關鍵任務", milestone: "里程�
 export function cleanSchedule(entries: ScheduleEntry[]): ScheduleEntry[] {
   return entries.map((e) => Object.fromEntries(KEYS.filter((k) => e[k] !== undefined).map((k) => [k, e[k]])) as ScheduleEntry);
 }
-
-type WorkItem = { workId: number; workContent: string; ownerName: string; status: string; subItems?: WorkItem[] };
 
 const toInput = (e: ScheduleEntry) => e as ScheduleInput;
 const toDeliveries = (project: SectionItem) =>
@@ -32,7 +32,7 @@ export function scheduleErrors(project: SectionItem) {
   const entries = project.schedule ?? [];
   const name = (id: string) => entries.find((e) => e.id === id)?.name || id;
   const title = project.title || "未命名專案";
-  const forecast = entries.flatMap((e) => forecastError(e) ?? []).map((m, i) => `「${title}」${m}`);
+  const forecast = entries.flatMap((e) => [forecastError(e), missingPlanDates(e)].flatMap((m) => m ?? [])).map((m, i) => `「${title}」${m}`);
   return [...evaluateSchedule(entries.map(toInput)).errors.map((x) => `「${title}」${name(x.entryId)} ← ${name(x.predecessorId)}：${x.message}`), ...forecast];
 }
 
@@ -65,6 +65,7 @@ export function scheduleErrors(project: SectionItem) {
                 </td>
                 <td class="name-cell">
                   <input data-field="entry-name" aria-label="名稱" [(ngModel)]="e.name" [disabled]="!editable() || e.state === 'cancelled'" />
+                  @if (e.workId != null) { <small class="num" data-bound-work [title]="'來源 #' + e.workId">已綁定 #{{ e.workId }}</small> }
                 </td>
                 <td>@if (e.kind === 'task') { <input aria-label="負責人/單位" [(ngModel)]="e.owner" [disabled]="!editable()" /> }</td>
                 <td>
@@ -101,9 +102,6 @@ export function scheduleErrors(project: SectionItem) {
                 <td>
                   @if (editable()) {
                     <div class="entry-actions">
-                      @if (e.kind === 'task' && e.state !== 'cancelled') {
-                        <button type="button" data-evidence-toggle title="佐證" aria-label="佐證" (click)="toggleEvidence(e.id)"><svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M10.5 5.5 6 10a1.4 1.4 0 0 0 2 2l5-5a3 3 0 0 0-4.2-4.2L4 7.6a4.6 4.6 0 0 0 6.5 6.5"/></svg><span class="num">{{ e.evidenceLinks?.length || 0 }}</span></button>
-                      }
                       @if (e.kind === 'phase' && e.state !== 'cancelled') { <button type="button" data-add-task title="＋任務" aria-label="＋任務" (click)="addTask(e.id)"><svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M8 3v10M3 8h10"/></svg></button> }
                       @if (e.state === 'cancelled') { <button type="button" title="重新啟用" aria-label="重新啟用" (click)="reactivate(e.id)"><svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 8a5 5 0 1 0 1.8-3.8M3 2.5v3h3"/></svg></button> }
                       @else { <button type="button" title="取消項目" aria-label="取消項目" (click)="cancel(e.id)"><svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="8" cy="8" r="5.5"/><path d="m4 4 8 8"/></svg></button> }
@@ -112,28 +110,6 @@ export function scheduleErrors(project: SectionItem) {
                   }
                 </td>
               </tr>
-              @if (editable() && e.kind === 'task' && e.state !== 'cancelled' && evidenceOpen === e.id) {
-                <tr class="evidence-row"><td colspan="10">
-                  <div class="evidence-panel" data-evidence-panel>
-                    @for (l of e.evidenceLinks; track l.workId) {
-                      <div class="evidence-link">
-                        <span>#{{ l.workId }}</span>
-                        <input data-field="evidence-summary" placeholder="摘要" [(ngModel)]="l.summary" />
-                        <button type="button" (click)="unlink(e, l.workId)">移除</button>
-                      </div>
-                    }
-                    @for (w of unlinked(e); track w.workId) {
-                      <div class="evidence-candidate" [attr.data-work]="w.workId">
-                        <button type="button" data-pick (click)="link(e, w.workId)">挑選</button>
-                        #{{ w.workId }} {{ w.workContent }}（{{ w.ownerName }}・{{ w.status }}）
-                        @for (c of w.subItems; track c.workId) { <small>　└ #{{ c.workId }} {{ c.workContent }}</small> }
-                      </div>
-                    }
-                    <label>手動輸入 workId <input type="number" data-field="manual-work-id" [(ngModel)]="manualId" /></label>
-                    <button type="button" data-manual-add [disabled]="!manualId" (click)="link(e, manualId!); manualId = null">加入</button>
-                  </div>
-                </td></tr>
-              }
               @for (msg of entryErrors(e.id); track msg) { <tr class="error-row"><td colspan="10"><p class="error" role="alert">{{ msg }}</p></td></tr> }
             }
           </tbody>
@@ -143,7 +119,28 @@ export function scheduleErrors(project: SectionItem) {
         @if (editable()) {
           <p>
             @for (k of KINDS; track k) { <button type="button" [attr.data-add-entry]="k" (click)="add(k)">新增{{ KIND_LABELS[k] }}</button> }
+            <button type="button" data-open-task-picker (click)="openPicker()">從工程師工作挑選任務</button>
           </p>
+          @if (picking) {
+            <div class="evidence-panel" data-task-picker>
+              <label>歸屬階段
+                <select data-field="pick-phase" [(ngModel)]="pickPhase">
+                  <option [ngValue]="null">專案直屬</option>
+                  @for (ph of livePhases(); track ph.id) { <option [ngValue]="ph.id">{{ ph.name || "未命名階段" }}</option> }
+                </select></label>
+              @if (pickError) { <p class="err" role="alert" data-picker-error>{{ pickError }}</p> }
+              @if (focus.length) { <button type="button" data-picker-back (click)="back()">← 上一層</button> }
+              @for (w of focusList(); track w.workId) {
+                <div class="evidence-candidate" [attr.data-pick-row]="w.workId">
+                  <span class="num">#{{ w.workId }}</span> {{ w.workContent }} <span class="num">{{ w.ownerName }}・{{ w.status }}・{{ w.percentage }}%</span>
+                  @if (!canBind(w.workId, bound())) { <em data-bound>已綁定</em> }
+                  @else { <button type="button" data-pick (click)="pick(w)">挑選</button> }
+                  @if (w.subItems?.length && w !== focus.at(-1)) { <button type="button" data-picker-children (click)="drill(w)">看子工作</button> }
+                </div>
+              }
+              <button type="button" data-close-picker (click)="picking = false">關閉</button>
+            </div>
+          }
         }
       </details>
 
@@ -197,10 +194,17 @@ export class ProjectSchedule {
   private host = inject<ElementRef<HTMLElement>>(ElementRef);
   project = input.required<SectionItem>();
   week = input("");
-  evidenceOpen: string | null = null;
-  manualId: number | null = null;
-  work: WorkItem[] = [];
-  private workLoaded = false;
+  /** Section file whose engineer summary feeds the picker. */
+  file = input("");
+  /** All section files of the week; a workId may be bound only once across them. */
+  all = input<Record<string, Partial<SectionFile>>>({});
+  readonly canBind = canBind;
+  bound = () => boundWorkIds(["s1", "s2", "s3"].map((f) => this.all()[f]));
+  picking = false;
+  pickError = "";
+  pickPhase: string | null = null;
+  engineerWorks: EngineerWork[] = [];
+  focus: EngineerWork[] = [];
   editable = input(false);
   /** Publication layout: title line, gantt and a read-only deliveries table; no schedule forms. */
   document = input(false);
@@ -286,7 +290,7 @@ export class ProjectSchedule {
     if (this.memo?.key !== key) this.memo = { key, value: evaluateSchedule((p.schedule ?? []).map(toInput), toDeliveries(p), this.baseDate()) };
     return this.memo.value;
   };
-  invalid = () => this.evaluated().errors.length > 0 || (this.project().schedule ?? []).some((e) => !!forecastError(e));
+  invalid = () => this.evaluated().errors.length > 0 || (this.project().schedule ?? []).some((e) => !!forecastError(e) || !!missingPlanDates(e));
   others = (e: ScheduleEntry) => (this.project().schedule ?? []).filter((o) => o.id !== e.id && o.state !== "cancelled");
   // option arrays are input bindings, so keep identity stable until names/ids actually change (NG0100).
   private optionCache = new Map<string, { key: string; value: ScheduleEntry[] }>();
@@ -302,7 +306,7 @@ export class ProjectSchedule {
     const entries = this.project().schedule ?? [];
     const name = (x: string) => entries.find((e) => e.id === x)?.name || x;
     const own = entries.find((e) => e.id === id);
-    return [...this.evaluated().errors.filter((x) => x.entryId === id).map((x) => `前置項目「${name(x.predecessorId)}」：${x.message}`), ...(own ? [forecastError(own)] : []).flatMap((m) => m ?? [])];
+    return [...this.evaluated().errors.filter((x) => x.entryId === id).map((x) => `前置項目「${name(x.predecessorId)}」：${x.message}`), ...(own ? [forecastError(own), missingPlanDates(own)] : []).flatMap((m) => m ?? [])];
   };
   clamp = clampProgress;
   progressOf = (e: ScheduleEntry) => progressText(this.project().schedule ?? [], e);
@@ -316,21 +320,32 @@ export class ProjectSchedule {
   statesOf = (kind: ScheduleEntry["kind"]) =>
     kind === "milestone" ? [["pending", "待達成"], ["achieved", "已達成"]] : [["open", "開放"], ["in-progress", "進行中"], ["completed", "完成"]];
 
-  async toggleEvidence(id: string) {
-    this.evidenceOpen = this.evidenceOpen === id ? null : id;
-    if (this.workLoaded || !this.week()) return;
-    this.workLoaded = true;
+  livePhases = () => (this.project().schedule ?? []).filter((e) => e.kind === "phase" && e.state !== "cancelled");
+  focusList = (): EngineerWork[] => {
+    const f = this.focus.at(-1);
+    return f ? [f, ...(f.subItems ?? [])] : this.engineerWorks;
+  };
+  drill(work: EngineerWork) { this.focus.push(work); }
+  back() { this.focus.pop(); }
+  async openPicker() {
+    this.picking = true;
+    this.pickError = "";
+    this.pickPhase = null;
+    this.focus = [];
+    this.engineerWorks = [];
     try {
-      const data = await firstValueFrom(this.http.get<{ results: Record<string, { items: WorkItem[] }> }>(`/api/weeks/${this.week()}/engineer-work`));
-      this.work = Object.values(data.results ?? {}).flatMap((r) => r.items ?? []);
-    } catch { /* 404 or unreadable: manual entry still works */ }
+      const data = await firstValueFrom(this.http.get<EngineerFile>(`/api/weeks/${this.week()}/engineer/${this.file()}`));
+      this.engineerWorks = Object.values(data.results).flatMap((r) => r.items);
+    } catch (e: any) {
+      this.pickError = e?.status === 404 ? "本週尚無工程師工作彙整，請先到「工程師進度」上傳" : `載入失敗：${e?.error?.error ?? e?.status ?? "未知錯誤"}`;
+    }
     this.changes.detectChanges();
   }
-  unlinked = (e: ScheduleEntry) => this.work.filter((w) => !e.evidenceLinks?.some((l) => l.workId === w.workId));
-  link(e: ScheduleEntry, workId: number) {
-    if (!e.evidenceLinks?.some((l) => l.workId === workId)) (e.evidenceLinks ??= []).push({ workId, summary: "" });
+  pick(work: EngineerWork) {
+    if (!canBind(work.workId, this.bound())) return;
+    (this.project().schedule ??= []).push(taskFromWork(work, this.pickPhase));
+    this.changes.detectChanges();
   }
-  unlink(e: ScheduleEntry, workId: number) { e.evidenceLinks = e.evidenceLinks?.filter((l) => l.workId !== workId); }
 
   add(kind: ScheduleEntry["kind"], phaseId: string | null = null) {
     const p = this.project();

@@ -28,7 +28,7 @@ export type ScheduleEntry = {
   planDate?: string | null;
   actualDate?: string | null;
   predecessors?: string[];
-  evidenceLinks?: { workId: number; summary: string }[];
+  workId?: number;
 };
 
 export type ExternalDependency = {

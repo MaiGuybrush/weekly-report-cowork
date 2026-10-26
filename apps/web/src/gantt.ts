@@ -130,8 +130,8 @@ import { expectedProgress, progressStatus, progressText } from "./project-progre
               @if (entry.externalNotices?.length) {
                 <small class="gantt-ext-icon" [title]="entry.externalNotices![0].message">🌐</small>
               }
-              @if (entry.kind === 'task' && entry.evidenceLinks?.length) {
-                <span class="gantt-evidence-chip" [title]="evidenceTitle(entry)">📎 {{ entry.evidenceLinks!.length }}</span>
+              @if (entry.kind === 'task' && entry.workId != null) {
+                <span class="gantt-evidence-chip" [title]="'來源 #' + entry.workId">已綁定</span>
               }
             </div>
 
@@ -261,7 +261,6 @@ export class Gantt {
     this.phaseToggles.set(next);
   }
 
-  evidenceTitle = (e: GanttEntry) => (e.evidenceLinks ?? []).map((l) => `#${l.workId} ${l.summary}`.trim()).join("\n");
   /** Marker for 計畫應有進度: sits on the plan bar at the base date (clamped to the plan range). */
   expected = (e: GanttEntry) => {
     const pct = expectedProgress(e, this.today());

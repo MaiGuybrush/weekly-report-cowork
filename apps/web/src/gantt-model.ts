@@ -16,7 +16,7 @@ export type GanttEntry = {
   forecastEnd?: string | null;
   warnings?: { message: string }[];
   externalNotices?: { message: string }[];
-  evidenceLinks?: { workId: number; summary: string }[];
+  workId?: number;
   /** Finish-to-start: ids that must finish before this entry starts; successors is the derived reverse. */
   predecessors?: string[];
   successors?: string[];

@@ -21,7 +21,7 @@ export function pruneRefLinks(item: SectionItem) {
   template: `<section [attr.data-file]="file()">
       @if (tab() === "projects") {
         @for (p of itemsOf("projects"); track p.id) {
-          <app-project-schedule [week]="week()" [project]="p" [editable]="editable()" />
+          <app-project-schedule [week]="week()" [file]="file()" [all]="all()" [project]="p" [editable]="editable()" />
           @if (editable()) { <button type="button" (click)="remove(p)">刪除專案</button> }
         } @empty {
           <div class="empty" data-empty>{{ editable() ? "尚無專案，按下方「新增專案」開始。" : "尚無專案" }}</div>

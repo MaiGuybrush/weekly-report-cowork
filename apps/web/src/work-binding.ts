@@ -1,9 +1,10 @@
 import type { EngineerWork } from "./engineer-progress";
-import type { NonProjectSection, SectionItem } from "./report-types";
+import type { NonProjectSection, ScheduleEntry, SectionItem } from "./report-types";
 
 /** A workId may back only one item site-wide, so collect the ids already taken across every section file. */
 export function boundWorkIds(files: ({ items?: SectionItem[] } | undefined)[]): Set<number> {
-  const ids = files.flatMap((f) => f?.items ?? []).flatMap((i) => (i.workId == null ? [] : [i.workId]));
+  const items = files.flatMap((f) => f?.items ?? []);
+  const ids = [...items, ...items.flatMap((i) => i.schedule ?? [])].flatMap((x) => (x.workId == null ? [] : [x.workId]));
   return new Set(ids);
 }
 
@@ -16,3 +17,16 @@ export function itemFromWork(work: EngineerWork, section: NonProjectSection): Se
     workId: work.workId, engineerProgress: work.percentage, engineerStatus: work.status,
   };
 }
+
+/** New key task bound to the picked work. Plan dates come only from planStartDate/planEndDate (never dueDate); blanks stay null and are flagged by missingPlanDates. */
+export function taskFromWork(work: EngineerWork, phaseId: string | null): ScheduleEntry {
+  return {
+    id: crypto.randomUUID(), kind: "task", name: work.workContent, owner: work.ownerName ?? "", phaseId, state: "open",
+    planStart: work.planStartDate || null, planEnd: work.planEndDate || null, actualStart: null, actualEnd: null,
+    predecessors: [], workId: work.workId,
+  };
+}
+
+/** A bound task must carry both plan dates; manual tasks are not held to this. */
+export const missingPlanDates = (e: Pick<ScheduleEntry, "kind" | "planStart" | "planEnd"> & { workId?: number }) =>
+  e.kind === "task" && e.workId != null && (!e.planStart || !e.planEnd) ? "此任務綁定工程師工作，請填寫計畫起迄" : undefined;

@@ -31,3 +31,28 @@ test('parent and child each bind once; parent progress ignores children', () => 
   assert.equal(canBind(101, bound), false);
   assert.equal(itemFromWork(parent, 'incidents').engineerProgress, 40);
 });
+
+import { missingPlanDates, taskFromWork } from '../apps/web/src/work-binding.ts';
+
+test('project task prefills name, owner and plan dates from the work; dueDate is ignored', () => {
+  const w = { ...work, ownerName: '甲', planStartDate: '2026-10-01', planEndDate: '2026-10-20', dueDate: '2026-12-01' };
+  const t = taskFromWork(w, 'ph1');
+  assert.deepEqual([t.kind, t.name, t.owner, t.phaseId, t.workId, t.planStart, t.planEnd], ['task', '二層B', '甲', 'ph1', 101, '2026-10-01', '2026-10-20']);
+  assert.equal(missingPlanDates(t), undefined);
+  assert.equal(taskFromWork(w, null).phaseId, null);
+});
+
+test('missing plan dates are flagged on bound tasks only', () => {
+  const t = taskFromWork({ ...work, planStartDate: '', planEndDate: undefined, dueDate: '2026-12-01' }, 'ph1');
+  assert.equal(t.planStart, null);
+  assert.equal(t.planEnd, null);
+  assert.match(missingPlanDates(t), /計畫起迄/);
+  assert.equal(missingPlanDates({ kind: 'task', planStart: null, planEnd: null }), undefined);
+});
+
+test('workId uniqueness covers project tasks and section items together', () => {
+  const project = { items: [{ id: 'p', section: 'projects', title: '', content: '', details: {}, schedule: [taskFromWork(work, null)] }] };
+  const bound = boundWorkIds([project, file(100)]);
+  assert.deepEqual([...bound].sort(), [100, 101]);
+  assert.equal(canBind(101, bound), false);
+});
