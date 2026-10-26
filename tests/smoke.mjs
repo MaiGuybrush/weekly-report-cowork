@@ -139,7 +139,7 @@ try {
   const up1 = await upload('H1', 'CIM2_ENG_WeeklyReport_261014_SEC1.json', annotated('CIM2_ENG_WeeklyReport_261014_SEC1.json', '匯入評語')); assert.equal(up1.status, 201); assert.equal(up1.body.week, '2026-W42');
   assert.match(git(remote, 'log', '--format=%s', 'master'), /2026-W42\/engineer-s1: upload by H1/);
   // same week again merges by workId: new values win, absent works kept and flagged, sub levels merged
-  assert.equal((await upload('H1', 'CIM2_ENG_WeeklyReport_261015_SEC1.json')).status, 201);
+  assert.equal((await upload('H1', 'CIM2_ENG_WeeklyReport_261015_SEC1.json', annotated('CIM2_ENG_WeeklyReport_261015_SEC1.json', '重傳評語'))).status, 201);
   const merged = (await call('/api/weeks/2026-W42/engineer/s1', 'H1')).body.results;
   const a = merged.alice.items;
   assert.deepEqual(a.map(i => [i.workId, i.percentage, !!i.absent]), [[100, 55, false], [200, 0, true]]);
@@ -147,9 +147,9 @@ try {
   assert.deepEqual(a[0].subItems[0].subItems.map(i => [i.workId, !!i.absent]), [[102, true]]);
   assert.equal(a[0].subItems[0].subItems[0].deltaPert, '?');
   assert.equal(a[1].rmsFlag, 'R');
-  // re-upload (isImportant false, no comment) keeps what the site holds; last week's comment shows beside the same workId
+  // re-upload replaces an import nobody touched on the site (and only that); last week's comment shows beside the same workId
   const first42 = merged.alice.items[0];
-  assert.deepEqual([first42.isImportant, first42.managerComment, first42.lastComment], [true, '匯入評語', 'W41評語']);
+  assert.deepEqual([first42.isImportant, first42.managerComment, first42.lastComment], [true, '重傳評語', 'W41評語']);
   const put = (user, work, body, week = '2026-W42', section = 's1') => call(`/api/weeks/${week}/engineer/${section}/works/${work}`, user, 'PUT', body);
   assert.equal((await put('H1', 101, { isImportant: true, managerComment: '子項評語' })).status, 204);
   assert.equal((await put('H1', 100, { isImportant: false, managerComment: '' })).status, 204);
@@ -173,6 +173,15 @@ try {
   assert.equal((await call('/api/weeks/2026-W42/engineer/s2', 'H2')).status, 404);
   assert.equal((await call('/api/weeks/2026-W42/engineer/s3', 'G')).status, 404);
   assert.equal((await call('/api/weeks/2026-W42/engineer/cross', 'G')).status, 400);
+  // publication snapshot carries no engineer data or annotations; next week starts clean but shows last week's comment
+  const pub = await call('/api/weeks/2026-W42/publications', 'G', 'POST'); assert.equal(pub.status, 201);
+  assert.doesNotMatch(JSON.stringify((await call(`/api/publications/2026-W42/${pub.body.version}`, 'G')).body), /isImportant|managerComment|lastComment|engineer/);
+  assert.ok(git(remote, 'ls-tree', '--name-only', 'master', `publications/2026-W42/v${pub.body.version}/`).split(/\r?\n/).filter(Boolean).every(n => /\/(s1|s2|s3|cross)\.json$/.test(n)));
+  assert.equal((await call('/api/weeks', 'G', 'POST')).body.week, '2026-W43');
+  assert.equal((await call('/api/weeks/2026-W43/engineer/s1', 'H1')).status, 404);
+  assert.equal((await upload('H1', 'CIM2_ENG_WeeklyReport_261021_SEC1.json', intake('CIM2_ENG_WeeklyReport_261015_SEC1.json'))).status, 201);
+  const w43 = (await call('/api/weeks/2026-W43/engineer/s1', 'H1')).body.results.alice.items[0].subItems[0];
+  assert.deepEqual([!!w43.isImportant, w43.managerComment ?? '', w43.lastComment], [false, '', '子項評語']);
   console.log('API smoke passed');
 } catch (error) {
   console.error(logs);

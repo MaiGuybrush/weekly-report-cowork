@@ -115,7 +115,9 @@ export class EngineerProgress {
       work.isImportant = isImportant;
       work.managerComment = managerComment;
     } catch (e: any) {
-      this.error = `儲存標註失敗：${e?.error?.error ?? e?.status ?? "未知錯誤"}`;
+      const reason = e?.error?.error ?? e?.status ?? "未知錯誤";
+      await this.load(this.week(), this.file()); // drop the unsaved input so the page matches the server
+      this.error = `儲存標註失敗：${reason}`;
     }
     this.changes.detectChanges();
   }

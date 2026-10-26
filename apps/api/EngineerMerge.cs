@@ -45,9 +45,10 @@ public static class EngineerMerge
             var key = item["workId"]?.ToJsonString();
             JsonObject? previous = null;
             if (key is not null && oldById.TryGetValue(key, out previous)) seen.Add(key);
-            // Site annotations win over the upload's once the work is known.
-            foreach (var field in new[] { "isImportant", "managerComment" })
-                if (previous?[field] is { } kept) copy[field] = kept.DeepClone();
+            // Annotations edited on the site win over the upload's; an untouched import is replaced by the new upload.
+            if (previous?["siteAnnotated"]?.GetValue<bool>() == true)
+                foreach (var field in new[] { "isImportant", "managerComment", "siteAnnotated" })
+                    if (previous[field] is { } kept) copy[field] = kept.DeepClone();
             copy["subItems"] = MergeItems(previous?["subItems"] as JsonArray, item["subItems"] as JsonArray);
             merged.Add(copy);
         }
@@ -60,7 +61,7 @@ public static class EngineerMerge
     public static bool Annotate(JsonObject file, long workId, bool important, string comment)
     {
         foreach (var work in AllWorks(file))
-            if (work["workId"]?.GetValue<long>() == workId) { work["isImportant"] = important; work["managerComment"] = comment; return true; }
+            if (work["workId"]?.GetValue<long>() == workId) { work["isImportant"] = important; work["managerComment"] = comment; work["siteAnnotated"] = true; return true; }
         return false;
     }
 
