@@ -30,6 +30,13 @@ export type ScheduleEntry = {
   predecessors?: string[];
   workId?: number;
   engineerProgress?: number;
+  engineerStatus?: string;
+  /** Unconfirmed auto-sync: the state/progress this task had before the engineer upload changed it. Never in the published document. */
+  pendingSync?: { state: ScheduleEntry["state"]; progress?: number | null; forecastEnd?: string | null };
+  /** The head set progress by hand: auto-sync is paused until switched back to following the engineer. */
+  progressOverride?: boolean;
+  /** Engineer status/percentage of an upload the head reverted; that same upload never overwrites again. */
+  rejectedSync?: { status?: string; percentage: number };
 };
 
 export type ExternalDependency = {

@@ -34,8 +34,27 @@ export const missingPlanDates = (e: Pick<ScheduleEntry, "kind" | "planStart" | "
 const worksById = (works: EngineerWork[]): Map<number, EngineerWork> =>
   new Map(works.flatMap((w) => [[w.workId, w] as const, ...worksById(w.subItems ?? [])]));
 
+/** Engineer status -> key task state. 中止 is absent on purpose: it only raises a notice (see abortNotice), the head decides. */
+export const STATUS_TO_STATE: Record<string, ScheduleEntry["state"]> = {
+  已完成: "completed", 處理中: "in-progress", 簽核中: "in-progress", 待發佈: "in-progress", 待執行: "open",
+};
+
+/** Moves a bound task to the engineer's state/progress, remembering the first original in pendingSync. Returns whether anything changed. */
+function applyToTask(t: ScheduleEntry, status: string | undefined, percentage: number): boolean {
+  const state = STATUS_TO_STATE[status ?? ""];
+  if (!state || t.state === "cancelled") return false;
+  const progress = state === "in-progress" ? percentage : undefined; // progress only means something while in progress (see setState)
+  if (t.state === state && (t.progress ?? undefined) === progress) return false;
+  t.pendingSync ??= { state: t.state, progress: t.progress, forecastEnd: t.forecastEnd };
+  t.state = state;
+  t.progress = progress;
+  if (state === "completed") t.forecastEnd = undefined;
+  return true;
+}
+
 /**
- * Pulls the engineer's latest percentage (and status) into every bound item and key task. Works the upload lacks (absent) keep the last snapshot.
+ * Pulls the engineer's latest percentage/status into every bound item and key task. Works the upload lacks (absent) keep the last snapshot.
+ * Key tasks follow the status table and leave a pendingSync record, unless the head overrode progress or reverted this very upload.
  * Mutates in place; returns how many bound entries were updated. The engineer file's own deltaPert is never read.
  */
 export function syncBound(items: SectionItem[], works: EngineerWork[]): number {
@@ -45,12 +64,56 @@ export function syncBound(items: SectionItem[], works: EngineerWork[]): number {
     const work = target.workId == null ? undefined : byId.get(target.workId);
     if (!work || work.absent) continue;
     target.engineerProgress = work.percentage;
-    // a task keeps progress only while in progress (see setState); other states just record the snapshot
-    if ("kind" in target) { if (target.state === "in-progress") target.progress = work.percentage; } else target.engineerStatus = work.status;
+    target.engineerStatus = work.status;
+    if ("kind" in target) {
+      const rejected = target.rejectedSync;
+      if (rejected && rejected.status === work.status && rejected.percentage === work.percentage) { updated++; continue; }
+      delete target.rejectedSync;
+      if (!target.progressOverride) applyToTask(target, work.status, work.percentage);
+    }
     updated++;
   }
   return updated;
 }
+
+/** Keep the auto change. */
+export const confirmSync = (t: ScheduleEntry) => { delete t.pendingSync; };
+
+/** Restore the original state/progress; the upload that caused the change will not overwrite again. */
+export function revertSync(t: ScheduleEntry) {
+  const p = t.pendingSync;
+  if (!p) return;
+  t.state = p.state;
+  t.progress = p.progress;
+  t.forecastEnd = p.forecastEnd;
+  t.rejectedSync = { status: t.engineerStatus, percentage: t.engineerProgress ?? 0 };
+  delete t.pendingSync;
+}
+
+/** Progress typed in by hand on a bound task pauses auto-sync and supersedes any unconfirmed change. */
+export function overrideProgress(t: ScheduleEntry) {
+  if (t.workId == null) return;
+  t.progressOverride = true;
+  delete t.pendingSync;
+}
+
+/** Back to following the engineer: applies the last synced snapshot right away. */
+export function followEngineer(t: ScheduleEntry) {
+  delete t.progressOverride;
+  delete t.rejectedSync;
+  if (t.engineerProgress != null) applyToTask(t, t.engineerStatus, t.engineerProgress);
+}
+
+/** Unconfirmed auto changes across items (project key tasks). */
+export const pendingCount = (items: SectionItem[] = []) => items.reduce((n, i) => n + (i.schedule ?? []).filter((e) => e.pendingSync).length, 0);
+
+/** Shown while paused: the engineer's newest progress when it differs from the head's own. */
+export const followHint = (t: ScheduleEntry) =>
+  t.progressOverride && t.engineerProgress != null && t.engineerProgress !== (t.progress ?? undefined) ? `工程師最新進度 ${t.engineerProgress}%` : "";
+
+export const abortNotice = (t: ScheduleEntry) => (t.workId != null && t.engineerStatus === "中止" && t.state !== "cancelled" ? "工程師標示中止" : "");
+
+export const missingActualEnd = (t: ScheduleEntry) => (t.kind === "task" && t.workId != null && t.state === "completed" && !t.actualEnd ? "缺實際結束日" : "");
 
 /** workId -> progress recorded in a published snapshot (items and key tasks alike). */
 export function baselineOf(files: ({ items?: SectionItem[] } | undefined)[]): Map<number, number> {

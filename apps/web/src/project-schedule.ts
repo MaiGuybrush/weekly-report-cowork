@@ -10,12 +10,12 @@ import { PredecessorSelect } from "./predecessor-select";
 import type { EngineerFile, EngineerWork } from "./engineer-progress";
 import { clampProgress, liveTasksOf, progressText } from "./project-progress";
 import { cancelEntry, evaluateSchedule, reactivateEntry, type ScheduleInput } from "./schedule-rules";
-import { boundWorkIds, canBind, deltaText, missingPlanDates, taskFromWork } from "./work-binding";
+import { abortNotice, boundWorkIds, canBind, confirmSync, deltaText, followEngineer, followHint, missingActualEnd, missingPlanDates, overrideProgress, revertSync, taskFromWork } from "./work-binding";
 import type { ExternalDependency, ScheduleEntry, SectionFile, SectionItem } from "./report-types";
 
 const KEYS: (keyof ScheduleEntry)[] = [
   "id", "kind", "name", "owner", "phaseId", "state", "planStart", "planEnd",
-  "progress", "forecastEnd", "actualStart", "actualEnd", "planDate", "actualDate", "predecessors", "workId", "engineerProgress",
+  "progress", "forecastEnd", "actualStart", "actualEnd", "planDate", "actualDate", "predecessors", "workId", "engineerProgress", "engineerStatus", "pendingSync", "progressOverride", "rejectedSync",
 ];
 const KIND_LABELS = { phase: "階段", task: "關鍵任務", milestone: "里程碑" };
 
@@ -66,6 +66,17 @@ export function scheduleErrors(project: SectionItem) {
                 <td class="name-cell">
                   <input data-field="entry-name" aria-label="名稱" [(ngModel)]="e.name" [disabled]="!editable() || e.state === 'cancelled'" />
                   @if (e.workId != null) { <small class="num" data-bound-work [title]="'來源 #' + e.workId">已綁定 #{{ e.workId }}</small>@if (deltaText(e.workId, e.engineerProgress, baseline()); as d) { <small class="num" data-progress-delta>（{{ d }}）</small> } }
+                  @if (e.pendingSync; as p) {
+                    <span class="sync-badge" data-sync-badge>已依工程師更新（原：{{ stateLabel(p.state) }}・{{ originalProgress(e) }}）
+                      @if (editable()) { <button type="button" data-sync-confirm (click)="confirmSync(e)">確認</button><button type="button" data-sync-revert (click)="revertSync(e)">還原</button> }
+                    </span>
+                  }
+                  @if (abortNotice(e); as n) { <small class="err" data-abort-notice>{{ n }}</small> }
+                  @if (missingActualEnd(e); as n) { <small class="err" data-missing-actual-end>{{ n }}</small> }
+                  @if (e.progressOverride) {
+                    <small class="num" data-follow-hint>{{ followHint(e) }}</small>
+                    @if (editable()) { <button type="button" data-follow-engineer (click)="followEngineer(e)">改回跟隨工程師</button> }
+                  }
                 </td>
                 <td>@if (e.kind === 'task') { <input aria-label="負責人/單位" [(ngModel)]="e.owner" [disabled]="!editable()" /> }</td>
                 <td>
@@ -78,7 +89,7 @@ export function scheduleErrors(project: SectionItem) {
                 <td>
                   @if (e.kind !== 'milestone' && e.state !== 'cancelled') {
                     @if (editable() && e.state === 'in-progress' && !hasLiveChildren(e)) {
-                      <input type="number" min="0" max="100" step="1" aria-label="進度" data-field="entry-progress" [ngModel]="e.progress ?? null" (ngModelChange)="e.progress = clamp($event)" />
+                      <input type="number" min="0" max="100" step="1" aria-label="進度" data-field="entry-progress" [ngModel]="e.progress ?? null" (ngModelChange)="e.progress = clamp($event); overrideProgress(e)" />
                     } @else { <span class="num" data-progress-text>{{ progressOf(e) }}</span> }
                   }
                 </td>
@@ -196,6 +207,13 @@ export class ProjectSchedule {
   week = input("");
   baseline = input(new Map<number, number>());
   deltaText = deltaText;
+  readonly confirmSync = confirmSync;
+  readonly revertSync = revertSync;
+  readonly followEngineer = followEngineer;
+  readonly followHint = followHint;
+  readonly abortNotice = abortNotice;
+  readonly missingActualEnd = missingActualEnd;
+  readonly overrideProgress = overrideProgress;
   /** Section file whose engineer summary feeds the picker. */
   file = input("");
   /** All section files of the week; a workId may be bound only once across them. */
@@ -319,6 +337,8 @@ export class ProjectSchedule {
     if (state === "completed") e.forecastEnd = undefined; // 預估完工日 only means something until the item is done
     e.progress = undefined; // progress only means something while in progress; a new state starts blank
   }
+  stateLabel = (state: ScheduleEntry["state"]) => ({ open: "開放", "in-progress": "進行中", completed: "完成", cancelled: "已取消", pending: "待達成", achieved: "已達成" })[state];
+  originalProgress = (e: ScheduleEntry) => progressText(this.project().schedule ?? [], { ...e, state: e.pendingSync!.state, progress: e.pendingSync!.progress }) || "—";
   statesOf = (kind: ScheduleEntry["kind"]) =>
     kind === "milestone" ? [["pending", "待達成"], ["achieved", "已達成"]] : [["open", "開放"], ["in-progress", "進行中"], ["completed", "完成"]];
 

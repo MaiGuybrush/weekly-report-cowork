@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { boundWorkIds, canBind, itemFromWork } from '../apps/web/src/work-binding.ts';
+import { abortNotice, baselineOf, boundWorkIds, canBind, confirmSync, deltaText, followEngineer, followHint, itemFromWork, missingActualEnd, overrideProgress, pendingCount, previousWeek, revertSync, syncBound } from '../apps/web/src/work-binding.ts';
 
 const work = { workId: 101, workContent: '二層B', status: '處理中', percentage: 30, deltaTime: 1, managerComment: '看一下', subItems: [{ workId: 102, percentage: 99 }] };
 const file = (...ids) => ({ items: ids.map((workId) => ({ id: String(workId), section: 'incidents', title: '', content: '', details: {}, workId })).concat([{ id: 'x', section: 'incidents', title: '', content: '', details: {} }]) });
@@ -57,7 +57,6 @@ test('workId uniqueness covers project tasks and section items together', () => 
   assert.equal(canBind(101, bound), false);
 });
 
-import { baselineOf, deltaText, previousWeek, syncBound } from '../apps/web/src/work-binding.ts';
 
 const bound = () => [{ id: 'i', section: 'operations', title: '', content: '', details: {}, workId: 101, engineerProgress: 10, engineerStatus: '待執行',
   schedule: [{ id: 't', kind: 'task', state: 'in-progress', workId: 102, engineerProgress: 20, progress: 20 }] }];
@@ -90,4 +89,80 @@ test('previousWeek crosses year boundaries on ISO weeks', () => {
   assert.equal(previousWeek('2026-W43'), '2026-W42');
   assert.equal(previousWeek('2026-W01'), '2025-W52');
   assert.equal(previousWeek('2021-W01'), '2020-W53');
+});
+
+
+const taskItem = (t = {}) => [{ id: 'p', section: 'projects', title: '', content: '', details: {}, schedule: [{ id: 't', kind: 'task', state: 'open', workId: 7, planStart: null, planEnd: null, actualStart: null, actualEnd: null, ...t }] }];
+const upload = (status, percentage) => [{ workId: 7, status, percentage }];
+
+test('status table maps engineer status to task state; 已完成 completes without an actual end', () => {
+  for (const [status, state] of [['處理中', 'in-progress'], ['簽核中', 'in-progress'], ['待發佈', 'in-progress'], ['待執行', 'open'], ['已完成', 'completed']]) {
+    const items = taskItem({ state: state === 'open' ? 'completed' : 'open' });
+    syncBound(items, upload(status, 60));
+    assert.equal(items[0].schedule[0].state, state, status);
+  }
+  const items = taskItem({ state: 'in-progress', progress: 40 });
+  syncBound(items, upload('已完成', 100));
+  assert.equal(items[0].schedule[0].actualEnd, null);
+  assert.equal(missingActualEnd(items[0].schedule[0]), '缺實際結束日');
+});
+
+test('中止 only raises a notice and never changes the task', () => {
+  const items = taskItem({ state: 'in-progress', progress: 40 });
+  syncBound(items, upload('中止', 40));
+  const t = items[0].schedule[0];
+  assert.deepEqual([t.state, t.pendingSync], ['in-progress', undefined]);
+  assert.equal(abortNotice(t), '工程師標示中止');
+});
+
+test('badge keeps the first original across uploads; confirm clears it and the count', () => {
+  const items = taskItem({ state: 'open' });
+  syncBound(items, upload('處理中', 30));
+  syncBound(items, upload('處理中', 50));
+  const t = items[0].schedule[0];
+  assert.deepEqual(t.pendingSync, { state: 'open', progress: undefined, forecastEnd: undefined });
+  assert.equal(pendingCount(items), 1);
+  confirmSync(t);
+  assert.equal(pendingCount(items), 0);
+  assert.equal(t.progress, 50);
+});
+
+test('revert restores the original and the same upload no longer overwrites; a new one does', () => {
+  const items = taskItem({ state: 'in-progress', progress: 20 });
+  syncBound(items, upload('已完成', 100));
+  const t = items[0].schedule[0];
+  revertSync(t);
+  assert.deepEqual([t.state, t.progress, t.pendingSync], ['in-progress', 20, undefined]);
+  syncBound(items, upload('已完成', 100));
+  assert.deepEqual([t.state, t.progress, t.pendingSync], ['in-progress', 20, undefined]);
+  syncBound(items, upload('處理中', 80));
+  assert.deepEqual([t.state, t.progress], ['in-progress', 80]);
+});
+
+test('manual progress pauses sync, shows the engineer latest, and following resumes', () => {
+  const items = taskItem({ state: 'in-progress', progress: 20 });
+  const t = items[0].schedule[0];
+  t.progress = 35;
+  overrideProgress(t);
+  syncBound(items, upload('處理中', 70));
+  assert.deepEqual([t.progress, t.engineerProgress, t.pendingSync], [35, 70, undefined]);
+  assert.equal(followHint(t), '工程師最新進度 70%');
+  followEngineer(t);
+  assert.deepEqual([t.progress, t.progressOverride, followHint(t)], [70, undefined, '']);
+  assert.equal(t.pendingSync.progress, 35);
+});
+
+test('manual tasks without a workId are never overridden or flagged', () => {
+  const t = taskItem({ workId: undefined })[0].schedule[0];
+  overrideProgress(t);
+  assert.equal(t.progressOverride, undefined);
+  assert.equal(missingActualEnd({ ...t, state: 'completed' }), '');
+});
+
+test('revert also restores the forecast end that completing cleared', () => {
+  const items = taskItem({ state: 'in-progress', progress: 20, forecastEnd: '2026-11-01' });
+  syncBound(items, upload('已完成', 100));
+  assert.equal(items[0].schedule[0].forecastEnd, undefined);
+  revertSync(items[0].schedule[0]);
+  assert.equal(items[0].schedule[0].forecastEnd, '2026-11-01');
 });

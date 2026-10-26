@@ -7,7 +7,7 @@ import { isDirty, snapshotOf } from "./dirty-state";
 import { EDIT_FILES, tabsOf } from "./edit-nav";
 import { EngineerProgress, type EngineerWork } from "./engineer-progress";
 import { FileView, pruneRefLinks } from "./file-view";
-import { baselineOf, previousWeek, syncBound } from "./work-binding";
+import { baselineOf, pendingCount, previousWeek, syncBound } from "./work-binding";
 import { cleanSchedule, scheduleErrors } from "./project-schedule";
 import { FILE_LABELS, SECTION_LABELS, type CrossFile, type SectionFile } from "./report-types";
 import { ShellState } from "./shell-state";
@@ -40,7 +40,7 @@ export const leaveGuard: CanDeactivateFn<WeekEditor> = (editor, _route, _state, 
         <div class="tabs" role="tablist" aria-label="分項">
           @for (t of tabsOf(file); track t) {
             <a role="tab" [attr.data-tab]="t" [routerLink]="['/weeks', week, file, t]" [class.on]="t === tab"
-              [attr.aria-selected]="t === tab" [attr.aria-current]="t === tab ? 'page' : null">{{ TAB_LABELS[t] }}@if (count(t) !== null) { <em>{{ count(t) }}</em> }</a>
+              [attr.aria-selected]="t === tab" [attr.aria-current]="t === tab ? 'page' : null">{{ TAB_LABELS[t] }}@if (count(t) !== null) { <em>{{ count(t) }}</em> }@if (t === 'projects' && pending() > 0) { <b data-pending-count title="未確認的工程師同步">{{ pending() }}</b> }</a>
           }
         </div>
         @if (!loaded) {
@@ -193,6 +193,7 @@ export class WeekEditor implements OnInit {
     this.changes.detectChanges();
   }
 
+  pending = () => pendingCount(this.data[this.file]?.items);
   /** Switching file keeps the current tab when the new file has it. */
   tabFor = (file: string) => (tabsOf(file).includes(this.tab) ? this.tab : tabsOf(file)[0]);
   count(tab: string): number | null {

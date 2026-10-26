@@ -511,6 +511,32 @@ try {
   await pj.locator('[data-entry="頂層工作A"]').waitFor({ timeout: 15000 });
   await pj.locator('app-gantt').getByText('展開關鍵任務').click();
   assert.match(await pj.locator('.gantt-evidence-chip', { hasText: '已綁定' }).first().innerText(), /已綁定/);
+  // reupload maps engineer status onto the key task: badge with the original state, delta, unconfirmed count; survives reload until confirmed
+  await page.goto(base + '/#/weeks/2026-W41/s1/engineer');
+  await page.locator('[data-engineer-upload]').setInputFiles(join(root, 'tests/fixtures/engineer-intake/CIM2_ENG_WeeklyReport_261009_SEC1.json'));
+  await page.locator('[data-save-state="dirty"]').waitFor({ timeout: 15000 });
+  await page.goto(base + '/#/weeks/2026-W41/s1/projects');
+  const task = pj.locator('[data-entry="頂層工作A"]');
+  assert.match(await task.locator('[data-sync-badge]').innerText(), /已依工程師更新（原：開放・0%）/);
+  assert.equal(await task.locator('[data-progress-delta]').innerText(), '（新增）');
+  assert.equal(await task.locator('[data-field="entry-progress"]').inputValue(), '40');
+  assert.equal(await page.locator('[data-tab="projects"] [data-pending-count]').innerText(), '1');
+  await page.locator('[data-save]').click();
+  await page.locator('[data-save-state="clean"]').waitFor({ timeout: 15000 });
+  await page.reload();
+  await task.locator('[data-sync-badge]').waitFor({ timeout: 15000 });
+  assert.equal(await page.locator('[data-tab="projects"] [data-pending-count]').innerText(), '1');
+  await task.locator('[data-sync-confirm]').click();
+  assert.equal(await task.locator('[data-sync-badge]').count(), 0);
+  assert.equal(await page.locator('[data-tab="projects"] [data-pending-count]').count(), 0);
+  // manual progress pauses sync and shows the engineer's latest
+  await task.locator('[data-field="entry-progress"]').fill('70');
+  assert.equal(await task.locator('[data-follow-hint]').innerText(), '工程師最新進度 40%');
+  await task.locator('[data-follow-engineer]').click();
+  assert.equal(await task.locator('[data-field="entry-progress"]').inputValue(), '40');
+  assert.equal(await task.locator('[data-sync-badge]').count(), 1);
+  await task.locator('[data-sync-revert]').click();
+  assert.equal(await task.locator('[data-sync-badge]').count(), 0);
   // tidy up so later project assertions see the original schedule
   await pj.locator('[data-entry="頂層工作A"] [aria-label="刪除"]').click();
   await page.locator('[data-save]').click();
@@ -610,6 +636,7 @@ try {
   await pub.locator('.btn-phase-expand').click();
   assert.equal(await guyPage.locator('[data-file="s1"] [data-source-links] a').getAttribute('href'), 'https://example.com/notice');
   assert.equal(await guyPage.locator('[data-file="s2"] [data-impact-line]').innerText(), '交接：交接給同課同仁；影響：無；下一步：補人（2026-10-05 生效）');
+  assert.equal(await guyPage.locator('[data-sync-badge], [data-pending-count]').count(), 0);
   assert.equal(await guyPage.locator('[data-old-version]').count(), 0);
   await shot(guyPage, '12-publication');
   // printing hides the top bar and the document controls
