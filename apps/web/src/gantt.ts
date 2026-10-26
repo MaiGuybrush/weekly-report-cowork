@@ -18,7 +18,7 @@ import {
   varianceBadgeClass,
   varianceText,
 } from "./gantt-model";
-import { progressText } from "./project-progress";
+import { expectedProgress, progressStatus, progressText } from "./project-progress";
 
 @Component({
   selector: "app-gantt",
@@ -62,6 +62,9 @@ import { progressText } from "./project-progress";
         <span class="legend-item"><i class="legend-bar actual-bar"></i> 實際</span>
         <span class="legend-item"><i class="legend-bar actual-bar late"></i> 實際（逾期）</span>
         <span class="legend-item"><i class="legend-bar forecast-bar"></i> 預估完工</span>
+        <span class="legend-item"><i class="legend-expected" data-status="normal"></i> 計畫應有進度：實際差距 10 點內正常</span>
+        <span class="legend-item"><i class="legend-expected" data-status="behind"></i> 落後（低 10 點以上）</span>
+        <span class="legend-item"><i class="legend-expected" data-status="ahead"></i> 領先（高 10 點以上）</span>
         <span class="legend-item"><i class="legend-diamond pending-diamond"></i> 計畫節點</span>
         <span class="legend-item"><i class="legend-diamond achieved-diamond"></i> 實際節點</span>
       </div>
@@ -146,6 +149,14 @@ import { progressText } from "./project-progress";
                     [style.left.%]="position(m.actualDiamond)"
                     [title]="tooltip(entry)"></i>
                 }
+                @if (m.planBar && expected(entry); as exp) {
+                  <i
+                    class="expected-mark"
+                    data-expected
+                    [attr.data-status]="status(entry)"
+                    [style.left.%]="position(exp.date)"
+                    [title]="'計畫應有進度 ' + exp.pct + '%'"></i>
+                }
                 @if (m.planBar) {
                   <i
                     class="plan plan-bar"
@@ -162,7 +173,7 @@ import { progressText } from "./project-progress";
                     [style.width.%]="width(m.actualBar.start, m.actualBar.end)"
                     [title]="tooltip(entry)"></i>
                   @if (progressLabel(entry); as pct) {
-                    <b class="gantt-progress" data-progress [class.flip]="position(m.actualBar.end) > 85" [style.left.%]="position(m.actualBar.end)">{{ pct }}</b>
+                    <b class="gantt-progress" data-progress [attr.data-status]="status(entry)" [class.flip]="position(m.actualBar.end) > 85" [style.left.%]="position(m.actualBar.end)">{{ pct }}</b>
                   }
                 }
                 @if (forecastBar(entry); as f) {
@@ -246,6 +257,12 @@ export class Gantt {
   }
 
   evidenceTitle = (e: GanttEntry) => (e.evidenceLinks ?? []).map((l) => `#${l.workId} ${l.summary}`.trim()).join("\n");
+  /** Marker for 計畫應有進度: sits on the plan bar at the base date (clamped to the plan range). */
+  expected = (e: GanttEntry) => {
+    const pct = expectedProgress(e, this.today());
+    return pct === undefined ? null : { pct, date: this.today() < e.planStart! ? e.planStart : this.today() > e.planEnd! ? e.planEnd : this.today() };
+  };
+  status = (e: GanttEntry) => progressStatus(this.entries(), e, this.today());
   progressLabel = (e: GanttEntry) => progressText(this.entries(), e);
   marks = ganttMarks;
   tooltip = ganttTooltip;

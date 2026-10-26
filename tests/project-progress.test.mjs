@@ -58,3 +58,30 @@ test('clamp: 0–100 integer, blank is unfilled', () => {
   assert.equal(clampProgress(''), undefined);
   assert.equal(clampProgress(NaN), undefined);
 });
+
+test('expectedProgress: calendar-day linear, clamped; none for milestone / cancelled / undated', async () => {
+  const { expectedProgress } = await import('../apps/web/src/project-progress.ts');
+  const t = e({ planStart: '2026-10-01', planEnd: '2026-10-11' });
+  assert.equal(expectedProgress(t, '2026-09-30'), 0);
+  assert.equal(expectedProgress(t, '2026-10-01'), 0);
+  assert.equal(expectedProgress(t, '2026-10-06'), 50);
+  assert.equal(expectedProgress(t, '2026-10-11'), 100);
+  assert.equal(expectedProgress(t, '2026-11-01'), 100);
+  assert.equal(expectedProgress(e({ planStart: '2026-10-01', planEnd: '2026-10-01' }), '2026-10-01'), 100);
+  assert.equal(expectedProgress(e({ kind: 'milestone', planStart: '2026-10-01', planEnd: '2026-10-11' }), '2026-10-06'), undefined);
+  assert.equal(expectedProgress({ ...t, state: 'cancelled' }, '2026-10-06'), undefined);
+  assert.equal(expectedProgress(e({}), '2026-10-06'), undefined);
+});
+
+test('progressStatus: 10-point threshold both ways; unfilled in-progress counts 0', async () => {
+  const { progressStatus } = await import('../apps/web/src/project-progress.ts');
+  const t = (o) => e({ state: 'in-progress', planStart: '2026-10-01', planEnd: '2026-10-11', ...o }); // expected 50 on 10-06
+  const s = (o) => { const x = t(o); return progressStatus([x], x, '2026-10-06'); };
+  assert.equal(s({ progress: 41 }), 'normal');
+  assert.equal(s({ progress: 40 }), 'behind');
+  assert.equal(s({ progress: 59 }), 'normal');
+  assert.equal(s({ progress: 60 }), 'ahead');
+  assert.equal(s({}), 'behind', 'unfilled = 0%');
+  const m = e({ kind: 'milestone', planStart: '2026-10-01', planEnd: '2026-10-11' });
+  assert.equal(progressStatus([m], m, '2026-10-06'), undefined);
+});

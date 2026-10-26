@@ -1,4 +1,4 @@
-type P = { id: string; kind: "phase" | "task" | "milestone"; state: string; phaseId?: string | null; progress?: number | null };
+type P = { id: string; kind: "phase" | "task" | "milestone"; state: string; phaseId?: string | null; progress?: number | null; planStart?: string | null; planEnd?: string | null };
 
 /** number = percent, null = in progress but not filled, undefined = entry has no progress (milestone / cancelled). */
 export type Progress = number | null | undefined;
@@ -24,6 +24,29 @@ export const progressText = (all: P[], e: P) => {
   const p = entryProgress(all, e);
   return p === undefined ? "" : p === null ? "—" : `${p}%`;
 };
+
+/** Gap (percentage points) at which progress counts as behind / ahead of plan. */
+export const PROGRESS_GAP = 10;
+const DAY = 86400000;
+
+/** 計畫應有進度: calendar days elapsed between plan start and end at the base date, 0–100; undefined without progress or plan dates. */
+export function expectedProgress(e: P, today: string): number | undefined {
+  if (e.kind === "milestone" || e.state === "cancelled" || !e.planStart || !e.planEnd) return undefined;
+  if (today < e.planStart) return 0;
+  if (today >= e.planEnd) return 100;
+  return Math.round(((Date.parse(today) - Date.parse(e.planStart)) / (Date.parse(e.planEnd) - Date.parse(e.planStart))) * 100);
+}
+
+export type ProgressStatus = "behind" | "ahead" | "normal";
+
+/** Actual vs expected; unfilled in-progress counts as 0. undefined when there is nothing to compare. */
+export function progressStatus(all: P[], e: P, today: string): ProgressStatus | undefined {
+  const expected = expectedProgress(e, today);
+  const actual = entryProgress(all, e);
+  if (expected === undefined || actual === undefined) return undefined;
+  const gap = (actual ?? 0) - expected;
+  return gap <= -PROGRESS_GAP ? "behind" : gap >= PROGRESS_GAP ? "ahead" : "normal";
+}
 
 /** Phases and project-level tasks weigh one unit each; null when there is no unit. */
 export function projectProgress(all: P[]): number | null {

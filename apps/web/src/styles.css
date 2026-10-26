@@ -207,6 +207,12 @@ input:disabled, select:disabled, textarea:disabled { background: var(--paper); -
 .gantt-variance-badge { font: 600 .75rem var(--num); color: var(--mute); }
 .variance-delayed { color: var(--red); }
 .variance-ahead { color: var(--ok); }
+.gantt-track .expected-mark { top: .25rem; width: 3px; height: .8rem; transform: translateX(-50%); border-radius: 1px; background: var(--mute); z-index: 1; }
+.expected-mark[data-status="behind"], .legend-expected[data-status="behind"] { background: var(--red); }
+.expected-mark[data-status="ahead"], .legend-expected[data-status="ahead"] { background: var(--ok); }
+.legend-expected { display: inline-block; width: 3px; height: .8rem; border-radius: 1px; background: var(--mute); }
+.gantt-track .gantt-progress[data-status="behind"] { color: var(--red); font-weight: 600; }
+.gantt-track .gantt-progress[data-status="ahead"] { color: var(--ok); font-weight: 600; }
 .variance-forecast { color: var(--mute); font-weight: 400; opacity: .75; }
 .gantt-track .forecast-bar { top: 1.05rem; height: .5rem; min-width: 4px; border-top: 2px dashed var(--actual); opacity: .6; }
 .legend-bar.forecast-bar { height: 0; border-top: 2px dashed var(--actual); border-radius: 0; opacity: .6; }
