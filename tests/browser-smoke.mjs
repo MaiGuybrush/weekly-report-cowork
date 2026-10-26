@@ -216,6 +216,9 @@ try {
   assert.equal(await again.locator('.gantt-row-task .forecast-bar').count(), 1);
   await spec.locator('[data-field="forecastEnd"]').fill('');
   assert.equal(await again.locator('.gantt-row-task .forecast-bar').count(), 0);
+  // critical chain: at least one row flagged, legend explains it
+  assert.ok(await again.locator('.gantt-row[data-critical]').count() >= 1, 'critical chain marked');
+  assert.match(await again.locator('.gantt .legend-item', { hasText: '關鍵鏈' }).innerText(), /延誤即拖延專案/);
   await spec.locator('select[aria-label="狀態"]').selectOption('open');
   assert.equal(await spec.locator('[data-field="entry-progress"]').count(), 0);
   // schedule grid: gantt sits above it, it scrolls on its own with a sticky header, phases open by default and share state with the gantt
