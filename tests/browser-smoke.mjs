@@ -696,5 +696,5 @@ try {
   api.kill();
   if (api.exitCode === null) await once(api, 'exit');
   jwks.close();
-  rmSync(temporary, { recursive: true, force: true });
+  try { rmSync(temporary, { recursive: true, force: true, maxRetries: 10, retryDelay: 300 }); } catch (e) { console.warn('temp cleanup skipped (Windows file lock):', e.code, temporary); }
 }

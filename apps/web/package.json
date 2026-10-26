@@ -1,7 +1,8 @@
 {
   "name": "weekly-report-web",
   "private": true,
-  "scripts": { "start": "ng serve", "build": "ng build", "smoke": "node ../../tests/browser-smoke.mjs", "check": "tsc -p tsconfig.app.json --noEmit && node --test \"../../tests/*.test.mjs\" && ng build" },
+  "type": "module",
+  "scripts": { "start": "ng serve", "build": "ng build", "smoke": "node ../../tests/browser-smoke.mjs", "check": "tsc -p tsconfig.app.json --noEmit && node --test --test-reporter=dot \"../../tests/*.test.mjs\" && ng build" },
   "dependencies": {
     "@angular/common": "21.0.0", "@angular/compiler": "21.0.0", "@angular/core": "21.0.0",
     "@angular/forms": "21.0.0", "@angular/platform-browser": "21.0.0", "@angular/router": "21.0.0",
