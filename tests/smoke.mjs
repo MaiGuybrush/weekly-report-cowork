@@ -129,6 +129,8 @@ try {
   assert.equal((await upload('H1', 'CIM2_ENG_WeeklyReport_261014_bad.json')).status, 400);
   assert.equal((await upload('H1', 'CIM2_ENG_WeeklyReport_261014_missing.json')).status, 400);
   assert.match((await upload('H1', 'CIM2_ENG_WeeklyReport_261030_SEC1.json', intake('CIM2_ENG_WeeklyReport_261014_SEC1.json'))).body.error, /尚未建立/);
+  const noPercent = JSON.parse(intake('CIM2_ENG_WeeklyReport_261014_SEC1.json')); delete noPercent.results.alice.items[0].percentage;
+  assert.match((await upload('H1', 'CIM2_ENG_WeeklyReport_261014_SEC1.json', JSON.stringify(noPercent))).body.error, /percentage/);
   const up1 = await upload('H1', 'CIM2_ENG_WeeklyReport_261014_SEC1.json'); assert.equal(up1.status, 201); assert.equal(up1.body.week, '2026-W42');
   assert.match(git(remote, 'log', '--format=%s', 'master'), /2026-W42\/engineer-s1: upload by H1/);
   // same week again merges by workId: new values win, absent works kept and flagged, sub levels merged
@@ -146,6 +148,7 @@ try {
   assert.equal((await call('/api/weeks/2026-W42/engineer/s1', 'G')).status, 200);
   assert.equal((await call('/api/weeks/2026-W42/engineer/s1', 'H2')).status, 403);
   assert.equal((await call('/api/weeks/2026-W42/engineer/s2', 'H2')).status, 404);
+  assert.equal((await call('/api/weeks/2026-W42/engineer/s3', 'G')).status, 404);
   assert.equal((await call('/api/weeks/2026-W42/engineer/cross', 'G')).status, 400);
   console.log('API smoke passed');
 } catch (error) {

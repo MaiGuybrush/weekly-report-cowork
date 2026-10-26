@@ -70,7 +70,9 @@ export class EngineerProgress {
     try {
       const data = await firstValueFrom(this.http.get<EngineerFile>(`/api/weeks/${week}/engineer/${file}`));
       if (week === this.week() && file === this.file()) this.data = data;
-    } catch { /* 404: nothing uploaded yet */ }
+    } catch (e: any) {
+      if (e?.status !== 404) this.error = `載入失敗：${e?.error?.error ?? e?.status ?? "未知錯誤"}`; // 404: nothing uploaded yet
+    }
     this.loading = false;
     this.changes.detectChanges();
   }

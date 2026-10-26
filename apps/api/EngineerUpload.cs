@@ -29,11 +29,14 @@ public static partial class EngineerUpload
         return null;
     }
 
+    static bool Number(JsonNode? node) => node is JsonValue v && v.TryGetValue<double>(out _);
+
     static string? ItemProblem(JsonArray items)
     {
         foreach (var node in items)
         {
-            if (node is not JsonObject item || item["workId"] is not JsonValue id || !id.TryGetValue<long>(out _) || item["workContent"] is not JsonValue) return "工作缺少 workId 或 workContent";
+            if (node is not JsonObject item || item["workId"] is not JsonValue id || !id.TryGetValue<long>(out _) || item["workContent"] is not JsonValue
+                || item["status"] is not JsonValue || !Number(item["percentage"]) || !Number(item["deltaTime"])) return "工作缺少 workId、workContent、status、percentage 或 deltaTime";
             if (item["subItems"] is JsonArray subs && ItemProblem(subs) is { } p) return p;
         }
         return null;
