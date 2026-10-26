@@ -207,6 +207,9 @@ input:disabled, select:disabled, textarea:disabled { background: var(--paper); -
 .gantt-variance-badge { font: 600 .75rem var(--num); color: var(--mute); }
 .variance-delayed { color: var(--red); }
 .variance-ahead { color: var(--ok); }
+.variance-forecast { color: var(--mute); font-weight: 400; opacity: .75; }
+.gantt-track .forecast-bar { top: 1.05rem; height: .5rem; min-width: 4px; border-top: 2px dashed var(--actual); opacity: .6; }
+.legend-bar.forecast-bar { height: 0; border-top: 2px dashed var(--actual); border-radius: 0; opacity: .6; }
 
 @media (max-width: 860px) {
   .top { flex-wrap: wrap; gap: .5rem; }

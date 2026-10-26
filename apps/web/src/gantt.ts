@@ -7,6 +7,7 @@ import {
   ganttMarks,
   ganttPosition,
   ganttTooltip,
+  forecastEnds,
   ganttRange,
   ganttTicks,
   ganttWidth,
@@ -60,6 +61,7 @@ import { progressText } from "./project-progress";
         <span class="legend-item"><i class="legend-bar plan-bar"></i> 計畫</span>
         <span class="legend-item"><i class="legend-bar actual-bar"></i> 實際</span>
         <span class="legend-item"><i class="legend-bar actual-bar late"></i> 實際（逾期）</span>
+        <span class="legend-item"><i class="legend-bar forecast-bar"></i> 預估完工</span>
         <span class="legend-item"><i class="legend-diamond pending-diamond"></i> 計畫節點</span>
         <span class="legend-item"><i class="legend-diamond achieved-diamond"></i> 實際節點</span>
       </div>
@@ -163,12 +165,15 @@ import { progressText } from "./project-progress";
                     <b class="gantt-progress" data-progress [class.flip]="position(m.actualBar.end) > 85" [style.left.%]="position(m.actualBar.end)">{{ pct }}</b>
                   }
                 }
+                @if (forecastBar(entry); as f) {
+                  <i class="forecast-bar" [style.left.%]="position(f.start)" [style.width.%]="width(f.start, f.end)" [title]="tooltip(entry)"></i>
+                }
               }
             </div>
 
             <div class="gantt-stats">
               <span class="gantt-state-pill" [attr.data-state]="entry.state">{{ stateLabel(entry.state) }}</span>
-              <span [class]="'gantt-variance-badge ' + varianceBadgeClass(entry)">{{ varianceText(entry) }}</span>
+              <span [class]="'gantt-variance-badge ' + varianceClass(entry)">{{ varianceOf(entry) }}</span>
             </div>
           </div>
         }
@@ -219,6 +224,14 @@ export class Gantt {
       return { ...l, active: active.has(l), d: `M${x1} ${y(l.from)} H${x1} V${y(l.to)} H${x2}` };
     });
   });
+  forecasts = computed(() => forecastEnds(this.entries(), this.today()));
+  forecastBar = (entry: GanttEntry) => {
+    const from = this.marks(entry, this.today()).actualBar?.end ?? this.today();
+    const to = this.forecasts().get(entry.id);
+    return to && to > from ? { start: from, end: to } : null;
+  };
+  varianceOf = (e: GanttEntry) => varianceText(e, this.forecasts().get(e.id));
+  varianceClass = (e: GanttEntry) => varianceBadgeClass(e, this.forecasts().get(e.id));
   todayPosition = computed(() => ganttPosition(this.range(), this.today()));
   todayLabel = computed(() => this.today().slice(5).replace("-", "/"));
 

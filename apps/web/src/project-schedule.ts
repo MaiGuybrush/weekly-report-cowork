@@ -4,7 +4,7 @@ import { FormsModule } from "@angular/forms";
 import { firstValueFrom } from "rxjs";
 import { DateRangePicker } from "./date-range-picker";
 import { Gantt } from "./gantt";
-import { gridRows, hasChildTasks, isPhaseOpen, moveTask, type TaskDrop } from "./gantt-model";
+import { forecastError, gridRows, hasChildTasks, isPhaseOpen, moveTask, type TaskDrop } from "./gantt-model";
 import { ProjectHeader } from "./project-header";
 import { PredecessorSelect } from "./predecessor-select";
 import { clampProgress, liveTasksOf, progressText } from "./project-progress";
@@ -13,7 +13,7 @@ import type { ExternalDependency, ScheduleEntry, SectionItem } from "./report-ty
 
 const KEYS: (keyof ScheduleEntry)[] = [
   "id", "kind", "name", "owner", "phaseId", "state", "planStart", "planEnd",
-  "progress", "actualStart", "actualEnd", "planDate", "actualDate", "predecessors", "evidenceLinks",
+  "progress", "forecastEnd", "actualStart", "actualEnd", "planDate", "actualDate", "predecessors", "evidenceLinks",
 ];
 const KIND_LABELS = { phase: "階段", task: "關鍵任務", milestone: "里程碑" };
 
@@ -31,7 +31,9 @@ const toDeliveries = (project: SectionItem) =>
 export function scheduleErrors(project: SectionItem) {
   const entries = project.schedule ?? [];
   const name = (id: string) => entries.find((e) => e.id === id)?.name || id;
-  return evaluateSchedule(entries.map(toInput)).errors.map((x) => `「${project.title || "未命名專案"}」${name(x.entryId)} ← ${name(x.predecessorId)}：${x.message}`);
+  const title = project.title || "未命名專案";
+  const forecast = entries.flatMap((e) => forecastError(e) ?? []).map((m, i) => `「${title}」${m}`);
+  return [...evaluateSchedule(entries.map(toInput)).errors.map((x) => `「${title}」${name(x.entryId)} ← ${name(x.predecessorId)}：${x.message}`), ...forecast];
 }
 
 @Component({
@@ -40,7 +42,7 @@ export function scheduleErrors(project: SectionItem) {
   imports: [FormsModule, Gantt, ProjectHeader, DateRangePicker, PredecessorSelect],
   template: `
     <!-- the app refreshes views manually (no zone events), so re-render after any edit bubbling up -->
-    <div class="project" [class.doc-project]="document()" [class.invalid]="evaluated().errors.length > 0" [attr.data-project-error]="evaluated().errors.length > 0 ? '' : null" [attr.data-project]="project().id" (input)="changes.detectChanges()" (change)="changes.detectChanges()" (click)="changes.detectChanges()">
+    <div class="project" [class.doc-project]="document()" [class.invalid]="invalid()" [attr.data-project-error]="invalid() ? '' : null" [attr.data-project]="project().id" (input)="changes.detectChanges()" (change)="changes.detectChanges()" (click)="changes.detectChanges()">
       <app-project-header [project]="project()" [editable]="editable()" [document]="document()" [baseDate]="baseDate()" />
 
       <app-gantt [baseDate]="baseDate()" [entries]="evaluated().entries" [phasesOpen]="!document()" [selectedId]="selectedId()" (entrySelected)="selectFromGantt($event)" [(expandTasks)]="expandTasks" [(phaseToggles)]="phaseToggles" />
@@ -50,7 +52,7 @@ export function scheduleErrors(project: SectionItem) {
         <summary>時程明細（{{ project().schedule?.length || 0 }} 項）</summary>
         <div class="grid-scroll" data-schedule-grid>
         <table class="grid sched-grid">
-          <thead><tr><th>類型</th><th>名稱</th><th>負責</th><th>狀態</th><th>進度</th><th>計畫起訖</th><th>實際起訖</th><th>前置項目</th><th>操作</th></tr></thead>
+          <thead><tr><th>類型</th><th>名稱</th><th>負責</th><th>狀態</th><th>進度</th><th>計畫起訖</th><th>實際起訖</th><th>預估完工</th><th>前置項目</th><th>操作</th></tr></thead>
           <tbody>
             @for (e of rows(); track e.id) {
               <tr class="entry" [attr.data-entry]="e.name" [attr.data-entry-id]="e.id" [class.cancelled]="e.state === 'cancelled'" [class.is-child]="e.kind === 'task' && !!e.phaseId" [class.row-selected]="e.id === selectedId()" [class.drag-src]="e.id === dragId()" [class.drop-before]="hint()?.id === e.id && hint()?.pos === 'before'" [class.drop-after]="hint()?.id === e.id && hint()?.pos === 'after'" [class.drop-into]="hint()?.id === e.id && hint()?.pos === 'into'" (click)="selectFromGrid($event, e.id)" (dragover)="dragOver($event, e)" (dragleave)="hint.set(null)" (drop)="dropOn($event, e)">
@@ -87,6 +89,11 @@ export function scheduleErrors(project: SectionItem) {
                   <td><app-date-range-picker [compact]="true" data-field="actualRange" ariaLabel="實際起訖" [(startDate)]="e.actualStart" [(endDate)]="e.actualEnd" [disabled]="!editable() || e.state === 'cancelled'" /></td>
                 }
                 <td>
+                  @if (e.kind === 'task' && (e.state === 'open' || e.state === 'in-progress')) {
+                    <input type="date" data-field="forecastEnd" aria-label="預估完工日" [ngModel]="e.forecastEnd ?? ''" (ngModelChange)="e.forecastEnd = $event || undefined" [disabled]="!editable()" />
+                  }
+                </td>
+                <td>
                   @if (e.state !== 'cancelled') {
                     <app-predecessor-select data-field="predecessors" [options]="optionsFor(e)" [selected]="e.predecessors ?? NONE" (selectedChange)="e.predecessors = $event" [disabled]="!editable()" />
                   }
@@ -106,7 +113,7 @@ export function scheduleErrors(project: SectionItem) {
                 </td>
               </tr>
               @if (editable() && e.kind === 'task' && e.state !== 'cancelled' && evidenceOpen === e.id) {
-                <tr class="evidence-row"><td colspan="9">
+                <tr class="evidence-row"><td colspan="10">
                   <div class="evidence-panel" data-evidence-panel>
                     @for (l of e.evidenceLinks; track l.workId) {
                       <div class="evidence-link">
@@ -127,7 +134,7 @@ export function scheduleErrors(project: SectionItem) {
                   </div>
                 </td></tr>
               }
-              @for (msg of entryErrors(e.id); track msg) { <tr class="error-row"><td colspan="9"><p class="error" role="alert">{{ msg }}</p></td></tr> }
+              @for (msg of entryErrors(e.id); track msg) { <tr class="error-row"><td colspan="10"><p class="error" role="alert">{{ msg }}</p></td></tr> }
             }
           </tbody>
         </table>
@@ -279,6 +286,7 @@ export class ProjectSchedule {
     if (this.memo?.key !== key) this.memo = { key, value: evaluateSchedule((p.schedule ?? []).map(toInput), toDeliveries(p), this.baseDate()) };
     return this.memo.value;
   };
+  invalid = () => this.evaluated().errors.length > 0 || (this.project().schedule ?? []).some((e) => !!forecastError(e));
   others = (e: ScheduleEntry) => (this.project().schedule ?? []).filter((o) => o.id !== e.id && o.state !== "cancelled");
   // option arrays are input bindings, so keep identity stable until names/ids actually change (NG0100).
   private optionCache = new Map<string, { key: string; value: ScheduleEntry[] }>();
@@ -293,7 +301,8 @@ export class ProjectSchedule {
   entryErrors = (id: string) => {
     const entries = this.project().schedule ?? [];
     const name = (x: string) => entries.find((e) => e.id === x)?.name || x;
-    return this.evaluated().errors.filter((x) => x.entryId === id).map((x) => `前置項目「${name(x.predecessorId)}」：${x.message}`);
+    const own = entries.find((e) => e.id === id);
+    return [...this.evaluated().errors.filter((x) => x.entryId === id).map((x) => `前置項目「${name(x.predecessorId)}」：${x.message}`), ...(own ? [forecastError(own)] : []).flatMap((m) => m ?? [])];
   };
   clamp = clampProgress;
   progressOf = (e: ScheduleEntry) => progressText(this.project().schedule ?? [], e);
@@ -301,6 +310,7 @@ export class ProjectSchedule {
   setState(e: ScheduleEntry, state: ScheduleEntry["state"]) {
     if (e.state === state) return;
     e.state = state;
+    if (state === "completed") e.forecastEnd = undefined; // 預估完工日 only means something until the item is done
     e.progress = undefined; // progress only means something while in progress; a new state starts blank
   }
   statesOf = (kind: ScheduleEntry["kind"]) =>

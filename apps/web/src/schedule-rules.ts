@@ -101,7 +101,7 @@ export function evaluateSchedule(entries: ScheduleInput[], deliveries: ExternalD
 // Cancel keeps the entry (state "cancelled") but drops phase membership and every dependency touching it.
 export function cancelEntry<T extends ScheduleInput>(entries: T[], id: string): T[] {
   return entries.map((e) => {
-    if (e.id === id) return { ...e, state: "cancelled" as const, phaseId: null, predecessors: [] };
+    if (e.id === id) return { ...e, state: "cancelled" as const, phaseId: null, predecessors: [], forecastEnd: undefined };
     const next = { ...e, predecessors: e.predecessors?.filter((p) => p !== id) };
     return e.phaseId === id ? { ...next, phaseId: null } : next;
   });

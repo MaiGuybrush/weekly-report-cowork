@@ -145,3 +145,38 @@ test('ganttLinks: endpoints, collapsed reattach, cancelled dropped', () => {
   // collapsed: t1/t2 -> p1, t3 -> p2; t1->t2 becomes a self link and is dropped; duplicates merge
   assert.deepEqual(view([]), [{ from: 'p1', to: 'p2' }, { from: 'p2', to: 'm1' }]);
 });
+
+test('預估完工日: defaults, filled value, phase rollup, none when done or milestone', async () => {
+  const { forecastEnds, forecastError } = await import('../apps/web/src/gantt-model.ts');
+  const t = (o) => ({ ...blank, kind: 'task', name: 'T', state: 'in-progress', planStart: '2026-10-01', planEnd: '2026-10-10', ...o });
+  const all = [
+    { ...blank, id: 'p', kind: 'phase', name: 'P', state: 'in-progress', planEnd: '2026-10-10' },
+    t({ id: 'a', phaseId: 'p' }),
+    t({ id: 'b', phaseId: 'p', forecastEnd: '2026-10-20' }),
+    t({ id: 'c', state: 'open', planEnd: '2026-10-05' }),
+    t({ id: 'd', state: 'completed', forecastEnd: '2026-10-20' }),
+    t({ id: 'e', state: 'open', planEnd: '2026-10-30' }),
+    { ...blank, id: 'm', kind: 'milestone', name: 'M', state: 'pending', planDate: '2026-10-01' },
+  ];
+  const f = forecastEnds(all, '2026-10-12');
+  assert.equal(f.get('a'), '2026-10-12', 'overdue unfilled -> base date');
+  assert.equal(f.get('b'), '2026-10-20');
+  assert.equal(f.get('c'), '2026-10-12');
+  assert.equal(f.get('p'), '2026-10-20', 'phase = latest child');
+  assert.equal(forecastEnds(all, '2026-10-02').get('a'), '2026-10-10', 'not overdue -> plan end');
+  for (const id of ['d', 'e', 'm']) assert.equal(f.has(id), false, id);
+  const solo = [{ ...blank, id: 'p', kind: 'phase', name: 'P', state: 'in-progress', planEnd: '2026-10-10' }];
+  assert.equal(forecastEnds(solo, '2026-10-12').get('p'), '2026-10-12', 'phase without forecasts uses default');
+  assert.match(forecastError(t({ forecastEnd: '2026-09-30' })), /不可早於計畫開始日/);
+  assert.match(forecastError(t({ forecastEnd: '2026-10-01', actualStart: '2026-10-03' })), /實際開始日/);
+  assert.equal(forecastError(t({ forecastEnd: '2026-10-03' })), null);
+  const { varianceText } = await import('../apps/web/src/gantt-model.ts');
+  assert.equal(varianceText(t({}), '2026-10-13'), '預估 +3 天');
+  assert.equal(varianceText(t({ actualEnd: '2026-10-12' }), '2026-10-13'), '+2 天', 'actual wins');
+});
+
+test('cancel clears 預估完工日', async () => {
+  const { cancelEntry } = await import('../apps/web/src/schedule-rules.ts');
+  const out = cancelEntry([{ ...blank, id: 'a', kind: 'task', name: 'A', state: 'in-progress', forecastEnd: '2026-10-20' }], 'a');
+  assert.equal(out[0].forecastEnd, undefined);
+});

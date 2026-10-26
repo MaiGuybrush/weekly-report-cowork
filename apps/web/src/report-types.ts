@@ -24,6 +24,7 @@ export type ScheduleEntry = {
   actualStart: string | null;
   actualEnd: string | null;
   progress?: number | null;
+  forecastEnd?: string | null;
   planDate?: string | null;
   actualDate?: string | null;
   predecessors?: string[];

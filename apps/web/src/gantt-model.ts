@@ -12,6 +12,8 @@ export type GanttEntry = {
   actualDate?: string | null;
   state: "open" | "in-progress" | "completed" | "cancelled" | "pending" | "achieved";
   progress?: number | null;
+  /** 預估完工日: optional, tasks only; see forecastEnds. */
+  forecastEnd?: string | null;
   warnings?: { message: string }[];
   externalNotices?: { message: string }[];
   evidenceLinks?: { workId: number; summary: string }[];
@@ -30,7 +32,7 @@ export const localToday = () => {
 const time = (date: string) => new Date(`${date}T00:00:00`).getTime();
 
 function dates(entries: GanttEntry[], extra: string[] = []) {
-  return [...entries.flatMap((e) => [e.planStart, e.planEnd, e.actualStart, e.actualEnd, e.planDate, e.actualDate]), ...extra]
+  return [...entries.flatMap((e) => [e.planStart, e.planEnd, e.actualStart, e.actualEnd, e.planDate, e.actualDate, e.forecastEnd]), ...extra]
     .filter((d): d is string => !!d)
     .map(time);
 }
@@ -133,17 +135,57 @@ function varianceDays(entry: GanttEntry): number | null {
   return base && end ? Math.round((Date.parse(end) - Date.parse(base)) / DAY) : null;
 }
 
-export function varianceText(entry: GanttEntry) {
+const isOpenEntry = (e: GanttEntry) => e.state === "open" || e.state === "in-progress";
+
+/** Default rule: the later of plan end and base date, only for running or overdue items. */
+function defaultForecast(e: GanttEntry, today: string): string | null {
+  if (!e.planEnd || !(e.state === "in-progress" || (e.state === "open" && today > e.planEnd))) return null;
+  return e.planEnd > today ? e.planEnd : today;
+}
+
+/** 預估完工日 per entry id. Task: filled value, else default. Phase: latest of its live tasks, else the default. Milestones, completed and cancelled get none. */
+export function forecastEnds(entries: GanttEntry[], today: string): Map<string, string> {
+  const result = new Map<string, string>();
+  const task = (e: GanttEntry) => (isOpenEntry(e) ? e.forecastEnd || defaultForecast(e, today) : null);
+  for (const e of entries) {
+    if (e.kind === "task") {
+      const f = task(e);
+      if (f) result.set(e.id, f);
+    }
+  }
+  for (const e of entries) {
+    if (e.kind !== "phase" || !isOpenEntry(e)) continue;
+    const kids = entries.filter((t) => t.kind === "task" && t.phaseId === e.id && result.has(t.id)).map((t) => result.get(t.id)!);
+    const f = kids.length ? kids.reduce((a, b) => (a > b ? a : b)) : defaultForecast(e, today);
+    if (f) result.set(e.id, f);
+  }
+  return result;
+}
+
+/** Why a filled 預估完工日 cannot be saved, or null. */
+export function forecastError(e: GanttEntry): string | null {
+  const start = e.actualStart || e.planStart;
+  return e.kind === "task" && e.forecastEnd && start && e.forecastEnd < start ? `預估完工日 (${e.forecastEnd}) 不可早於${e.actualStart ? "實際" : "計畫"}開始日 (${start})` : null;
+}
+
+/** Days of the forecast past the plan end; null when there is no forecast or no plan end. */
+export const forecastDays = (entry: GanttEntry, forecast?: string | null) =>
+  forecast && entry.planEnd ? Math.round((Date.parse(forecast) - Date.parse(entry.planEnd)) / DAY) : null;
+
+export function varianceText(entry: GanttEntry, forecast?: string | null) {
   const milestone = entry.kind === "milestone";
   if (milestone ? !entry.planDate : !entry.planEnd) return "無基準";
   const days = varianceDays(entry);
+  const est = forecastDays(entry, forecast);
+  if (days === null && est !== null) return est === 0 ? "預估 如期" : `預估 ${est > 0 ? "+" : ""}${est} 天`;
   if (days === null) return "—";
   if (days === 0) return milestone ? "如期達成" : "如期";
   return `${days > 0 ? "+" : ""}${days} 天`;
 }
 
-export function varianceBadgeClass(entry: GanttEntry) {
+export function varianceBadgeClass(entry: GanttEntry, forecast?: string | null) {
   const days = varianceDays(entry);
+  if (days === null && forecastDays(entry, forecast) !== null) return "variance-forecast";
   return days === null ? "variance-neutral" : days > 0 ? "variance-delayed" : days < 0 ? "variance-ahead" : "variance-ontime";
 }
 
