@@ -57,6 +57,8 @@ export type SectionItem = {
   title: string;
   content: string;
   details: ItemDetails;
+  /** 系統別 of a maintenance item; blank or absent = 未分類. */
+  system?: string;
   // engineer work this item is bound to (unique site-wide) and its last synced progress/status
   workId?: number;
   engineerProgress?: number;
@@ -80,5 +82,6 @@ export const SECTION_LABELS: Record<SectionName, string> = {
   technology: "新技術",
 };
 /** The publication appendix is generated from bindings, not an editable section. */
+export const UNCLASSIFIED_LABEL = "未分類";
 export const APPENDIX_LABEL = "工程師工作明細與來源連結";
 export const FILE_LABELS: Record<string, string> = { s1: "第一課", s2: "第二課", s3: "第三課" };

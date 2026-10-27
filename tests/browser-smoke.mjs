@@ -702,6 +702,10 @@ try {
   await guyPage.route('**/api/publications/2026-W41/1', async r => {
     const data = await (await r.fetch()).json();
     data.s1.items.find(i => i.title === '新平台').schedule.find(e => e.name === '撰寫規格').workId = 100;
+    // systems: s1 has an unclassified item first, s1 二層B and s2 share MES (with stray spaces) and must merge
+    data.s1.items.unshift({ id: 'smoke-ops-none', section: 'operations', title: '未分類事項', content: '', details: {} });
+    data.s1.items.find(i => i.title === '二層B').system = 'MES';
+    data.s2.items.find(i => i.id === 's2-ops-1').system = ' MES ';
     await r.fulfill({ json: data });
   });
   await guyPage.reload();
@@ -729,6 +733,9 @@ try {
   assert.equal(await titleLink.getAttribute('target'), '_blank');
   assert.match(await titleLink.getAttribute('href'), /WorkID=101$/);
   assert.equal(await guyPage.locator('[data-chapter="personnel"] .item-doc b [data-work-link]').count(), 0);
+  assert.deepEqual(await guyPage.locator('[data-chapter="operations"] [data-system-group]').allInnerTexts(), ['MES', '未分類']);
+  assert.deepEqual(await guyPage.locator('[data-chapter="operations"] .item-doc b').allInnerTexts(), ['二層B', 's2 系統維護', '未分類事項', 's1 系統維護', 's3 系統維護']);
+  assert.equal(await guyPage.locator('[data-chapter="personnel"] [data-system-group]').count(), 0);
   for (const b of await guyPage.locator('[data-chapter="projects"] app-gantt').getByText('展開關鍵任務').all()) await b.click();
   const taskLink = guyPage.locator('[data-chapter="projects"] .gantt-name [data-work-link]');
   assert.match(await taskLink.getAttribute('href'), /WorkID=100$/);

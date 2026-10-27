@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { chaptersOf } from '../apps/web/src/report-chapters.ts';
+import { chaptersOf, systemGroupsOf } from '../apps/web/src/report-chapters.ts';
 
 const item = (id, section) => ({ id, section, title: id, content: '', details: {} });
 const ids = (c) => c.items.map((i) => i.id);
@@ -19,4 +19,18 @@ test('empty chapters are omitted and missing files are tolerated', () => {
   const chapters = chaptersOf([undefined, { items: [item('a', 'operations')] }, {}]);
   assert.deepEqual(chapters.map((c) => c.section), ['operations']);
   assert.deepEqual(chaptersOf([undefined, undefined, undefined]), []);
+});
+
+const op = (id, system) => ({ ...item(id, 'operations'), ...(system === undefined ? {} : { system }) });
+
+test('maintenance groups merge across files, ordered by first appearance, 未分類 last', () => {
+  const items = [op('a', undefined), op('b', 'MES'), op('c', 'EAP'), op('d', ' MES '), op('e', '  '), op('f', 'mes')];
+  const groups = systemGroupsOf(items);
+  assert.deepEqual(groups.map((g) => g.system), ['MES', 'EAP', 'mes', null]);
+  assert.deepEqual(groups.map(ids), [['b', 'd'], ['c'], ['f'], ['a', 'e']]);
+});
+
+test('no unclassified group when every item has a system; empty input gives no groups', () => {
+  assert.deepEqual(systemGroupsOf([op('a', 'X')]).map((g) => g.system), ['X']);
+  assert.deepEqual(systemGroupsOf([]), []);
 });

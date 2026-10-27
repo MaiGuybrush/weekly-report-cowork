@@ -11,3 +11,18 @@ export function chaptersOf(files: (Partial<SectionFile> | undefined)[]): Chapter
     .map((section) => ({ section, items: files.flatMap((f) => f?.items ?? []).filter((i) => i.section === section) }))
     .filter((c) => c.items.length);
 }
+
+export type SystemGroup = { system: string | null; items: SectionItem[] };
+
+/** Groups maintenance items by trimmed 系統別 in first-appearance order; blank/absent goes to a trailing group with system null. */
+export function systemGroupsOf(items: SectionItem[]): SystemGroup[] {
+  const groups = new Map<string, SectionItem[]>();
+  const unclassified: SectionItem[] = [];
+  for (const i of items) {
+    const key = i.system?.trim();
+    if (!key) unclassified.push(i);
+    else groups.set(key, [...(groups.get(key) ?? []), i]);
+  }
+  const named = [...groups].map(([system, its]) => ({ system, items: its }));
+  return unclassified.length ? [...named, { system: null, items: unclassified }] : named;
+}

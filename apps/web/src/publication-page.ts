@@ -3,11 +3,11 @@ import { HttpClient } from "@angular/common/http";
 import { ActivatedRoute } from "@angular/router";
 import { firstValueFrom } from "rxjs";
 import { ProjectSchedule } from "./project-schedule";
-import { chaptersOf } from "./report-chapters";
+import { type Chapter, chaptersOf, systemGroupsOf } from "./report-chapters";
 import { publishedDate } from "./week-status";
 import { appendixRows, baselineOf, deltaText, previousWeek } from "./work-binding";
 import { WorkLink } from "./work-link";
-import { APPENDIX_LABEL, SECTION_LABELS, type CrossFile, type PublicationIndex, type SectionFile, type SectionItem } from "./report-types";
+import { APPENDIX_LABEL, SECTION_LABELS, UNCLASSIFIED_LABEL, type CrossFile, type PublicationIndex, type SectionFile, type SectionItem } from "./report-types";
 
 type Entry = PublicationIndex["publications"][number];
 
@@ -56,7 +56,9 @@ export function latestPublication(index: PublicationIndex): Entry | undefined {
         @for (c of chapters; track c.section) {
           <section [attr.data-chapter]="c.section">
             <h2>{{ SECTION_LABELS[c.section] }}</h2>
-            @for (item of c.items; track item.id) {
+            @for (g of blocksOf(c); track $index) {
+              @if (g.heading) { <h3 data-system-group>{{ g.heading }}</h3> }
+              @for (item of g.items; track item.id) {
               @if (c.section === "projects") {
                 <app-project-schedule [project]="item" [document]="true" [baseDate]="baseDate" [baseline]="baseline" />
               } @else {
@@ -71,6 +73,7 @@ export function latestPublication(index: PublicationIndex): Entry | undefined {
                   }
                 </div>
               }
+            }
             }
           </section>
         }
@@ -120,6 +123,12 @@ export class PublicationPage implements OnInit {
   }
   /** 基準日 of a published view = that version's publish date. */
   get baseDate() { return this.entries.find((p) => p.week === this.week && p.version === this.version)?.publishedAt.slice(0, 10); }
+  /** Maintenance splits into 系統別 groups with a heading; every other chapter is one headingless block. */
+  blocksOf(c: Chapter) {
+    return c.section === "operations"
+      ? systemGroupsOf(c.items).map((g) => ({ heading: g.system ?? UNCLASSIFIED_LABEL, items: g.items }))
+      : [{ heading: "", items: c.items }];
+  }
   print = () => window.print();
   /** 交接／影響／下一步（生效日）, skipping parts that were left empty. */
   impactLine(item: SectionItem) {
