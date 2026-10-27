@@ -481,7 +481,7 @@ try {
   await eng.locator('[data-work="102"] > [data-comment-quote]').waitFor({ state: 'detached', timeout: 15000 });
   // collapsing a parent hides its sub-works
   await eng.locator('[data-work="100"] > [data-collapse]').click();
-  assert.equal(await eng.locator('[data-work="101"]').count(), 0);
+  await eng.locator('[data-work="101"]').waitFor({ state: 'detached', timeout: 15000 });
   await eng.locator('[data-work="100"] > [data-collapse]').click();
   // roster: per-engineer counts follow annotations; click jumps, writes hash without history, reload restores
   assert.equal(await eng.locator('[data-roster="alice"] [data-roster-stars]').innerText(), '★1');
@@ -511,6 +511,23 @@ try {
   await eng.locator('[data-only-important]').check();
   assert.equal(await eng.locator('[data-work="200"]').count(), 0);
   assert.equal(await eng.locator('[data-work="100"]').count(), 1);
+  assert.equal(await eng.locator('[data-work="101"]').count(), 0);
+  assert.equal(await eng.locator('[data-no-important]').count() > 0, true);
+  await eng.locator('[data-only-important]').uncheck();
+  await eng.locator('[data-work="102"] > [data-star]').click();
+  await eng.locator('[data-work="102"] > [data-star][aria-pressed="true"]').waitFor({ timeout: 15000 });
+  await eng.locator('[data-only-important]').check();
+  assert.equal(await eng.locator('[data-work="102"]').count(), 1);
+  assert.equal(await eng.locator('[data-work="101"]').count(), 1);
+  await eng.locator('[data-only-important]').uncheck();
+  await eng.locator('[data-work="102"] > [data-star]').click();
+  await eng.locator('[data-work="102"] > [data-star][aria-pressed="false"]').waitFor({ timeout: 15000 });
+  // expand/collapse all reaches every level
+  await eng.locator('[data-toggle-all]').click();
+  await eng.locator('[data-work="101"]').waitFor({ state: 'detached', timeout: 15000 });
+  await eng.locator('[data-toggle-all]').click();
+  await eng.locator('[data-work="102"]').waitFor({ timeout: 15000 });
+  await eng.locator('[data-only-important]').check();
   assert.equal(await page.locator('[data-tab="engineer"] em').count(), 0);
 
   // pick a child work (101, under 100) into a non-project tab: prefilled, saved, bound; picking it again is blocked

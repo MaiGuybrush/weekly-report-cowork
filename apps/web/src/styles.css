@@ -384,3 +384,4 @@ input:disabled, select:disabled, textarea:disabled { background: var(--paper); -
   .eng-roster a { flex: none; border-left: 0; border-bottom: 3px solid transparent; }
   .eng-roster a.on { border-bottom-color: var(--steel); }
 }
+.eng-toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: .8rem 1.2rem; margin-bottom: .8rem; }

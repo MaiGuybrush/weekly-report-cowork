@@ -7,9 +7,8 @@ export const LONG_HOURS = 10;
 
 export type WorkAnnotation = { work: EngineerWork; isImportant: boolean; managerComment: string };
 
-/** 「僅重要」篩選時，自己重要或含重要子項的工作才顯示。 */
-export const isShown = (w: EngineerWork, onlyImportant: boolean): boolean =>
-  !onlyImportant || !!w.isImportant || !!w.subItems?.some((s) => isShown(s, onlyImportant));
+/** 工具列「全部展開／收合」：每次點擊換一個新物件，各列據此重設自己的收合狀態。 */
+export type BulkCollapse = { collapsed: boolean };
 
 @Component({
   selector: "li[app-work-row]",
@@ -41,14 +40,14 @@ export const isShown = (w: EngineerWork, onlyImportant: boolean): boolean =>
       }
     }
     @if (work().subItems?.length && !collapsed()) {
-      <ul app-work-list [items]="work().subItems!" [editable]="editable()" [onlyImportant]="onlyImportant()" (annotated)="annotated.emit($event)"></ul>
+      <ul app-work-list [items]="work().subItems!" [editable]="editable()" [bulk]="bulk()" (annotated)="annotated.emit($event)"></ul>
     }`,
 })
 export class WorkRow {
   readonly LONG_HOURS = LONG_HOURS;
   work = input.required<EngineerWork>();
   editable = input(false);
-  onlyImportant = input(false);
+  bulk = input<BulkCollapse | null>(null);
   annotated = output<WorkAnnotation>();
   collapsed = signal(false);
   editing = signal(false);
@@ -59,6 +58,10 @@ export class WorkRow {
 
   constructor() {
     effect(() => this.box()?.nativeElement.focus());
+    effect(() => {
+      const b = this.bulk();
+      if (b) this.collapsed.set(b.collapsed);
+    });
   }
   open() {
     this.cancelled = false;
@@ -80,15 +83,12 @@ export class WorkRow {
   standalone: true,
   imports: [WorkRow],
   template: `@for (w of items(); track w.workId) {
-    @if (shown(w)) {
-      <li app-work-row [work]="w" [editable]="editable()" [onlyImportant]="onlyImportant()" (annotated)="annotated.emit($event)"></li>
-    }
+    <li app-work-row [work]="w" [editable]="editable()" [bulk]="bulk()" (annotated)="annotated.emit($event)"></li>
   }`,
 })
 export class WorkList {
   items = input.required<EngineerWork[]>();
   editable = input(false);
-  onlyImportant = input(false);
+  bulk = input<BulkCollapse | null>(null);
   annotated = output<WorkAnnotation>();
-  shown = (w: EngineerWork) => isShown(w, this.onlyImportant());
 }

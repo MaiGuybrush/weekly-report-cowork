@@ -2,7 +2,8 @@ import { ChangeDetectorRef, Component, effect, HostListener, inject, input, outp
 import { HttpClient } from "@angular/common/http";
 import { firstValueFrom } from "rxjs";
 import { EngineerBlock } from "./engineer-block";
-import { countMarked } from "./engineer-model";
+import { countMarked, findWork } from "./engineer-model";
+import type { BulkCollapse } from "./engineer-work";
 import { ShellState } from "./shell-state";
 
 export type EngineerWork = {
@@ -29,16 +30,19 @@ export { LONG_HOURS } from "./engineer-work";
       </nav>
     }
     <div class="eng-main">
-    @if (editable()) {
-      <p><label>上傳工程師工作彙整 JSON <input type="file" accept=".json,application/json" data-engineer-upload (change)="upload($event)" /></label></p>
-    }
-    <p><label><input type="checkbox" data-only-important [checked]="onlyImportant" (change)="onlyImportant = !onlyImportant" /> 僅顯示重要工作</label></p>
+    <div class="eng-toolbar" role="toolbar" aria-label="工程師進度工具列">
+      @if (editable()) {
+        <label>上傳彙整檔 <input type="file" accept=".json,application/json" data-engineer-upload (change)="upload($event)" /></label>
+      }
+      <label><input type="checkbox" data-only-important [checked]="onlyImportant" (change)="onlyImportant = !onlyImportant" /> 僅看重要</label>
+      <button type="button" data-toggle-all (click)="toggleAll()">{{ bulk()?.collapsed ? "全部展開" : "全部收合" }}</button>
+    </div>
     @if (error) { <p class="err" role="alert" data-engineer-error>{{ error }}</p> }
     @if (!data) {
-      <div class="empty" data-empty>{{ loading ? "載入中…" : "本週尚無工程師工作彙整" }}</div>
+      <div class="empty" data-empty>{{ loading ? "載入中…" : editable() ? "本週尚無工程師工作彙整，請先上傳彙整檔" : "本週尚無工程師工作彙整" }}</div>
     } @else {
       @for (e of engineers(); track e[0]) {
-        <app-engineer-block [name]="e[0]" [result]="e[1]" [editable]="editable()" [onlyImportant]="onlyImportant" (annotated)="annotate($event.work, $event.isImportant, $event.managerComment)" />
+        <app-engineer-block [name]="e[0]" [result]="e[1]" [editable]="editable()" [onlyImportant]="onlyImportant" [bulk]="bulk()" (annotated)="annotate($event.work, $event.isImportant, $event.managerComment)" />
       }
     }
     </div>
@@ -55,11 +59,15 @@ export class EngineerProgress {
   uploaded = output<EngineerWork[]>();
   data: EngineerFile | null = null;
   onlyImportant = false;
+  bulk = signal<BulkCollapse | null>(null);
   loading = false;
   error = "";
 
   constructor() {
     effect(() => void this.load(this.week(), this.file()));
+  }
+  toggleAll() {
+    this.bulk.set({ collapsed: !this.bulk()?.collapsed });
   }
   active = signal("");
   engineers = () => Object.entries(this.data?.results ?? {});
@@ -129,8 +137,9 @@ export class EngineerProgress {
     this.error = "";
     try {
       await firstValueFrom(this.http.put(`/api/weeks/${this.week()}/engineer/${this.file()}/works/${work.workId}`, { isImportant, managerComment }));
-      work.isImportant = isImportant;
-      work.managerComment = managerComment;
+      for (const target of [work, ...Object.values(this.data?.results ?? {}).map((r) => findWork(r.items, work.workId))]) { // work may be a filtered copy
+        if (target) Object.assign(target, { isImportant, managerComment });
+      }
     } catch (e: any) {
       const reason = e?.error?.error ?? e?.status ?? "未知錯誤";
       await this.load(this.week(), this.file()); // drop the unsaved input so the page matches the server

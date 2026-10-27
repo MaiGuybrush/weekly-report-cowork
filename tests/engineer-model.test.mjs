@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { countMarked } from '../apps/web/src/engineer-model.ts';
+import { countMarked, filterImportant, findWork } from '../apps/web/src/engineer-model.ts';
 
 test('countMarked is zero for no works', () => {
   assert.deepEqual(countMarked([]), { stars: 0, comments: 0 });
@@ -19,4 +19,32 @@ test('countMarked counts stars and comments across three nested levels', () => {
 test('countMarked sees marks that only sub-works carry; empty comment is not a comment', () => {
   const items = [{ workId: 1, managerComment: '', subItems: [{ workId: 2, isImportant: true, managerComment: '子' }] }];
   assert.deepEqual(countMarked(items), { stars: 1, comments: 1 });
+});
+
+test('filterImportant keeps marked works with ancestors, drops unmarked siblings, leaves input untouched', () => {
+  const items = [
+    { workId: 1, subItems: [
+      { workId: 2, subItems: [{ workId: 3, isImportant: true }] },
+      { workId: 4 },
+    ] },
+    { workId: 5 },
+    { workId: 6, isImportant: true, subItems: [{ workId: 7 }] },
+  ];
+  const before = JSON.stringify(items);
+  const out = filterImportant(items);
+  assert.deepEqual(out.map((w) => w.workId), [1, 6]);
+  assert.deepEqual(out[0].subItems.map((w) => w.workId), [2]);
+  assert.deepEqual(out[0].subItems[0].subItems.map((w) => w.workId), [3]);
+  assert.deepEqual(out[1].subItems, []);
+  assert.equal(JSON.stringify(items), before);
+});
+
+test('filterImportant is empty when nothing is marked', () => {
+  assert.deepEqual(filterImportant([{ workId: 1, subItems: [{ workId: 2 }] }]), []);
+});
+
+test('findWork finds a nested work by id', () => {
+  const items = [{ workId: 1, subItems: [{ workId: 2, subItems: [{ workId: 3 }] }] }];
+  assert.equal(findWork(items, 3), items[0].subItems[0].subItems[0]);
+  assert.equal(findWork(items, 9), undefined);
 });
