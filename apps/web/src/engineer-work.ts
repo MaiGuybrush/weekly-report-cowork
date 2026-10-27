@@ -1,6 +1,6 @@
-import { Component, ElementRef, effect, forwardRef, inject, input, output, signal, viewChild } from "@angular/core";
-import { WORK_URL_TEMPLATE } from "./config";
+import { Component, ElementRef, effect, forwardRef, input, output, signal, viewChild } from "@angular/core";
 import type { EngineerWork } from "./engineer-progress";
+import { WorkLink } from "./work-link";
 
 /** 耗時達此值（小時）的工作加註標示。 */
 export const LONG_HOURS = 10;
@@ -13,12 +13,12 @@ export type BulkCollapse = { collapsed: boolean };
 @Component({
   selector: "li[app-work-row]",
   standalone: true,
-  imports: [forwardRef(() => WorkList)],
+  imports: [forwardRef(() => WorkList), WorkLink],
   host: { "[attr.data-work]": "work().workId", "[id]": "'w' + work().workId", "[attr.data-absent]": "work().absent ? '' : null" },
   template: `@if (work().subItems?.length) {
       <button type="button" data-collapse class="icon-btn" [attr.aria-expanded]="!collapsed()" [attr.aria-label]="(collapsed() ? '展開 #' : '收合 #') + work().workId" (click)="collapsed.set(!collapsed())">{{ collapsed() ? "▸" : "▾" }}</button>
     }
-    <a data-work-link class="num" [href]="href()" target="_blank" rel="noopener">#{{ work().workId }}</a> {{ work().workContent }}
+    <a app-work-link class="num" [workId]="work().workId"></a> {{ work().workContent }}
     <span class="num">{{ work().status }}・{{ work().percentage }}%・{{ work().deltaTime }}H</span>
     @if (work().deltaTime >= LONG_HOURS) { <em data-long>耗時 ≥{{ LONG_HOURS }}H</em> }
     @if (work().rmsFlag) { <em data-rms>RMS</em> }
@@ -53,8 +53,6 @@ export class WorkRow {
   editing = signal(false);
   private cancelled = false;
   private box = viewChild<ElementRef<HTMLInputElement>>("box");
-  private template = inject(WORK_URL_TEMPLATE);
-  href = () => this.template.replace("{id}", String(this.work().workId));
 
   constructor() {
     effect(() => this.box()?.nativeElement.focus());

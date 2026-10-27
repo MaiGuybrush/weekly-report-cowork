@@ -7,6 +7,7 @@ import { pickerList } from "./engineer-model";
 import { ProjectSchedule } from "./project-schedule";
 import { type NonProjectSection, type SourceLink, type SectionFile, type SectionItem } from "./report-types";
 import { boundWorkIds, canBind, deltaText, itemFromWork } from "./work-binding";
+import { WorkLink } from "./work-link";
 
 /** Rows without a URL are dropped on save; an emptied list leaves no field behind. */
 export function pruneRefLinks(item: SectionItem) {
@@ -18,7 +19,7 @@ export function pruneRefLinks(item: SectionItem) {
 @Component({
   selector: "app-file-view",
   standalone: true,
-  imports: [FormsModule, ProjectSchedule],
+  imports: [FormsModule, ProjectSchedule, WorkLink],
   template: `<section [attr.data-file]="file()">
       @if (tab() === "projects") {
         @for (p of itemsOf("projects"); track p.id) {
@@ -47,7 +48,7 @@ export function pruneRefLinks(item: SectionItem) {
                 <textarea data-field="content" rows="6" [(ngModel)]="item.content" [disabled]="!editable()"></textarea></label>
             }
             @if (item.workId != null) {
-              <p class="num" data-bound-work>來源 #{{ item.workId }}・工程師狀態 {{ item.engineerStatus }}・進度 {{ item.engineerProgress }}%@if (deltaText(item.workId, item.engineerProgress, baseline()); as d) { <strong data-progress-delta>（{{ d }}）</strong> }</p>
+              <p class="num" data-bound-work>來源 <a app-work-link [workId]="item.workId"></a>・工程師狀態 {{ item.engineerStatus }}・進度 {{ item.engineerProgress }}%@if (deltaText(item.workId, item.engineerProgress, baseline()); as d) { <strong data-progress-delta>（{{ d }}）</strong> }</p>
             }
             <div class="ref-links">
               <strong>參考連結</strong>
@@ -76,7 +77,7 @@ export function pruneRefLinks(item: SectionItem) {
             @if (focus.length) { <button type="button" data-picker-back (click)="back()">← 上一層</button> }
             @for (w of focusList(); track w.workId) {
               <div [attr.data-pick-row]="w.workId">
-                <span class="num">#{{ w.workId }}</span> {{ w.workContent }} <span class="num">{{ w.status }}・{{ w.percentage }}%</span>
+                <a app-work-link class="num" [workId]="w.workId"></a> {{ w.workContent }} <span class="num">{{ w.status }}・{{ w.percentage }}%</span>
                 @if (!canBind(w.workId, bound())) { <em data-bound>已綁定</em> }
                 @else { <button type="button" data-pick (click)="pick(w)">挑選</button> }
                 @if (w.subItems?.length && w !== focus.at(-1)) { <button type="button" data-picker-children (click)="drill(w)">看子工作</button> }

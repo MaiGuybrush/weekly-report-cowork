@@ -11,6 +11,7 @@ import { PredecessorSelect } from "./predecessor-select";
 import type { EngineerFile, EngineerWork } from "./engineer-progress";
 import { clampProgress, liveTasksOf, progressText } from "./project-progress";
 import { cancelEntry, evaluateSchedule, reactivateEntry, type ScheduleInput } from "./schedule-rules";
+import { WorkLink } from "./work-link";
 import { abortNotice, boundWorkIds, canBind, confirmSync, deltaText, followEngineer, followHint, missingActualEnd, missingPlanDates, overrideProgress, revertSync, taskFromWork } from "./work-binding";
 import type { ExternalDependency, ScheduleEntry, SectionFile, SectionItem } from "./report-types";
 
@@ -40,7 +41,7 @@ export function scheduleErrors(project: SectionItem) {
 @Component({
   selector: "app-project-schedule",
   standalone: true,
-  imports: [FormsModule, Gantt, ProjectHeader, DateRangePicker, PredecessorSelect],
+  imports: [FormsModule, Gantt, ProjectHeader, DateRangePicker, PredecessorSelect, WorkLink],
   template: `
     <!-- the app refreshes views manually (no zone events), so re-render after any edit bubbling up -->
     <div class="project" [class.doc-project]="document()" [class.invalid]="invalid()" [attr.data-project-error]="invalid() ? '' : null" [attr.data-project]="project().id" (input)="changes.detectChanges()" (change)="changes.detectChanges()" (click)="changes.detectChanges()">
@@ -66,7 +67,7 @@ export function scheduleErrors(project: SectionItem) {
                 </td>
                 <td class="name-cell">
                   <input data-field="entry-name" aria-label="名稱" [(ngModel)]="e.name" [disabled]="!editable() || e.state === 'cancelled'" />
-                  @if (e.workId != null) { <small class="num" data-bound-work [title]="'來源 #' + e.workId">已綁定 #{{ e.workId }}</small>@if (deltaText(e.workId, e.engineerProgress, baseline()); as d) { <small class="num" data-progress-delta>（{{ d }}）</small> } }
+                  @if (e.workId != null) { <small class="num" data-bound-work [title]="'來源 #' + e.workId">已綁定 <a app-work-link [workId]="e.workId"></a></small>@if (deltaText(e.workId, e.engineerProgress, baseline()); as d) { <small class="num" data-progress-delta>（{{ d }}）</small> } }
                   @if (e.pendingSync; as p) {
                     <span class="sync-badge" data-sync-badge>已依工程師更新（原：{{ stateLabel(p.state) }}・{{ originalProgress(e) }}）
                       @if (editable()) { <button type="button" data-sync-confirm (click)="confirmSync(e)">確認</button><button type="button" data-sync-revert (click)="revertSync(e)">還原</button> }
@@ -145,7 +146,7 @@ export function scheduleErrors(project: SectionItem) {
               @if (focus.length) { <button type="button" data-picker-back (click)="back()">← 上一層</button> }
               @for (w of focusList(); track w.workId) {
                 <div class="evidence-candidate" [attr.data-pick-row]="w.workId">
-                  <span class="num">#{{ w.workId }}</span> {{ w.workContent }} <span class="num">{{ w.ownerName }}・{{ w.status }}・{{ w.percentage }}%</span>
+                  <a app-work-link class="num" [workId]="w.workId"></a> {{ w.workContent }} <span class="num">{{ w.ownerName }}・{{ w.status }}・{{ w.percentage }}%</span>
                   @if (!canBind(w.workId, bound())) { <em data-bound>已綁定</em> }
                   @else { <button type="button" data-pick (click)="pick(w)">挑選</button> }
                   @if (w.subItems?.length && w !== focus.at(-1)) { <button type="button" data-picker-children (click)="drill(w)">看子工作</button> }

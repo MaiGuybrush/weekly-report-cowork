@@ -5,6 +5,7 @@ import { firstValueFrom } from "rxjs";
 import { ProjectSchedule } from "./project-schedule";
 import { publishedDate } from "./week-status";
 import { appendixRows, baselineOf, deltaText, previousWeek } from "./work-binding";
+import { WorkLink } from "./work-link";
 import { APPENDIX_LABEL, FILE_LABELS, SECTION_LABELS, type CrossFile, type NonProjectSection, type PublicationIndex, type SectionFile, type SectionItem } from "./report-types";
 
 type Entry = PublicationIndex["publications"][number];
@@ -16,7 +17,7 @@ export function latestPublication(index: PublicationIndex): Entry | undefined {
 
 @Component({
   standalone: true,
-  imports: [ProjectSchedule],
+  imports: [ProjectSchedule, WorkLink],
   template: `<main class="pub-wrap">
       <article class="doc">
         <div class="doc-head">
@@ -83,7 +84,7 @@ export function latestPublication(index: PublicationIndex): Entry | undefined {
               <thead><tr><th>工作編號</th><th>工作內容</th><th>進度</th><th>變動</th></tr></thead>
               <tbody>
                 @for (r of appendix; track r.workId) {
-                  <tr data-appendix-row><td class="num">{{ r.workId }}</td><td>{{ r.content }}</td><td class="num">{{ r.progress }}%</td><td class="num">{{ r.delta }}</td></tr>
+                  <tr data-appendix-row><td class="num"><a app-work-link [workId]="r.workId"></a></td><td>{{ r.content }}</td><td class="num">{{ r.progress }}%</td><td class="num">{{ r.delta }}</td></tr>
                 }
               </tbody>
             </table>
