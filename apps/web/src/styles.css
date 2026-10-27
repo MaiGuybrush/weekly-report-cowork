@@ -389,6 +389,7 @@ input:disabled, select:disabled, textarea:disabled { background: var(--paper); -
 .eng-overview-scroll { overflow-x: auto; }
 .eng-overview table { border-collapse: collapse; width: 100%; }
 .eng-overview th, .eng-overview td { padding: .25rem .6rem; text-align: left; border-bottom: 1px solid var(--steel-t); }
+.eng-overview th:first-child, .eng-overview td:first-child { white-space: nowrap; }
 .eng-overview tr[data-alert] { background: var(--amber-t); }
 .eng-overview td.dim { color: var(--mute); }
 .eng-overview tfoot { font-weight: 600; }
