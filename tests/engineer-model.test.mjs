@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { countMarked, filterImportant, findWork, hoursAlert, topWorks, sectionTotals } from '../apps/web/src/engineer-model.ts';
+import { countMarked, displayName, filterImportant, findWork, hoursAlert, topWorks, sectionTotals } from '../apps/web/src/engineer-model.ts';
 
 test('countMarked is zero for no works', () => {
   assert.deepEqual(countMarked([]), { stars: 0, comments: 0 });
@@ -75,4 +75,13 @@ test('topWorks takes the two biggest top-level works, ties keep file order, sub-
 
 test('sectionTotals sums work and leave hours', () => {
   assert.deepEqual(sectionTotals([{ totalWorkHours: 32, totalOffHours: 4 }, { totalWorkHours: 36.5 }, {}]), { work: 68.5, off: 4 });
+});
+
+test('displayName takes the first non-empty top-level ownerName', () => {
+  assert.equal(displayName('guy.mai', [{ workId: 1 }, { workId: 2, ownerName: '' }, { workId: 3, ownerName: '買家暉' }]), '買家暉');
+});
+
+test('displayName falls back to sub-works, then to the account', () => {
+  assert.equal(displayName('kyle.tsai', [{ workId: 1, subItems: [{ workId: 2, ownerName: '蔡焜來' }] }]), '蔡焜來');
+  assert.equal(displayName('kyle.tsai', []), 'kyle.tsai');
 });

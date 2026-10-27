@@ -1,6 +1,6 @@
 import { Component, computed, input, output, signal } from "@angular/core";
 import type { EngineerFile } from "./engineer-progress";
-import { hoursAlert, sectionTotals, topWorks } from "./engineer-model";
+import { displayName, hoursAlert, sectionTotals, topWorks } from "./engineer-model";
 
 /** 工時總覽：每人工時、休假、主要耗時工作與工時警示，末列為課別合計。 */
 @Component({
@@ -15,7 +15,7 @@ import { hoursAlert, sectionTotals, topWorks } from "./engineer-model";
           <tbody>
             @for (e of engineers(); track e[0]) {
               <tr [attr.data-overview-row]="e[0]" [attr.data-alert]="alert(e[1])">
-                <td><a href="javascript:void(0)" data-overview-name (click)="$event.preventDefault(); jump.emit('e-' + e[0])">{{ e[0] }}</a></td>
+                <td><a href="javascript:void(0)" data-overview-name (click)="$event.preventDefault(); jump.emit('e-' + e[0])">{{ displayName(e[0], e[1].items) }}</a></td>
                 <td class="num">{{ e[1].totalWorkHours ?? 0 }}H @if (alert(e[1]) === "short") { <em data-alert-note>不足</em> } @else if (alert(e[1]) === "over") { <em data-alert-note>過量</em> }</td>
                 <td class="num" [class.dim]="!e[1].totalOffHours">{{ e[1].totalOffHours ?? 0 }}H</td>
                 <td>@for (w of topWorks(e[1].items); track w.workId) {
@@ -36,5 +36,6 @@ export class EngineerOverview {
   open = signal(true);
   totals = computed(() => sectionTotals(this.engineers().map((e) => e[1])));
   topWorks = topWorks;
+  displayName = displayName;
   alert = (r: EngineerFile["results"][string]) => hoursAlert(r.totalWorkHours ?? 0, r.totalOffHours ?? 0);
 }

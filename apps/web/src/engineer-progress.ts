@@ -3,7 +3,7 @@ import { HttpClient } from "@angular/common/http";
 import { firstValueFrom } from "rxjs";
 import { EngineerBlock } from "./engineer-block";
 import { EngineerOverview } from "./engineer-overview";
-import { countMarked, findWork } from "./engineer-model";
+import { countMarked, displayName, findWork } from "./engineer-model";
 import type { BulkCollapse } from "./engineer-work";
 import { ShellState } from "./shell-state";
 
@@ -24,7 +24,7 @@ export { LONG_HOURS } from "./engineer-work";
       <nav class="eng-roster" aria-label="工程師名冊">
         @for (e of engineers(); track e[0]) {
           <a href="javascript:void(0)" data-roster-item [attr.data-roster]="e[0]" [class.on]="active() === e[0]" [attr.aria-current]="active() === e[0] ? 'location' : null" (click)="$event.preventDefault(); jump('e-' + e[0])">
-            <b>{{ e[0] }}</b>
+            <b>{{ displayName(e[0], e[1].items) }}</b>
             <small class="num">{{ e[1].totalWorkHours ?? 0 }}H・<span data-roster-stars>★{{ marked(e[1]).stars }}</span></small>
           </a>
         }
@@ -73,6 +73,7 @@ export class EngineerProgress {
   }
   active = signal("");
   engineers = () => Object.entries(this.data?.results ?? {});
+  displayName = displayName;
   marked = (r: EngineerFile["results"][string]) => countMarked(r.items);
 
   /** 目前所在的工程師：最後一個標題頂端已捲過視窗上緣附近者。 */

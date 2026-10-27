@@ -37,3 +37,9 @@ export const topWorks = (items: EngineerWork[]): EngineerWork[] => [...items].so
 /** 課別合計：各人工作時數與休假時數加總。 */
 export const sectionTotals = (results: { totalWorkHours?: number; totalOffHours?: number }[]) =>
   results.reduce((n, r) => ({ work: n.work + (r.totalWorkHours ?? 0), off: n.off + (r.totalOffHours ?? 0) }), { work: 0, off: 0 });
+
+/** 顯示姓名：頂層工作優先、再找子工作的第一個非空 ownerName；都沒有時退回帳號。 */
+export const displayName = (account: string, items: EngineerWork[]): string =>
+  items.find((w) => w.ownerName)?.ownerName ??
+  items.map((w) => displayName("", w.subItems ?? [])).find(Boolean) ??
+  account;
