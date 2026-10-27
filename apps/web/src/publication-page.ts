@@ -5,7 +5,7 @@ import { firstValueFrom } from "rxjs";
 import { ProjectSchedule } from "./project-schedule";
 import { publishedDate } from "./week-status";
 import { appendixRows, baselineOf, deltaText, previousWeek } from "./work-binding";
-import { FILE_LABELS, SECTION_LABELS, type CrossFile, type NonProjectSection, type PublicationIndex, type SectionFile, type SectionItem } from "./report-types";
+import { APPENDIX_LABEL, FILE_LABELS, SECTION_LABELS, type CrossFile, type NonProjectSection, type PublicationIndex, type SectionFile, type SectionItem } from "./report-types";
 
 type Entry = PublicationIndex["publications"][number];
 
@@ -78,7 +78,7 @@ export function latestPublication(index: PublicationIndex): Entry | undefined {
         }
         @if (appendix.length) {
           <section data-appendix>
-            <h2>{{ SECTION_LABELS.appendix }}</h2>
+            <h2>{{ APPENDIX_LABEL }}</h2>
             <table class="grid">
               <thead><tr><th>工作編號</th><th>工作內容</th><th>進度</th><th>變動</th></tr></thead>
               <tbody>
@@ -100,8 +100,8 @@ export class PublicationPage implements OnInit {
   readonly FILE_LABELS = FILE_LABELS;
   readonly publishedDate = publishedDate;
   readonly deltaText = deltaText;
-  /** The appendix is generated from bindings, so the hand-kept appendix section is not rendered here. */
-  readonly sectionKeys = (Object.keys(SECTION_LABELS) as NonProjectSection[]).filter((k) => k !== "appendix");
+  readonly APPENDIX_LABEL = APPENDIX_LABEL;
+  readonly sectionKeys = Object.keys(SECTION_LABELS) as NonProjectSection[];
   readonly files = ["s1", "s2", "s3"];
   week = "";
   version = 0;

@@ -48,7 +48,7 @@ export type ExternalDependency = {
   linkedEntryIds: string[];
 };
 
-export type NonProjectSection = "incidents" | "operations" | "personnel" | "technology" | "appendix";
+export type NonProjectSection = "incidents" | "operations" | "personnel" | "technology";
 export type SectionName = NonProjectSection | "projects";
 
 export type SectionItem = {
@@ -77,6 +77,7 @@ export const SECTION_LABELS: Record<NonProjectSection, string> = {
   operations: "系統維護與營運",
   personnel: "人力與組織異動",
   technology: "新技術評估",
-  appendix: "工程師工作明細與來源連結",
 };
+/** The publication appendix is generated from bindings, not an editable section. */
+export const APPENDIX_LABEL = "工程師工作明細與來源連結";
 export const FILE_LABELS: Record<string, string> = { s1: "第一課", s2: "第二課", s3: "第三課" };
