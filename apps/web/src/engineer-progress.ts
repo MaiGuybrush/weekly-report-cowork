@@ -1,7 +1,7 @@
 import { ChangeDetectorRef, Component, effect, inject, input, output } from "@angular/core";
 import { HttpClient } from "@angular/common/http";
-import { NgTemplateOutlet } from "@angular/common";
 import { firstValueFrom } from "rxjs";
+import { EngineerBlock } from "./engineer-block";
 import { ShellState } from "./shell-state";
 
 export type EngineerWork = {
@@ -10,13 +10,12 @@ export type EngineerWork = {
 };
 export type EngineerFile = { results: Record<string, { totalWorkHours?: number; totalOffHours?: number; items: EngineerWork[] }> };
 
-/** 耗時達此值（小時）的工作加註標示。 */
-export const LONG_HOURS = 10;
+export { LONG_HOURS } from "./engineer-work";
 
 @Component({
   selector: "app-engineer-progress",
   standalone: true,
-  imports: [NgTemplateOutlet],
+  imports: [EngineerBlock],
   template: `<section data-engineer-progress>
     @if (editable()) {
       <p><label>上傳工程師工作彙整 JSON <input type="file" accept=".json,application/json" data-engineer-upload (change)="upload($event)" /></label></p>
@@ -27,41 +26,15 @@ export const LONG_HOURS = 10;
       <div class="empty" data-empty>{{ loading ? "載入中…" : "本週尚無工程師工作彙整" }}</div>
     } @else {
       @for (e of engineers(); track e[0]) {
-        <h3 data-engineer>{{ e[0] }} <small class="num">工時 {{ e[1].totalWorkHours ?? 0 }}H・休假 {{ e[1].totalOffHours ?? 0 }}H</small></h3>
-        <ul class="work-tree">
-          <ng-container *ngTemplateOutlet="tree; context: { $implicit: e[1].items }" />
-        </ul>
+        <app-engineer-block [name]="e[0]" [result]="e[1]" [editable]="editable()" [onlyImportant]="onlyImportant" (annotated)="annotate($event.work, $event.isImportant, $event.managerComment)" />
       }
     }
-    <ng-template #tree let-items>
-      @for (w of items; track w.workId) {
-        @if (shown(w)) {
-        <li [attr.data-work]="w.workId" [attr.data-absent]="w.absent ? '' : null">
-          <span class="num">#{{ w.workId }}</span> {{ w.workContent }}
-          <span class="num">{{ w.status }}・{{ w.percentage }}%・{{ w.deltaTime }}H</span>
-          @if (w.deltaTime >= LONG_HOURS) { <em data-long>耗時 ≥{{ LONG_HOURS }}H</em> }
-          @if (w.rmsFlag) { <em data-rms>RMS</em> }
-          @if (w.absent) { <em data-absent-note>本週彙整未出現此工作（可能本週無進度）</em> }
-          @if (editable()) {
-            <button type="button" data-star [attr.aria-pressed]="!!w.isImportant" [attr.aria-label]="'標記 #' + w.workId + ' 為重要'" (click)="annotate(w, !w.isImportant, w.managerComment ?? '')">{{ w.isImportant ? "★" : "☆" }}</button>
-            <input type="text" data-comment maxlength="2000" placeholder="comment" [value]="w.managerComment ?? ''" (change)="annotate(w, !!w.isImportant, $any($event.target).value)" />
-          } @else {
-            @if (w.isImportant) { <em data-important>★ 重要</em> }
-            @if (w.managerComment) { <span data-comment-text>{{ w.managerComment }}</span> }
-          }
-          @if (w.lastComment) { <small data-last-comment>上週：{{ w.lastComment }}</small> }
-          @if (w.subItems?.length) { <ul><ng-container *ngTemplateOutlet="tree; context: { $implicit: w.subItems }" /></ul> }
-        </li>
-        }
-      }
-    </ng-template>
   </section>`,
 })
 export class EngineerProgress {
   private http = inject(HttpClient);
   private changes = inject(ChangeDetectorRef);
   private state = inject(ShellState);
-  readonly LONG_HOURS = LONG_HOURS;
   week = input.required<string>();
   file = input.required<string>();
   editable = input(false);
@@ -75,8 +48,6 @@ export class EngineerProgress {
   constructor() {
     effect(() => void this.load(this.week(), this.file()));
   }
-  /** 篩選「僅重要」時，自己重要或含重要子項的工作才顯示。 */
-  shown = (w: EngineerWork): boolean => !this.onlyImportant || !!w.isImportant || !!w.subItems?.some(this.shown);
   engineers = () => Object.entries(this.data?.results ?? {});
 
   private async load(week: string, file: string) {

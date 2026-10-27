@@ -1,0 +1,59 @@
+import { Component, forwardRef, input, output } from "@angular/core";
+import type { EngineerWork } from "./engineer-progress";
+
+/** 耗時達此值（小時）的工作加註標示。 */
+export const LONG_HOURS = 10;
+
+export type WorkAnnotation = { work: EngineerWork; isImportant: boolean; managerComment: string };
+
+/** 「僅重要」篩選時，自己重要或含重要子項的工作才顯示。 */
+export const isShown = (w: EngineerWork, onlyImportant: boolean): boolean =>
+  !onlyImportant || !!w.isImportant || !!w.subItems?.some((s) => isShown(s, onlyImportant));
+
+@Component({
+  selector: "li[app-work-row]",
+  standalone: true,
+  imports: [forwardRef(() => WorkList)],
+  host: { "[attr.data-work]": "work().workId", "[attr.data-absent]": "work().absent ? '' : null" },
+  template: `<span class="num">#{{ work().workId }}</span> {{ work().workContent }}
+    <span class="num">{{ work().status }}・{{ work().percentage }}%・{{ work().deltaTime }}H</span>
+    @if (work().deltaTime >= LONG_HOURS) { <em data-long>耗時 ≥{{ LONG_HOURS }}H</em> }
+    @if (work().rmsFlag) { <em data-rms>RMS</em> }
+    @if (work().absent) { <em data-absent-note>本週彙整未出現此工作（可能本週無進度）</em> }
+    @if (editable()) {
+      <button type="button" data-star [attr.aria-pressed]="!!work().isImportant" [attr.aria-label]="'標記 #' + work().workId + ' 為重要'" (click)="annotated.emit({ work: work(), isImportant: !work().isImportant, managerComment: work().managerComment ?? '' })">{{ work().isImportant ? "★" : "☆" }}</button>
+      <input type="text" data-comment maxlength="2000" placeholder="comment" [value]="work().managerComment ?? ''" (change)="annotated.emit({ work: work(), isImportant: !!work().isImportant, managerComment: $any($event.target).value })" />
+    } @else {
+      @if (work().isImportant) { <em data-important>★ 重要</em> }
+      @if (work().managerComment) { <span data-comment-text>{{ work().managerComment }}</span> }
+    }
+    @if (work().lastComment) { <small data-last-comment>上週：{{ work().lastComment }}</small> }
+    @if (work().subItems?.length) {
+      <ul app-work-list [items]="work().subItems!" [editable]="editable()" [onlyImportant]="onlyImportant()" (annotated)="annotated.emit($event)"></ul>
+    }`,
+})
+export class WorkRow {
+  readonly LONG_HOURS = LONG_HOURS;
+  work = input.required<EngineerWork>();
+  editable = input(false);
+  onlyImportant = input(false);
+  annotated = output<WorkAnnotation>();
+}
+
+@Component({
+  selector: "ul[app-work-list]",
+  standalone: true,
+  imports: [WorkRow],
+  template: `@for (w of items(); track w.workId) {
+    @if (shown(w)) {
+      <li app-work-row [work]="w" [editable]="editable()" [onlyImportant]="onlyImportant()" (annotated)="annotated.emit($event)"></li>
+    }
+  }`,
+})
+export class WorkList {
+  items = input.required<EngineerWork[]>();
+  editable = input(false);
+  onlyImportant = input(false);
+  annotated = output<WorkAnnotation>();
+  shown = (w: EngineerWork) => isShown(w, this.onlyImportant());
+}
