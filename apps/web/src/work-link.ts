@@ -6,10 +6,12 @@ import { WORK_URL_TEMPLATE } from "./config";
   selector: "a[app-work-link]",
   standalone: true,
   host: { "data-work-link": "", target: "_blank", rel: "noopener", "[attr.href]": "href()" },
-  template: `#{{ workId() }}`,
+  template: `{{ text() ?? "#" + workId() }}`,
 })
 export class WorkLink {
   workId = input.required<number>();
+  /** Link text; defaults to the work number. */
+  text = input<string>();
   private template = inject(WORK_URL_TEMPLATE);
   href = computed(() => this.template.replace("{id}", String(this.workId())));
 }

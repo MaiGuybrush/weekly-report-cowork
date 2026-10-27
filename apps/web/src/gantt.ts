@@ -19,11 +19,13 @@ import {
   varianceBadgeClass,
   varianceText,
 } from "./gantt-model";
+import { WorkLink } from "./work-link";
 import { expectedProgress, progressStatus, progressText } from "./project-progress";
 
 @Component({
   selector: "app-gantt",
   standalone: true,
+  imports: [WorkLink],
   template: `
     <div class="gantt">
       <div class="gantt-header">
@@ -120,7 +122,7 @@ import { expectedProgress, progressStatus, progressText } from "./project-progre
               <span class="gantt-kind-badge" [attr.data-kind]="entry.kind">
                 {{ entry.kind === 'phase' ? '階段' : entry.kind === 'task' ? '任務' : '里程碑' }}
               </span>
-              <span class="gantt-name" [title]="entry.name">{{ entry.name }}</span>
+              <span class="gantt-name" [title]="entry.name">@if (linkTasks() && entry.kind === 'task' && entry.workId != null) { <a app-work-link [workId]="entry.workId" [text]="entry.name" (click)="$event.stopPropagation()"></a> } @else { {{ entry.name }} }</span>
               @if (entry.kind === 'task' && entry.owner) {
                 <span class="gantt-owner-chip" [title]="'負責人/單位: ' + entry.owner">👤 {{ entry.owner }}</span>
               }
@@ -199,6 +201,8 @@ import { expectedProgress, progressStatus, progressText } from "./project-progre
 export class Gantt {
   entries = input.required<GanttEntry[]>();
   meetingDate = input<string>();
+  /** Document view: bound task names are work links (the editor keeps click-to-select). */
+  linkTasks = input(false);
   /** Emits the id of the clicked entry. */
   entrySelected = output<string>();
   /** Row highlighted by the parent (from a gantt or grid click). */

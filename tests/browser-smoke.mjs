@@ -698,6 +698,14 @@ try {
   await guyPage.unroute('**/api/weeks/2026-W41/publications');
   // document: 管理摘要, then 三課; version in the title row; project header, deliveries, evidence, links, personnel line
   await guyPage.locator('[data-chapter="projects"] app-project-schedule .gantt-row').first().waitFor({ timeout: 15000 });
+  // the tidy-up above removed the bound key task, so bind 撰寫規格 to work 100 in the fetched snapshot
+  await guyPage.route('**/api/publications/2026-W41/1', async r => {
+    const data = await (await r.fetch()).json();
+    data.s1.items.find(i => i.title === '新平台').schedule.find(e => e.name === '撰寫規格').workId = 100;
+    await r.fulfill({ json: data });
+  });
+  await guyPage.reload();
+  await guyPage.locator('[data-chapter="projects"] app-project-schedule .gantt-row').first().waitFor({ timeout: 15000 });
   assert.equal(await guyPage.locator('[data-doc-version]').innerText(), '2026-W41 · v1');
   assert.deepEqual(await guyPage.locator('.doc h2').allInnerTexts(), ['管理摘要', '專案', '維護', '人力調整', '工程師工作明細與來源連結']);
   assert.equal(await guyPage.locator('.doc .summary').innerText(), '本週有一項風險。');
@@ -711,9 +719,22 @@ try {
   assert.match(await pub.locator('[data-overall-progress]').innerText(), /整體進度 0%/);
   assert.match(await pub.locator('[data-deliveries-table]').innerText(), /伺服器採購\s+資訊採購組\s+2026-10-15\s+已交付/);
   await pub.locator('.btn-phase-expand').click();
+  await guyPage.unroute('**/api/publications/2026-W41/1');
   assert.equal(await guyPage.locator('[data-chapter="personnel"] [data-source-links] a').getAttribute('href'), 'https://example.com/notice');
   assert.equal(await guyPage.locator('[data-chapter="personnel"] [data-impact-line]').nth(1).innerText(), '交接：交接給同課同仁；影響：無；下一步：補人（2026-10-05 生效）');
   assert.match(await guyPage.locator('[data-appendix-row]', { hasText: '101' }).innerText(), /101\s+二層B\s+45%\s+新增/);
+  // bound titles are work links (new tab, no number); unbound titles stay plain; appendix keeps the number
+  const titleLink = guyPage.locator('[data-chapter="operations"] .item-doc b [data-work-link]');
+  assert.equal(await titleLink.innerText(), '二層B');
+  assert.equal(await titleLink.getAttribute('target'), '_blank');
+  assert.match(await titleLink.getAttribute('href'), /WorkID=101$/);
+  assert.equal(await guyPage.locator('[data-chapter="personnel"] .item-doc b [data-work-link]').count(), 0);
+  for (const b of await guyPage.locator('[data-chapter="projects"] app-gantt').getByText('展開關鍵任務').all()) await b.click();
+  const taskLink = guyPage.locator('[data-chapter="projects"] .gantt-name [data-work-link]');
+  assert.match(await taskLink.getAttribute('href'), /WorkID=100$/);
+  assert.equal(await taskLink.getAttribute('target'), '_blank');
+  assert.equal(await taskLink.innerText(), '撰寫規格');
+  assert.equal(await guyPage.locator('[data-appendix-row] [data-work-link]', { hasText: '#101' }).count(), 1);
   assert.equal(await guyPage.locator('[data-sync-badge], [data-pending-count]').count(), 0);
   assert.equal(await guyPage.locator('[data-old-version]').count(), 0);
   await shot(guyPage, '12-publication');

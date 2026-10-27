@@ -47,7 +47,7 @@ export function scheduleErrors(project: SectionItem) {
     <div class="project" [class.doc-project]="document()" [class.invalid]="invalid()" [attr.data-project-error]="invalid() ? '' : null" [attr.data-project]="project().id" (input)="changes.detectChanges()" (change)="changes.detectChanges()" (click)="changes.detectChanges()">
       <app-project-header [project]="project()" [editable]="editable()" [document]="document()" [baseDate]="baseDate()" />
 
-      <app-gantt [baseDate]="baseDate()" [entries]="evaluated().entries" [phasesOpen]="!document()" [selectedId]="selectedId()" (entrySelected)="selectFromGantt($event)" [(expandTasks)]="expandTasks" [(phaseToggles)]="phaseToggles" />
+      <app-gantt [linkTasks]="document()" [baseDate]="baseDate()" [entries]="evaluated().entries" [phasesOpen]="!document()" [selectedId]="selectedId()" (entrySelected)="selectFromGantt($event)" [(expandTasks)]="expandTasks" [(phaseToggles)]="phaseToggles" />
 
       @if (!document()) {
       <details class="sched" open>

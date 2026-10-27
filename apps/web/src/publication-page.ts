@@ -61,7 +61,7 @@ export function latestPublication(index: PublicationIndex): Entry | undefined {
                 <app-project-schedule [project]="item" [document]="true" [baseDate]="baseDate" [baseline]="baseline" />
               } @else {
                 <div class="item-doc">
-                  <b>{{ item.title }}</b>
+                  <b>@if (item.workId != null) { <a app-work-link [workId]="item.workId" [text]="item.title"></a> } @else { {{ item.title }} }</b>
                   <p class="body">{{ item.content }}@if (deltaText(item.workId, item.engineerProgress, baseline); as d) { <strong data-progress-delta> （{{ d }}）</strong> }</p>
                   @if (impactLine(item); as line) { <p data-impact-line>{{ line }}</p> }
                   @if (item.details.sourceLinks?.length) {
