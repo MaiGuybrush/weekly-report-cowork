@@ -72,11 +72,12 @@ export type SectionFile = { week: string; section: string; items: SectionItem[] 
 export type CrossFile = { week: string; managementSummary: string; pendingDecisions: { id: string; description: string; result?: string; newDueDate?: string }[] };
 export type PublicationIndex = { publications: { week: string; version: number; publishedAt: string; publishedBy: string; path: string }[] };
 
-export const SECTION_LABELS: Record<NonProjectSection, string> = {
-  incidents: "重大系統異常",
-  operations: "系統維護與營運",
-  personnel: "人力與組織異動",
-  technology: "新技術評估",
+export const SECTION_LABELS: Record<SectionName, string> = {
+  projects: "專案",
+  incidents: "系統異常",
+  operations: "維護",
+  personnel: "人力調整",
+  technology: "新技術",
 };
 /** The publication appendix is generated from bindings, not an editable section. */
 export const APPENDIX_LABEL = "工程師工作明細與來源連結";

@@ -13,7 +13,7 @@ import { FILE_LABELS, SECTION_LABELS, type CrossFile, type SectionFile } from ".
 import { ShellState } from "./shell-state";
 import { weekStatus } from "./week-status";
 
-const TAB_LABELS: Record<string, string> = { projects: "專案", ...SECTION_LABELS, engineer: "工程師進度", summary: "管理摘要", decisions: "待決策事項" };
+const TAB_LABELS: Record<string, string> = { ...SECTION_LABELS, engineer: "工程師進度", summary: "管理摘要", decisions: "待決策事項" };
 const RAIL_LABELS: Record<string, string> = { ...FILE_LABELS, cross: "跨課" };
 
 /** Changing week or leaving the editor asks first when a file has unsaved changes; switching file or tab never does. */

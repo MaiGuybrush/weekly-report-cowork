@@ -3,10 +3,11 @@ import { HttpClient } from "@angular/common/http";
 import { ActivatedRoute } from "@angular/router";
 import { firstValueFrom } from "rxjs";
 import { ProjectSchedule } from "./project-schedule";
+import { chaptersOf } from "./report-chapters";
 import { publishedDate } from "./week-status";
 import { appendixRows, baselineOf, deltaText, previousWeek } from "./work-binding";
 import { WorkLink } from "./work-link";
-import { APPENDIX_LABEL, FILE_LABELS, SECTION_LABELS, type CrossFile, type NonProjectSection, type PublicationIndex, type SectionFile, type SectionItem } from "./report-types";
+import { APPENDIX_LABEL, SECTION_LABELS, type CrossFile, type PublicationIndex, type SectionFile, type SectionItem } from "./report-types";
 
 type Entry = PublicationIndex["publications"][number];
 
@@ -52,30 +53,26 @@ export function latestPublication(index: PublicationIndex): Entry | undefined {
             }
           }
         </section>
-        @for (file of files; track file) {
-          @if (hasContent(file)) {
-            <section [attr.data-file]="file">
-              <h2>{{ FILE_LABELS[file] }}</h2>
-              @for (p of itemsOf(file, "projects"); track p.id) { <app-project-schedule [project]="p" [document]="true" [baseDate]="baseDate" [baseline]="baseline" /> }
-              @for (key of sectionKeys; track key) {
-                @if (itemsOf(file, key).length) {
-                  <h3>{{ SECTION_LABELS[key] }}</h3>
-                  @for (item of itemsOf(file, key); track item.id) {
-                    <div class="item-doc">
-                      <b>{{ item.title }}</b>
-                      <p class="body">{{ item.content }}@if (deltaText(item.workId, item.engineerProgress, baseline); as d) { <strong data-progress-delta> （{{ d }}）</strong> }</p>
-                      @if (impactLine(item); as line) { <p data-impact-line>{{ line }}</p> }
-                      @if (item.details.sourceLinks?.length) {
-                        <p class="links" data-source-links>
-                          @for (l of item.details.sourceLinks; track $index) { <a [href]="l.url" target="_blank" rel="noopener">{{ l.label || l.url }}</a> }
-                        </p>
-                      }
-                    </div>
+        @for (c of chapters; track c.section) {
+          <section [attr.data-chapter]="c.section">
+            <h2>{{ SECTION_LABELS[c.section] }}</h2>
+            @for (item of c.items; track item.id) {
+              @if (c.section === "projects") {
+                <app-project-schedule [project]="item" [document]="true" [baseDate]="baseDate" [baseline]="baseline" />
+              } @else {
+                <div class="item-doc">
+                  <b>{{ item.title }}</b>
+                  <p class="body">{{ item.content }}@if (deltaText(item.workId, item.engineerProgress, baseline); as d) { <strong data-progress-delta> （{{ d }}）</strong> }</p>
+                  @if (impactLine(item); as line) { <p data-impact-line>{{ line }}</p> }
+                  @if (item.details.sourceLinks?.length) {
+                    <p class="links" data-source-links>
+                      @for (l of item.details.sourceLinks; track $index) { <a [href]="l.url" target="_blank" rel="noopener">{{ l.label || l.url }}</a> }
+                    </p>
                   }
-                }
+                </div>
               }
-            </section>
-          }
+            }
+          </section>
         }
         @if (appendix.length) {
           <section data-appendix>
@@ -98,11 +95,9 @@ export class PublicationPage implements OnInit {
   private route = inject(ActivatedRoute);
   private changes = inject(ChangeDetectorRef);
   readonly SECTION_LABELS = SECTION_LABELS;
-  readonly FILE_LABELS = FILE_LABELS;
   readonly publishedDate = publishedDate;
   readonly deltaText = deltaText;
   readonly APPENDIX_LABEL = APPENDIX_LABEL;
-  readonly sectionKeys = Object.keys(SECTION_LABELS) as NonProjectSection[];
   readonly files = ["s1", "s2", "s3"];
   week = "";
   version = 0;
@@ -111,6 +106,7 @@ export class PublicationPage implements OnInit {
   message = "";
   /** Progress in the previous week's last official version; empty when that week was never published. */
   baseline = new Map<number, number>();
+  get chapters() { return chaptersOf(this.files.map((f) => this.data[f])); }
   get appendix() { return appendixRows(this.files.map((f) => this.data[f]), this.baseline); }
   get cross() { return (this.data["cross"] ?? {}) as Partial<CrossFile>; }
   /** Weeks newest first, versions newest first inside each week (entries arrive sorted that way). */
@@ -125,8 +121,6 @@ export class PublicationPage implements OnInit {
   /** 基準日 of a published view = that version's publish date. */
   get baseDate() { return this.entries.find((p) => p.week === this.week && p.version === this.version)?.publishedAt.slice(0, 10); }
   print = () => window.print();
-  /** A section with no project and no item gets no heading. */
-  hasContent = (file: string) => !!this.data[file]?.items?.length;
   /** 交接／影響／下一步（生效日）, skipping parts that were left empty. */
   impactLine(item: SectionItem) {
     const d = item.details;
@@ -142,8 +136,6 @@ export class PublicationPage implements OnInit {
   select(value: string) {
     location.hash = `#/publications/${value}`;
   }
-
-  itemsOf = (file: string, section: string): SectionItem[] => (this.data[file]?.items ?? []).filter((i) => i.section === section);
 
   private async loadBaseline(week: string) {
     const prev = previousWeek(week);
