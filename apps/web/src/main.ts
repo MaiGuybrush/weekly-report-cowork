@@ -6,13 +6,14 @@ import { APP_INITIALIZER, provideZoneChangeDetection } from '@angular/core';
 import { App } from './report-app';
 import { routes } from './routes';
 import { API_BASE_URL, UAC_BASE_URL, Auth, apiToken } from './auth';
-import { loadRuntimeConfig } from './config';
+import { WORK_URL_TEMPLATE, loadRuntimeConfig } from './config';
 
 loadRuntimeConfig().then(config => bootstrapApplication(App, {
   providers: [
     provideZoneChangeDetection(),
     { provide: API_BASE_URL, useValue: config.apiBaseUrl },
     { provide: UAC_BASE_URL, useValue: config.uacBaseUrl },
+    { provide: WORK_URL_TEMPLATE, useValue: config.workUrlTemplate },
     provideHttpClient(withInterceptors([apiToken])),
     provideRouter(routes, withHashLocation()),
     { provide: APP_INITIALIZER, useFactory: (auth: Auth) => () => auth.initialize(), deps: [Auth], multi: true }

@@ -1,5 +1,6 @@
 {
   "apiBaseUrl": "http://localhost:5080",
   "uacBaseUrl1": "http://tncimweb1.cminl.oa/uacapi/adAuth",
-  "uacBaseUrl": "http://localhost:5090/auth"
+  "uacBaseUrl": "http://localhost:5090/auth",
+  "workUrlTemplate": "https://tnecimwork.cminl.oa/Work/BrowseWork.aspx?WorkID={id}"
 }

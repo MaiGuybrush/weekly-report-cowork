@@ -452,12 +452,37 @@ try {
   // star + comment survive a reload; only-important filter hides the rest
   await eng.locator('[data-work="100"] > [data-star]').click();
   await eng.locator('[data-work="100"] > [data-star][aria-pressed="true"]').waitFor({ timeout: 15000 });
+  await eng.locator('[data-work="100"] > [data-comment-toggle]').click();
   await eng.locator('[data-work="100"] > [data-comment]').fill('重點追蹤');
   await eng.locator('[data-work="100"] > [data-comment]').blur();
+  await eng.locator('[data-work="100"] > [data-comment-quote]').waitFor({ timeout: 15000 });
+  // sub-work (three levels deep) links out, takes its own comment, parent unaffected; Esc discards
+  const link = eng.locator('[data-work="102"] > [data-work-link]');
+  assert.match(await link.getAttribute('href'), /BrowseWork\.aspx\?WorkID=102$/);
+  assert.equal(await link.getAttribute('target'), '_blank');
+  await eng.locator('[data-work="102"] > [data-comment-toggle]').click();
+  await eng.locator('[data-work="102"] > [data-comment]').fill('放棄');
+  await eng.locator('[data-work="102"] > [data-comment]').press('Escape');
+  assert.equal(await eng.locator('[data-work="102"] > [data-comment-quote]').count(), 0);
+  await eng.locator('[data-work="102"] > [data-comment-toggle]').click();
+  await eng.locator('[data-work="102"] > [data-comment]').fill('子工作評語');
+  await eng.locator('[data-work="102"] > [data-comment]').blur();
+  await eng.locator('[data-work="102"] > [data-comment-quote]').waitFor({ timeout: 15000 });
   await page.waitForTimeout(500);
   await page.reload();
-  await eng.locator('[data-work="100"] > [data-comment]').waitFor({ timeout: 15000 });
-  assert.equal(await eng.locator('[data-work="100"] > [data-comment]').inputValue(), '重點追蹤');
+  await eng.locator('[data-work="100"] > [data-comment-quote]').waitFor({ timeout: 15000 });
+  assert.equal(await eng.locator('[data-work="100"] > [data-comment-quote]').innerText(), '重點追蹤');
+  assert.equal(await eng.locator('[data-work="102"] > [data-comment-quote]').innerText(), '子工作評語');
+  assert.equal(await eng.locator('[data-work="101"] > [data-comment-quote]').count(), 0);
+  // click quote to re-edit; clearing removes the comment
+  await eng.locator('[data-work="102"] > [data-comment-quote]').click();
+  await eng.locator('[data-work="102"] > [data-comment]').fill('');
+  await eng.locator('[data-work="102"] > [data-comment]').blur();
+  await eng.locator('[data-work="102"] > [data-comment-quote]').waitFor({ state: 'detached', timeout: 15000 });
+  // collapsing a parent hides its sub-works
+  await eng.locator('[data-work="100"] > [data-collapse]').click();
+  assert.equal(await eng.locator('[data-work="101"]').count(), 0);
+  await eng.locator('[data-work="100"] > [data-collapse]').click();
   await eng.locator('[data-only-important]').check();
   assert.equal(await eng.locator('[data-work="200"]').count(), 0);
   assert.equal(await eng.locator('[data-work="100"]').count(), 1);

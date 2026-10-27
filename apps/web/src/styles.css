@@ -363,3 +363,8 @@ input:disabled, select:disabled, textarea:disabled { background: var(--paper); -
 .work-tree em { margin-left: .4rem; padding: 0 .4rem; border-radius: 4px; background: var(--amber-t); font-style: normal; font-size: .8rem; }
 .work-tree [data-rms] { background: var(--steel-t); }
 .work-tree [data-absent-note] { background: var(--line2); color: var(--mute); }
+.work-tree [data-absent] > :not(ul) { opacity: .55; }
+.work-tree .icon-btn { border: 0; background: none; cursor: pointer; padding: 0 .2rem; }
+.work-tree [data-comment-toggle].has-comment { background: var(--amber-t); }
+.work-tree .quote { display: block; margin: .15rem 0 0 1rem; padding: 0 .5rem; border: 0; border-left: 3px solid var(--line2); background: none; color: var(--mute); text-align: left; font: inherit; }
+.work-tree button.quote { cursor: pointer; }

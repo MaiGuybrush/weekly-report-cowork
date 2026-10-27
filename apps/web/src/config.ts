@@ -1,7 +1,21 @@
+import { InjectionToken } from '@angular/core';
+
 export type RuntimeConfig = {
   apiBaseUrl: string;
   uacBaseUrl: string;
+  /** 工作系統單筆工作的網址樣板，`{id}` 代入工作編號。 */
+  workUrlTemplate: string;
 };
+
+export const WORK_URL_TEMPLATE = new InjectionToken<string>('WORK_URL_TEMPLATE');
+const DEFAULT_WORK_URL_TEMPLATE = 'https://tnecimwork.cminl.oa/Work/BrowseWork.aspx?WorkID={id}';
+
+function workUrlTemplate(value: unknown): string {
+  if (value === undefined) return DEFAULT_WORK_URL_TEMPLATE;
+  if (typeof value !== 'string' || !/^https?:\/\//.test(value) || !value.includes('{id}'))
+    throw new Error('workUrlTemplate must be an HTTP(S) URL containing {id}');
+  return value;
+}
 
 function baseUrl(value: unknown, name: string, allowSameOrigin: boolean): string {
   if (typeof value !== 'string') throw new Error(`${name} must be a URL string`);
@@ -32,6 +46,7 @@ export async function loadRuntimeConfig(): Promise<RuntimeConfig> {
   const config = value as Record<string, unknown>;
   return {
     apiBaseUrl: baseUrl(config['apiBaseUrl'], 'apiBaseUrl', true),
-    uacBaseUrl: baseUrl(config['uacBaseUrl'], 'uacBaseUrl', false)
+    uacBaseUrl: baseUrl(config['uacBaseUrl'], 'uacBaseUrl', false),
+    workUrlTemplate: workUrlTemplate(config['workUrlTemplate'])
   };
 }
