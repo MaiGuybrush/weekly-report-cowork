@@ -569,6 +569,39 @@ try {
   await page.locator('[data-save]').click();
   await page.locator('[data-save-state="clean"]').waitFor({ timeout: 15000 });
 
+  // maintenance tab groups by 系統別: add system, add in group, pick in group (takes the group), pick at top (未分類), move by editing, empty group disappears
+  const group = (name) => ops.locator(`[data-system-group-edit][data-system="${name}"]`);
+  await ops.locator('[data-new-system-name]').fill(' SysX ');
+  await ops.locator('[data-add-system]').click();
+  assert.equal(await group('SysX').locator('.item').count(), 1);
+  await group('SysX').locator('[data-add-in-group]').click();
+  assert.equal(await group('SysX').locator('[data-field="system"]').last().inputValue(), 'SysX');
+  await group('SysX').locator('[data-group-picker]').click();
+  await ops.locator('[data-important-only]').uncheck();
+  await ops.locator('[data-pick-row="100"] [data-pick]').click();
+  assert.equal(await group('SysX').locator('.item').count(), 3);
+  assert.equal(await group('SysX').locator('[data-field="system"]').last().inputValue(), 'SysX');
+  await ops.locator('[data-open-picker]').click();
+  await ops.locator('[data-important-only]').uncheck();
+  await ops.locator('[data-pick-row="200"] [data-pick]').click();
+  assert.equal(await group('').locator('[data-bound-work]', { hasText: "#200" }).count(), 1);
+  await group('SysX').locator('[data-field="system"]').first().fill('SysY');
+  await group('SysX').locator('[data-field="title"]').first().click(); // blur commits the move
+  await group('SysY').locator('.item').waitFor({ timeout: 15000 });
+  assert.equal(await group('SysX').locator('.item').count(), 2);
+  await page.locator('[data-save]').click();
+  await page.locator('[data-save-state="clean"]').waitFor({ timeout: 15000 });
+  await page.reload();
+  await group('SysY').waitFor({ timeout: 15000 });
+  assert.deepEqual(await ops.locator('[data-system-title]').allInnerTexts(), ['SysY', 'SysX', '未分類']);
+  for (const name of ['SysX', 'SysY']) {
+    while (await group(name).count()) await group(name).getByRole('button', { name: '刪除', exact: true }).first().click();
+  }
+  await group('').locator('[data-bound-work]', { hasText: "#200" }).locator('xpath=ancestor::div[contains(@class,"item")]').getByRole('button', { name: '刪除', exact: true }).click();
+  assert.deepEqual(await ops.locator('[data-system-title]').allInnerTexts(), ['未分類']);
+  await page.locator('[data-save]').click();
+  await page.locator('[data-save-state="clean"]').waitFor({ timeout: 15000 });
+
   // pick a work into a project as a key task: prefilled, dates missing -> required hint, bound, survives reload, no double bind
   await page.goto(base + '/#/weeks/2026-W41/s1/projects');
   const pj = page.locator('[data-file="s1"] app-project-schedule').last();

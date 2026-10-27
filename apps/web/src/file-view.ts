@@ -1,9 +1,11 @@
 import { ChangeDetectorRef, Component, computed, inject, input } from "@angular/core";
 import { HttpClient } from "@angular/common/http";
+import { NgTemplateOutlet } from "@angular/common";
 import { FormsModule } from "@angular/forms";
 import { firstValueFrom } from "rxjs";
 import type { EngineerFile, EngineerWork } from "./engineer-progress";
 import { pickerList } from "./engineer-model";
+import { systemGroupsOf } from "./report-chapters";
 import { ProjectSchedule } from "./project-schedule";
 import { type NonProjectSection, type SourceLink, type SectionFile, type SectionItem } from "./report-types";
 import { boundWorkIds, canBind, deltaText, itemFromWork } from "./work-binding";
@@ -19,7 +21,7 @@ export function pruneRefLinks(item: SectionItem) {
 @Component({
   selector: "app-file-view",
   standalone: true,
-  imports: [FormsModule, ProjectSchedule, WorkLink],
+  imports: [FormsModule, NgTemplateOutlet, ProjectSchedule, WorkLink],
   template: `<section [attr.data-file]="file()">
       @if (tab() === "projects") {
         @for (p of itemsOf("projects"); track p.id) {
@@ -30,10 +32,14 @@ export function pruneRefLinks(item: SectionItem) {
         }
         @if (editable()) { <button type="button" data-add-project (click)="addProject()">新增專案</button> }
       } @else {
-        @for (item of itemsOf(tab()); track item.id) {
+        <ng-template #card let-item>
           <div class="item">
             <label>標題
               <input data-field="title" [(ngModel)]="item.title" [disabled]="!editable()" /></label>
+            @if (key() === "operations") {
+              <label>系統別
+                <input data-field="system" list="system-names" [ngModel]="item.system ?? ''" (ngModelChange)="item.system = $event" [ngModelOptions]="{ updateOn: 'blur' }" [disabled]="!editable()" /></label>
+            }
             @if (key() === "personnel") {
               <label>生效日期
                 <input type="date" [(ngModel)]="item.details.effectiveDate" [disabled]="!editable()" /></label>
@@ -63,12 +69,35 @@ export function pruneRefLinks(item: SectionItem) {
             </div>
             @if (editable()) { <button type="button" (click)="remove(item)">刪除</button> }
           </div>
+        </ng-template>
+        @if (tab() === "operations") {
+          <datalist id="system-names">@for (n of systemNames(); track n) { <option [value]="n"></option> }</datalist>
+          <div class="system-add">
+            <input data-new-system-name placeholder="系統別名稱" [(ngModel)]="newSystem" [disabled]="!editable()" />
+            @if (editable()) { <button type="button" data-add-system (click)="addSystem()">新增系統別</button> }
+          </div>
+          @for (g of systemGroups(); track g.system) {
+            <section data-system-group-edit [attr.data-system]="g.system ?? ''">
+              <h3 data-system-title>{{ g.system ?? "未分類" }}</h3>
+              @for (item of g.items; track item.id) { <ng-container *ngTemplateOutlet="card; context: { $implicit: item }" /> }
+              @if (editable()) {
+                <button type="button" data-add-in-group (click)="addOperation(g.system)">新增維護項目</button>
+                <button type="button" data-group-picker (click)="openPicker(g.system)">從工程師工作挑選</button>
+              }
+            </section>
+          } @empty {
+            <div class="empty" data-empty>{{ editable() ? "尚無維護項目，請「新增系統別」或從工程師工作挑選。" : "尚無項目" }}</div>
+          }
+          @if (editable()) { <button type="button" data-open-picker (click)="openPicker()">從工程師工作挑選</button> }
+        } @else {
+        @for (item of itemsOf(tab()); track item.id) { <ng-container *ngTemplateOutlet="card; context: { $implicit: item }" />
         } @empty {
           <div class="empty" data-empty>{{ editable() ? "尚無項目，按下方「新增項目」開始。" : "尚無項目" }}</div>
         }
         @if (editable()) {
           <button type="button" [attr.data-add]="tab()" (click)="add(key())">新增項目</button>
           <button type="button" data-open-picker (click)="openPicker()">從工程師工作挑選</button>
+        }
         }
         @if (picking) {
           <div class="work-picker" data-work-picker>
@@ -94,6 +123,9 @@ export class FileView {
   private http = inject(HttpClient);
   readonly canBind = canBind;
   picking = false;
+  /** 系統別 given to the next picked item; null = 未分類. */
+  pickSystem: string | null = null;
+  newSystem = "";
   pickError = "";
   engineerWorks: EngineerWork[] = [];
   onlyImportant = true;
@@ -119,6 +151,21 @@ export class FileView {
     (this.data().items ??= []).push({ id: crypto.randomUUID(), section, title: "", content: "", details: {} });
     this.changes.detectChanges();
   }
+  systemGroups = () => systemGroupsOf(this.itemsOf("operations"));
+  /** Names already used this week across the three files, offered as suggestions. */
+  systemNames = (): string[] => [...new Set(["s1", "s2", "s3"].flatMap((f) => (this.all()[f]?.items ?? []).filter((i) => i.section === "operations").map((i) => i.system?.trim() ?? "")).filter(Boolean))];
+  addOperation(system: string | null) {
+    this.add("operations");
+    if (system) this.data().items!.at(-1)!.system = system;
+    this.changes.detectChanges();
+  }
+  /** Adds a blank item with the name so the group survives a save. */
+  addSystem() {
+    const name = this.newSystem.trim();
+    if (!name) return;
+    this.addOperation(name);
+    this.newSystem = "";
+  }
   focusList = (): EngineerWork[] => pickerList(this.engineerWorks, this.focus, this.onlyImportant);
   setOnlyImportant(value: boolean) {
     this.onlyImportant = value;
@@ -136,7 +183,8 @@ export class FileView {
     this.picking = false;
     this.changes.detectChanges();
   }
-  async openPicker() {
+  async openPicker(system: string | null = null) {
+    this.pickSystem = system;
     this.picking = true;
     this.pickError = "";
     this.focus = [];
@@ -152,7 +200,9 @@ export class FileView {
   }
   pick(work: EngineerWork) {
     if (!canBind(work.workId, this.bound())) return;
-    (this.data().items ??= []).push(itemFromWork(work, this.key()));
+    const item = itemFromWork(work, this.key());
+    if (this.pickSystem) item.system = this.pickSystem;
+    (this.data().items ??= []).push(item);
     this.changes.detectChanges();
   }
   addProject() {
