@@ -1,7 +1,8 @@
-import { ChangeDetectorRef, Component, effect, inject, input, output } from "@angular/core";
+import { ChangeDetectorRef, Component, effect, HostListener, inject, input, output, signal } from "@angular/core";
 import { HttpClient } from "@angular/common/http";
 import { firstValueFrom } from "rxjs";
 import { EngineerBlock } from "./engineer-block";
+import { countMarked } from "./engineer-model";
 import { ShellState } from "./shell-state";
 
 export type EngineerWork = {
@@ -16,7 +17,18 @@ export { LONG_HOURS } from "./engineer-work";
   selector: "app-engineer-progress",
   standalone: true,
   imports: [EngineerBlock],
-  template: `<section data-engineer-progress>
+  template: `<section data-engineer-progress class="eng-layout">
+    @if (data) {
+      <nav class="eng-roster" aria-label="工程師名冊">
+        @for (e of engineers(); track e[0]) {
+          <a href="javascript:void(0)" data-roster-item [attr.data-roster]="e[0]" [class.on]="active() === e[0]" [attr.aria-current]="active() === e[0] ? 'location' : null" (click)="$event.preventDefault(); jump('e-' + e[0])">
+            <b>{{ e[0] }}</b>
+            <small class="num">{{ e[1].totalWorkHours ?? 0 }}H・<span data-roster-stars>★{{ marked(e[1]).stars }}</span>・<span data-roster-comments>💬{{ marked(e[1]).comments }}</span></small>
+          </a>
+        }
+      </nav>
+    }
+    <div class="eng-main">
     @if (editable()) {
       <p><label>上傳工程師工作彙整 JSON <input type="file" accept=".json,application/json" data-engineer-upload (change)="upload($event)" /></label></p>
     }
@@ -29,6 +41,7 @@ export { LONG_HOURS } from "./engineer-work";
         <app-engineer-block [name]="e[0]" [result]="e[1]" [editable]="editable()" [onlyImportant]="onlyImportant" (annotated)="annotate($event.work, $event.isImportant, $event.managerComment)" />
       }
     }
+    </div>
   </section>`,
 })
 export class EngineerProgress {
@@ -48,7 +61,32 @@ export class EngineerProgress {
   constructor() {
     effect(() => void this.load(this.week(), this.file()));
   }
+  active = signal("");
   engineers = () => Object.entries(this.data?.results ?? {});
+  marked = (r: EngineerFile["results"][string]) => countMarked(r.items);
+
+  /** 目前所在的工程師：最後一個標題頂端已捲過視窗上緣附近者。 */
+  @HostListener("window:scroll")
+  track() {
+    const heads = Array.from(document.querySelectorAll<HTMLElement>("[data-engineer]"));
+    const atEnd = scrollY + innerHeight >= document.documentElement.scrollHeight - 2; // bottom blocks can't reach the top edge
+    const limit = atEnd ? innerHeight : 140;
+    this.active.set((heads.filter((h) => h.getBoundingClientRect().top <= limit).pop() ?? heads[0])?.dataset["engineer"] ?? "");
+  }
+
+  /** 捲到目標並以 replaceState 寫入 hash（接在路由 hash 之後的第二段），不增加瀏覽器歷史。 */
+  jump(id: string, writeHash = true) {
+    const el = document.getElementById(id);
+    if (!el) return;
+    const calm = matchMedia("(prefers-reduced-motion: reduce)").matches;
+    el.scrollIntoView({ behavior: calm ? "auto" : "smooth", block: "start" });
+    if (writeHash) history.replaceState(null, "", `${location.hash.split("#").slice(0, 2).join("#")}#${id}`);
+    if (!calm) {
+      el.classList.add("flash");
+      setTimeout(() => el.classList.remove("flash"), 1500);
+    }
+    this.track();
+  }
 
   private async load(week: string, file: string) {
     this.loading = true;
@@ -62,6 +100,9 @@ export class EngineerProgress {
     }
     this.loading = false;
     this.changes.detectChanges();
+    const target = location.hash.split("#")[2];
+    if (this.data && target) setTimeout(() => this.jump(target, false));
+    this.track();
   }
 
   async upload(event: Event) {

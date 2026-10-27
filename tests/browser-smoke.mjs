@@ -483,6 +483,31 @@ try {
   await eng.locator('[data-work="100"] > [data-collapse]').click();
   assert.equal(await eng.locator('[data-work="101"]').count(), 0);
   await eng.locator('[data-work="100"] > [data-collapse]').click();
+  // roster: per-engineer counts follow annotations; click jumps, writes hash without history, reload restores
+  assert.equal(await eng.locator('[data-roster="alice"] [data-roster-stars]').innerText(), '★1');
+  assert.equal(await eng.locator('[data-roster="alice"] [data-roster-comments]').innerText(), '💬1');
+  await eng.locator('[data-work="102"] > [data-star]').click();
+  await eng.locator('[data-roster="alice"] [data-roster-stars]', { hasText: '★2' }).waitFor({ timeout: 15000 });
+  await eng.locator('[data-work="102"] > [data-star]').click();
+  await eng.locator('[data-roster="alice"] [data-roster-stars]', { hasText: '★1' }).waitFor({ timeout: 15000 });
+  const historyLength = await page.evaluate(() => history.length);
+  await eng.locator('[data-roster="bob"]').focus();
+  await page.keyboard.press('Enter');
+  await page.waitForFunction(() => location.hash.endsWith('#e-bob'));
+  assert.equal(await page.evaluate(() => history.length), historyLength);
+  assert.match(await page.evaluate(() => location.hash), /^#\/weeks\/2026-W41\/s1\/engineer#e-bob$/);
+  await page.waitForFunction(() => { const r = document.getElementById('e-bob').getBoundingClientRect(); return r.top >= 0 && r.top < innerHeight; });
+  await page.reload();
+  await eng.locator('[data-engineer="bob"]').waitFor({ timeout: 15000 });
+  await page.waitForFunction(() => { const r = document.getElementById('e-bob').getBoundingClientRect(); return r.top >= 0 && r.top < innerHeight; });
+  await eng.locator('[data-roster="bob"].on').waitFor({ timeout: 15000 });
+  // narrow screen: roster is a horizontal strip and still jumps
+  await page.setViewportSize({ width: 600, height: 800 });
+  const strip = await eng.locator('.eng-roster').evaluate((n) => getComputedStyle(n).flexDirection);
+  assert.equal(strip, 'row');
+  await eng.locator('[data-roster="alice"]').click();
+  await page.waitForFunction(() => location.hash.endsWith('#e-alice'));
+  await page.setViewportSize({ width: 1280, height: 800 });
   await eng.locator('[data-only-important]').check();
   assert.equal(await eng.locator('[data-work="200"]').count(), 0);
   assert.equal(await eng.locator('[data-work="100"]').count(), 1);

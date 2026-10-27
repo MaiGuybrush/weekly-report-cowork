@@ -8,7 +8,7 @@ import { WorkList, type WorkAnnotation } from "./engineer-work";
   standalone: true,
   imports: [WorkList],
   host: { style: "display: contents" },
-  template: `<h3 data-engineer>{{ name() }} <small class="num">工時 {{ result().totalWorkHours ?? 0 }}H・休假 {{ result().totalOffHours ?? 0 }}H</small></h3>
+  template: `<h3 [attr.data-engineer]="name()" [id]="'e-' + name()">{{ name() }} <small class="num">工時 {{ result().totalWorkHours ?? 0 }}H・休假 {{ result().totalOffHours ?? 0 }}H</small></h3>
     <ul app-work-list class="work-tree" [items]="result().items" [editable]="editable()" [onlyImportant]="onlyImportant()" (annotated)="annotated.emit($event)"></ul>`,
 })
 export class EngineerBlock {

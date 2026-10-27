@@ -368,3 +368,19 @@ input:disabled, select:disabled, textarea:disabled { background: var(--paper); -
 .work-tree [data-comment-toggle].has-comment { background: var(--amber-t); }
 .work-tree .quote { display: block; margin: .15rem 0 0 1rem; padding: 0 .5rem; border: 0; border-left: 3px solid var(--line2); background: none; color: var(--mute); text-align: left; font: inherit; }
 .work-tree button.quote { cursor: pointer; }
+
+.eng-layout { display: grid; grid-template-columns: 11rem 1fr; gap: 1.5rem; align-items: start; }
+.eng-roster { position: sticky; top: 3.5rem; display: flex; flex-direction: column; gap: .15rem; max-height: calc(100vh - 4rem); overflow: auto; }
+.eng-roster a { display: block; padding: .3rem .6rem; border-left: 3px solid transparent; border-radius: 4px; color: var(--ink); text-decoration: none; }
+.eng-roster a:hover { background: var(--steel-t); }
+.eng-roster a.on { border-left-color: var(--steel); background: var(--steel-t); font-weight: 600; }
+.eng-roster small { display: block; color: var(--mute); }
+.eng-main h3[data-engineer], .work-tree li { scroll-margin-top: 4rem; }
+@keyframes eng-flash { from { background: var(--amber-t); } to { background: transparent; } }
+.flash { animation: eng-flash 1.5s ease-out; }
+@media (max-width: 860px) {
+  .eng-layout { grid-template-columns: 1fr; }
+  .eng-roster { position: sticky; top: 0; z-index: 1; flex-direction: row; max-height: none; overflow-x: auto; padding: .3rem 0; background: var(--paper); }
+  .eng-roster a { flex: none; border-left: 0; border-bottom: 3px solid transparent; }
+  .eng-roster a.on { border-bottom-color: var(--steel); }
+}

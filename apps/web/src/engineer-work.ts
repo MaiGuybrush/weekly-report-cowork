@@ -15,7 +15,7 @@ export const isShown = (w: EngineerWork, onlyImportant: boolean): boolean =>
   selector: "li[app-work-row]",
   standalone: true,
   imports: [forwardRef(() => WorkList)],
-  host: { "[attr.data-work]": "work().workId", "[attr.data-absent]": "work().absent ? '' : null" },
+  host: { "[attr.data-work]": "work().workId", "[id]": "'w' + work().workId", "[attr.data-absent]": "work().absent ? '' : null" },
   template: `@if (work().subItems?.length) {
       <button type="button" data-collapse class="icon-btn" [attr.aria-expanded]="!collapsed()" [attr.aria-label]="(collapsed() ? '展開 #' : '收合 #') + work().workId" (click)="collapsed.set(!collapsed())">{{ collapsed() ? "▸" : "▾" }}</button>
     }
