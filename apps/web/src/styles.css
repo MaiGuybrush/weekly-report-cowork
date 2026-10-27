@@ -385,3 +385,11 @@ input:disabled, select:disabled, textarea:disabled { background: var(--paper); -
   .eng-roster a.on { border-bottom-color: var(--steel); }
 }
 .eng-toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: .8rem 1.2rem; margin-bottom: .8rem; }
+.eng-overview { margin-bottom: 1rem; }
+.eng-overview-scroll { overflow-x: auto; }
+.eng-overview table { border-collapse: collapse; width: 100%; }
+.eng-overview th, .eng-overview td { padding: .25rem .6rem; text-align: left; border-bottom: 1px solid var(--steel-t); }
+.eng-overview tr[data-alert] { background: var(--amber-t); }
+.eng-overview td.dim { color: var(--mute); }
+.eng-overview tfoot { font-weight: 600; }
+.eng-overview [data-overview-work] { display: block; }

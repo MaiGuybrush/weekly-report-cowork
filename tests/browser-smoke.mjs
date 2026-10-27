@@ -485,7 +485,6 @@ try {
   await eng.locator('[data-work="100"] > [data-collapse]').click();
   // roster: per-engineer counts follow annotations; click jumps, writes hash without history, reload restores
   assert.equal(await eng.locator('[data-roster="alice"] [data-roster-stars]').innerText(), '★1');
-  assert.equal(await eng.locator('[data-roster="alice"] [data-roster-comments]').innerText(), '💬1');
   await eng.locator('[data-work="102"] > [data-star]').click();
   await eng.locator('[data-roster="alice"] [data-roster-stars]', { hasText: '★2' }).waitFor({ timeout: 15000 });
   await eng.locator('[data-work="102"] > [data-star]').click();
@@ -501,6 +500,15 @@ try {
   await eng.locator('[data-engineer="bob"]').waitFor({ timeout: 15000 });
   await page.waitForFunction(() => { const r = document.getElementById('e-bob').getBoundingClientRect(); return r.top >= 0 && r.top < innerHeight; });
   await eng.locator('[data-roster="bob"].on').waitFor({ timeout: 15000 });
+  // hours overview: short-hours rows flagged, total row never, top work jumps to its row, collapses
+  assert.equal(await eng.locator('[data-overview-row="alice"]').getAttribute('data-alert'), 'short');
+  assert.equal(await eng.locator('[data-overview-total] [data-alert-note]').count(), 0);
+  await eng.locator('[data-overview-row="bob"] [data-overview-work]').click();
+  await page.waitForFunction(() => { const r = document.getElementById('w300').getBoundingClientRect(); return r.top >= 0 && r.bottom <= innerHeight; });
+  await eng.locator('[data-overview-toggle]').click();
+  await eng.locator('[data-overview-row="alice"]').waitFor({ state: 'detached', timeout: 15000 });
+  await eng.locator('[data-overview-toggle]').click();
+  await eng.locator('[data-overview-row="alice"]').waitFor({ timeout: 15000 });
   // narrow screen: roster is a horizontal strip and still jumps
   await page.setViewportSize({ width: 600, height: 800 });
   const strip = await eng.locator('.eng-roster').evaluate((n) => getComputedStyle(n).flexDirection);

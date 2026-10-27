@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { countMarked, filterImportant, findWork } from '../apps/web/src/engineer-model.ts';
+import { countMarked, filterImportant, findWork, hoursAlert, topWorks, sectionTotals } from '../apps/web/src/engineer-model.ts';
 
 test('countMarked is zero for no works', () => {
   assert.deepEqual(countMarked([]), { stars: 0, comments: 0 });
@@ -47,4 +47,32 @@ test('findWork finds a nested work by id', () => {
   const items = [{ workId: 1, subItems: [{ workId: 2, subItems: [{ workId: 3 }] }] }];
   assert.equal(findWork(items, 3), items[0].subItems[0].subItems[0]);
   assert.equal(findWork(items, 9), undefined);
+});
+
+test('hoursAlert flags work+off at <=38 as short and >=44 as over; 39..43 quiet', () => {
+  for (const [h, want] of [[37, 'short'], [38, 'short'], [39, null], [40, null], [43, null], [44, 'over'], [50, 'over']]) {
+    assert.equal(hoursAlert(h, 0), want, String(h));
+  }
+});
+
+test('hoursAlert counts leave hours toward the total', () => {
+  assert.equal(hoursAlert(32, 4), 'short');
+  assert.equal(hoursAlert(36, 4), null);
+  assert.equal(hoursAlert(40, 4), 'over');
+});
+
+test('topWorks takes the two biggest top-level works, ties keep file order, sub-works ignored', () => {
+  const items = [
+    { workId: 1, deltaTime: 5 },
+    { workId: 2, deltaTime: 12, subItems: [{ workId: 9, deltaTime: 99 }] },
+    { workId: 3, deltaTime: 5 },
+    { workId: 4, deltaTime: 1 },
+  ];
+  assert.deepEqual(topWorks(items).map((w) => w.workId), [2, 1]);
+  assert.deepEqual(topWorks([{ workId: 7, deltaTime: 3 }]).map((w) => w.workId), [7]);
+  assert.deepEqual(items.map((w) => w.workId), [1, 2, 3, 4]);
+});
+
+test('sectionTotals sums work and leave hours', () => {
+  assert.deepEqual(sectionTotals([{ totalWorkHours: 32, totalOffHours: 4 }, { totalWorkHours: 36.5 }, {}]), { work: 68.5, off: 4 });
 });

@@ -2,6 +2,7 @@ import { ChangeDetectorRef, Component, effect, HostListener, inject, input, outp
 import { HttpClient } from "@angular/common/http";
 import { firstValueFrom } from "rxjs";
 import { EngineerBlock } from "./engineer-block";
+import { EngineerOverview } from "./engineer-overview";
 import { countMarked, findWork } from "./engineer-model";
 import type { BulkCollapse } from "./engineer-work";
 import { ShellState } from "./shell-state";
@@ -17,14 +18,14 @@ export { LONG_HOURS } from "./engineer-work";
 @Component({
   selector: "app-engineer-progress",
   standalone: true,
-  imports: [EngineerBlock],
+  imports: [EngineerBlock, EngineerOverview],
   template: `<section data-engineer-progress class="eng-layout">
     @if (data) {
       <nav class="eng-roster" aria-label="工程師名冊">
         @for (e of engineers(); track e[0]) {
           <a href="javascript:void(0)" data-roster-item [attr.data-roster]="e[0]" [class.on]="active() === e[0]" [attr.aria-current]="active() === e[0] ? 'location' : null" (click)="$event.preventDefault(); jump('e-' + e[0])">
             <b>{{ e[0] }}</b>
-            <small class="num">{{ e[1].totalWorkHours ?? 0 }}H・<span data-roster-stars>★{{ marked(e[1]).stars }}</span>・<span data-roster-comments>💬{{ marked(e[1]).comments }}</span></small>
+            <small class="num">{{ e[1].totalWorkHours ?? 0 }}H・<span data-roster-stars>★{{ marked(e[1]).stars }}</span></small>
           </a>
         }
       </nav>
@@ -41,6 +42,7 @@ export { LONG_HOURS } from "./engineer-work";
     @if (!data) {
       <div class="empty" data-empty>{{ loading ? "載入中…" : editable() ? "本週尚無工程師工作彙整，請先上傳彙整檔" : "本週尚無工程師工作彙整" }}</div>
     } @else {
+      <app-engineer-overview [engineers]="engineers()" (jump)="jump($event)" />
       @for (e of engineers(); track e[0]) {
         <app-engineer-block [name]="e[0]" [result]="e[1]" [editable]="editable()" [onlyImportant]="onlyImportant" [bulk]="bulk()" (annotated)="annotate($event.work, $event.isImportant, $event.managerComment)" />
       }

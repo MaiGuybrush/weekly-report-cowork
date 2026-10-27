@@ -24,3 +24,16 @@ export const findWork = (items: EngineerWork[], workId: number): EngineerWork | 
     if (hit) return hit;
   }
 };
+
+/** 工時警示：工作＋休假對標準 40 小時，≤38 不足、≥44 過量，其餘不警示。 */
+export const hoursAlert = (work: number, off: number): "short" | "over" | null => {
+  const total = work + off;
+  return total <= 38 ? "short" : total >= 44 ? "over" : null;
+};
+
+/** 主要耗時工作：頂層工作中本週工時最大的前兩項；同時數依彙整檔順序（sort 為穩定排序）。 */
+export const topWorks = (items: EngineerWork[]): EngineerWork[] => [...items].sort((a, b) => b.deltaTime - a.deltaTime).slice(0, 2);
+
+/** 課別合計：各人工作時數與休假時數加總。 */
+export const sectionTotals = (results: { totalWorkHours?: number; totalOffHours?: number }[]) =>
+  results.reduce((n, r) => ({ work: n.work + (r.totalWorkHours ?? 0), off: n.off + (r.totalOffHours ?? 0) }), { work: 0, off: 0 });
