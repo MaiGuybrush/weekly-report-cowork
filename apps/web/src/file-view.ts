@@ -3,6 +3,7 @@ import { HttpClient } from "@angular/common/http";
 import { FormsModule } from "@angular/forms";
 import { firstValueFrom } from "rxjs";
 import type { EngineerFile, EngineerWork } from "./engineer-progress";
+import { pickerList } from "./engineer-model";
 import { ProjectSchedule } from "./project-schedule";
 import { type NonProjectSection, type SourceLink, type SectionFile, type SectionItem } from "./report-types";
 import { boundWorkIds, canBind, deltaText, itemFromWork } from "./work-binding";
@@ -71,6 +72,7 @@ export function pruneRefLinks(item: SectionItem) {
         @if (picking) {
           <div class="work-picker" data-work-picker>
             @if (pickError) { <p class="err" role="alert" data-picker-error>{{ pickError }}</p> }
+            <label><input type="checkbox" data-important-only [checked]="onlyImportant" (change)="setOnlyImportant($any($event.target).checked)" /> 只看重要</label>
             @if (focus.length) { <button type="button" data-picker-back (click)="back()">← 上一層</button> }
             @for (w of focusList(); track w.workId) {
               <div [attr.data-pick-row]="w.workId">
@@ -93,6 +95,7 @@ export class FileView {
   picking = false;
   pickError = "";
   engineerWorks: EngineerWork[] = [];
+  onlyImportant = true;
   /** Drill path: the focused work and its direct children are listed instead of the whole tree. */
   focus: EngineerWork[] = [];
   file = input.required<string>();
@@ -115,10 +118,11 @@ export class FileView {
     (this.data().items ??= []).push({ id: crypto.randomUUID(), section, title: "", content: "", details: {} });
     this.changes.detectChanges();
   }
-  focusList = (): EngineerWork[] => {
-    const f = this.focus.at(-1);
-    return f ? [f, ...(f.subItems ?? [])] : this.engineerWorks;
-  };
+  focusList = (): EngineerWork[] => pickerList(this.engineerWorks, this.focus, this.onlyImportant);
+  setOnlyImportant(value: boolean) {
+    this.onlyImportant = value;
+    this.focus = []; // focus holds copies trimmed under the old setting
+  }
   drill(work: EngineerWork) {
     this.focus.push(work);
     this.changes.detectChanges();
@@ -135,6 +139,7 @@ export class FileView {
     this.picking = true;
     this.pickError = "";
     this.focus = [];
+    this.onlyImportant = true;
     this.engineerWorks = [];
     try {
       const data = await firstValueFrom(this.http.get<EngineerFile>(`/api/weeks/${this.week()}/engineer/${this.file()}`));

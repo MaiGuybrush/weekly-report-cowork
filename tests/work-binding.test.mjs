@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { abortNotice, appendixRows, baselineOf, boundWorkIds, canBind, confirmSync, deltaText, followEngineer, followHint, itemFromWork, missingActualEnd, overrideProgress, pendingCount, previousWeek, revertSync, syncBound } from '../apps/web/src/work-binding.ts';
+import { pickerList } from '../apps/web/src/engineer-model.ts';
 
 const work = { workId: 101, workContent: '二層B', status: '處理中', percentage: 30, deltaTime: 1, managerComment: '看一下', subItems: [{ workId: 102, percentage: 99 }] };
 const file = (...ids) => ({ items: ids.map((workId) => ({ id: String(workId), section: 'incidents', title: '', content: '', details: {}, workId })).concat([{ id: 'x', section: 'incidents', title: '', content: '', details: {} }]) });
@@ -182,4 +183,17 @@ test('appendix lists every bound item and key task in file order with progress a
     { workId: 3, content: '評估B', progress: 0, delta: '-5%' },
   ]);
   assert.deepEqual(appendixRows([{}], new Map()), []);
+});
+
+test('picker list trims to important works at every level; toggle off shows all', () => {
+  const tree = [
+    { workId: 1, isImportant: false, subItems: [{ workId: 2, isImportant: true }, { workId: 3 }] },
+    { workId: 4, subItems: [{ workId: 5 }] },
+  ];
+  const ids = (l) => l.map((w) => w.workId);
+  assert.deepEqual(ids(pickerList(tree, [], false)), [1, 4]);
+  const top = pickerList(tree, [], true);
+  assert.deepEqual(ids(top), [1]); // 1 kept only for its important child
+  assert.deepEqual(ids(pickerList(tree, [top[0]], true)), [1, 2]);
+  assert.deepEqual(ids(pickerList(tree, [tree[0]], false)), [1, 2, 3]);
 });

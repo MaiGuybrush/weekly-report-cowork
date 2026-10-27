@@ -17,6 +17,13 @@ export const filterImportant = (items: EngineerWork[]): EngineerWork[] =>
     return w.isImportant || subItems.length ? [{ ...w, subItems }] : [];
   });
 
+/** Rows the picker shows: whole tree, or the focused work plus its direct children. onlyImportant trims both to important works (and their important descendants). */
+export function pickerList(works: EngineerWork[], focus: EngineerWork[], onlyImportant: boolean): EngineerWork[] {
+  const f = focus.at(-1);
+  if (!f) return onlyImportant ? filterImportant(works) : works;
+  return [f, ...(onlyImportant ? filterImportant(f.subItems ?? []) : f.subItems ?? [])];
+}
+
 /** 依編號在整棵樹找原始工作（篩選後的副本需回寫到原資料）。 */
 export const findWork = (items: EngineerWork[], workId: number): EngineerWork | undefined => {
   for (const w of items) {

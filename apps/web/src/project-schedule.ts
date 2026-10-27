@@ -2,6 +2,7 @@ import { ChangeDetectorRef, Component, ElementRef, inject, input, signal } from 
 import { HttpClient } from "@angular/common/http";
 import { FormsModule } from "@angular/forms";
 import { firstValueFrom } from "rxjs";
+import { pickerList } from "./engineer-model";
 import { DateRangePicker } from "./date-range-picker";
 import { Gantt } from "./gantt";
 import { forecastError, gridRows, hasChildTasks, isPhaseOpen, moveTask, type TaskDrop } from "./gantt-model";
@@ -140,6 +141,7 @@ export function scheduleErrors(project: SectionItem) {
                   @for (ph of livePhases(); track ph.id) { <option [ngValue]="ph.id">{{ ph.name || "未命名階段" }}</option> }
                 </select></label>
               @if (pickError) { <p class="err" role="alert" data-picker-error>{{ pickError }}</p> }
+              <label><input type="checkbox" data-important-only [checked]="onlyImportant" (change)="setOnlyImportant($any($event.target).checked)" /> 只看重要</label>
               @if (focus.length) { <button type="button" data-picker-back (click)="back()">← 上一層</button> }
               @for (w of focusList(); track w.workId) {
                 <div class="evidence-candidate" [attr.data-pick-row]="w.workId">
@@ -224,6 +226,7 @@ export class ProjectSchedule {
   pickError = "";
   pickPhase: string | null = null;
   engineerWorks: EngineerWork[] = [];
+  onlyImportant = true;
   focus: EngineerWork[] = [];
   editable = input(false);
   /** Publication layout: title line, gantt and a read-only deliveries table; no schedule forms. */
@@ -343,10 +346,11 @@ export class ProjectSchedule {
     kind === "milestone" ? [["pending", "待達成"], ["achieved", "已達成"]] : [["open", "開放"], ["in-progress", "進行中"], ["completed", "完成"]];
 
   livePhases = () => (this.project().schedule ?? []).filter((e) => e.kind === "phase" && e.state !== "cancelled");
-  focusList = (): EngineerWork[] => {
-    const f = this.focus.at(-1);
-    return f ? [f, ...(f.subItems ?? [])] : this.engineerWorks;
-  };
+  focusList = (): EngineerWork[] => pickerList(this.engineerWorks, this.focus, this.onlyImportant);
+  setOnlyImportant(value: boolean) {
+    this.onlyImportant = value;
+    this.focus = []; // focus holds copies trimmed under the old setting
+  }
   drill(work: EngineerWork) { this.focus.push(work); }
   back() { this.focus.pop(); }
   async openPicker() {
@@ -354,6 +358,7 @@ export class ProjectSchedule {
     this.pickError = "";
     this.pickPhase = null;
     this.focus = [];
+    this.onlyImportant = true;
     this.engineerWorks = [];
     try {
       const data = await firstValueFrom(this.http.get<EngineerFile>(`/api/weeks/${this.week()}/engineer/${this.file()}`));

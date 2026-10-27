@@ -542,6 +542,7 @@ try {
   await page.goto(base + '/#/weeks/2026-W41/s1/operations');
   const ops = page.locator('[data-file="s1"]');
   await ops.locator('[data-open-picker]').click();
+  await ops.locator('[data-important-only]').uncheck();
   await ops.locator('[data-pick-row="100"] [data-picker-children]').click();
   await ops.locator('[data-pick-row="101"] [data-pick]').click();
   assert.equal(await ops.locator('[data-field="title"]').last().inputValue(), '二層B');
@@ -555,6 +556,7 @@ try {
   await ops.locator('[data-bound-work]').waitFor({ timeout: 15000 });
   assert.equal(await ops.locator('[data-field="title"]').last().inputValue(), '二層B');
   await ops.locator('[data-open-picker]').click();
+  await ops.locator('[data-important-only]').uncheck();
   await ops.locator('[data-pick-row="100"] [data-picker-children]').click();
   await ops.locator('[data-pick-row="101"] [data-bound]').waitFor({ timeout: 15000 });
 
@@ -571,6 +573,7 @@ try {
   await page.goto(base + '/#/weeks/2026-W41/s1/projects');
   const pj = page.locator('[data-file="s1"] app-project-schedule').last();
   await pj.locator('[data-open-task-picker]').click();
+  await pj.locator('[data-important-only]').uncheck();
   await pj.locator('[data-pick-row="100"] [data-picker-children]').click();
   assert.equal(await pj.locator('[data-pick-row="101"] [data-bound]').count(), 1); // bound earlier by a non-project item
   await pj.locator('[data-picker-back]').click();
